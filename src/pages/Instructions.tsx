@@ -105,7 +105,8 @@ export default function Instructions() {
                 <input 
                   readOnly 
                   value={vpnKey}
-                  className="w-full bg-background/50 border border-border rounded-xl px-4 py-2.5 text-xs font-mono pr-10 focus:outline-none"
+                  onClick={handleCopy}
+                  className="w-full bg-background/50 border border-border rounded-xl px-4 py-2.5 text-xs font-mono pr-10 focus:outline-none cursor-pointer hover:bg-background/80 transition-colors"
                 />
                 <div className="absolute right-2 top-2">
                   <div className={`w-2 h-2 rounded-full ${subscription ? 'bg-primary' : 'bg-destructive'} animate-pulse`} />

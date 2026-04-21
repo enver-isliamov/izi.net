@@ -13,6 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { copyToClipboard } from '@/lib/utils';
+import { toast } from 'sonner';
+
 const platforms = [
   { id: 'ios', name: 'iOS', icon: Apple, color: 'text-white' },
   { id: 'android', name: 'Android', icon: Smartphone, color: 'text-green-500' },
@@ -27,7 +32,44 @@ const clients = [
 ];
 
 export default function Installation() {
+  const { user } = useAuth();
   const [selectedPlatform, setSelectedPlatform] = useState('ios');
+  const [copied, setCopied] = useState(false);
+  const [subscription, setSubscription] = useState<any>(null);
+
+  React.useEffect(() => {
+    async function fetchSub() {
+      if (!user) return;
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+      
+      setSubscription(data);
+    }
+    fetchSub();
+  }, [user]);
+
+  const vpnKey = subscription?.v2ray_config 
+    ? subscription.v2ray_config
+    : 'Сначала активируйте подписку';
+
+  const handleCopy = async () => {
+    if (!subscription) {
+      toast.error('У вас нет активной подписки');
+      return;
+    }
+    const success = await copyToClipboard(vpnKey);
+    if (success) {
+      setCopied(true);
+      toast.success('Ключ скопирован!');
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error('Не удалось скопировать ключ. Скопируйте вручную.');
+    }
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -86,10 +128,10 @@ export default function Installation() {
                 <div className="text-xs text-muted-foreground uppercase tracking-wider">Ваша персональная ссылка</div>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-xs truncate text-primary">
-                    https://izinet.app/api/v1/config/xxxx-xxxx-xxxx-xxxx
+                    {vpnKey}
                   </code>
-                  <Button size="sm" className="bg-primary text-black hover:bg-primary/90 rounded-lg">
-                    Копировать
+                  <Button size="sm" onClick={handleCopy} className="bg-primary text-black hover:bg-primary/90 rounded-lg">
+                    {copied ? 'Скопировано!' : 'Копировать'}
                   </Button>
                 </div>
               </div>

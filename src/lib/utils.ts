@@ -18,11 +18,12 @@ export async function copyToClipboard(text: string): Promise<boolean> {
       textArea.style.position = "absolute";
       textArea.style.left = "-999999px";
       document.body.prepend(textArea);
+      textArea.focus();
       textArea.select();
       try {
-        document.execCommand('copy');
+        const successful = document.execCommand('copy');
         textArea.remove();
-        return true;
+        return successful;
       } catch (error) {
         console.error('Fallback copy failed', error);
         textArea.remove();
