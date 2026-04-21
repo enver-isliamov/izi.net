@@ -562,8 +562,8 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; // Needs
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Telegram Bot Setup
-const botToken = process.env.TELEGRAM_BOT_TOKEN || '8663749623:AAEdnv8g7vfaAqxLoYHBlVAIyye59Jm89ok';
-const bot = new Telegraf(botToken);
+const botToken = process.env.TELEGRAM_BOT_TOKEN;
+const bot = botToken ? new Telegraf(botToken) : null;
 
 // --- Auth Utilities ---
 
@@ -652,7 +652,8 @@ app.post('/api/auth/telegram/verify', async (req, res) => {
 // --- Bot Logic ---
 
 // Handle /start and /start link_TOKEN
-bot.start(async (ctx) => {
+if (bot) {
+  bot.start(async (ctx) => {
   const startPayload = (ctx as any).startPayload;
   const chatId = ctx.chat.id;
   const username = ctx.from.username || ctx.from.first_name;
@@ -744,10 +745,10 @@ bot.start(async (ctx) => {
 
   // Generic welcome
   return ctx.reply(`Привет, ${username}! 🌐\n\nЯ бот izinet. Здесь ты можешь:\n• Проверить статус подписки\n• Узнать остаток трафика\n• Получить помощь\n\nЕсли ты хочешь привязать свой аккаунт, нажми "Привязать Telegram" в личном кабинете на сайте.`);
-});
+  });
 
-// Stats Command
-bot.command('status', async (ctx) => {
+  // Stats Command
+  bot.command('status', async (ctx) => {
   const chatId = ctx.chat.id.toString();
   
   try {
@@ -783,15 +784,22 @@ bot.command('status', async (ctx) => {
     console.error('Bot status error:', error);
     ctx.reply('❌ Ошибка при получении данных.');
   }
-});
+  });
 
-// Help Command
-bot.help((ctx) => ctx.reply('Доступные команды:\n/status - Моя подписка и баланс\n/help - Справка\n/support - Связаться с поддержкой'));
+  // Help Command
+  bot.help((ctx) => ctx.reply('Доступные команды:\n/status - Моя подписка и баланс\n/help - Справка\n/support - Связаться с поддержкой'));
+}
 
 // Start Polling (Development)
-bot.launch().then(() => {
-  console.log('🤖 Telegram Bot started');
-});
+if (bot) {
+  bot.launch().then(() => {
+    console.log('🤖 Telegram Bot started');
+  }).catch((err) => {
+    console.error('Bot launch failed. Check your TELEGRAM_BOT_TOKEN');
+  });
+} else {
+  console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
+}
 
 // --- Vite Middleware ---
 
@@ -822,5 +830,7 @@ async function startServer() {
 startServer();
 
 // Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+if (bot) {
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
