@@ -152,7 +152,7 @@ export default function Instructions() {
                   <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
                   <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
                 </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/incy/id6503930491', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/incy/id6756943388', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
                   <Download className="mr-2 h-4 w-4 text-primary group-hover:scale-110 transition-transform" /> Скачать в App Store
                 </Button>
               </CardContent>
@@ -172,7 +172,7 @@ export default function Instructions() {
                   <Step number={2} title="Добавьте профиль" description="Нажмите '+' и выберите 'Добавить из буфера'." />
                   <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
                 </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/hiddify-proxy-vpn/id6598772789', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
                   <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
                 </Button>
               </CardContent>
@@ -199,7 +199,7 @@ export default function Instructions() {
                   <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
                   <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
                 </div>
-                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=com.incy.vpn', '_blank')} className="w-full mt-6 rounded-xl bg-primary text-black font-bold group">
+                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=llc.itdev.incy', '_blank')} className="w-full mt-6 rounded-xl bg-primary text-black font-bold group">
                   <Download className="mr-2 h-4 w-4 text-black group-hover:scale-110 transition-transform" /> Скачать в Google Play
                 </Button>
               </CardContent>
