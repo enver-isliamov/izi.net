@@ -180,9 +180,13 @@ class XUIService {
               host = this.host.split('/')[0].split(':')[0] || host;
             }
 
-            const sni = realitySettings.serverNames[0];
-            const pbk = realitySettings.publicKey;
-            const sid = realitySettings.shortIds[0];
+            const sni = realitySettings.serverNames?.[0] || 'google.com';
+            // Extract from realitySettings.settings.publicKey or realitySettings.publicKey depending on XUI version
+            const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
+            const sid = realitySettings.shortIds?.[0] || '';
+            
+            if (!pbk) throw new Error("Public key not found in inbound");
+            
             link = `vless://${uuid}@${host}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
           } catch (e) {
             console.error('Error parsing inbound settings for link generation:', e);

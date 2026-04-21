@@ -92,7 +92,8 @@ export default function Referrals() {
   const totalEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
   
   const refCode = userData?.referral_code || 'Генерация...';
-  const siteLink = `https://izinet.app/login?ref=${refCode}`;
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://izinet.vercel.app';
+  const siteLink = `${siteUrl}/login?ref=${refCode}`;
   const botLink = `https://t.me/izinet_bot?start=ref_${refCode}`;
 
   return (
