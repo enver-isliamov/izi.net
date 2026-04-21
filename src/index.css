@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans: 'Inter', sans-serif;
+    --color-primary: #00ff88;
+    --color-primary-foreground: #000000;
+    --color-background: #000000;
+    --color-foreground: #ffffff;
+    --color-card: #111111;
+    --color-card-foreground: #ffffff;
+    --color-popover: #111111;
+    --color-popover-foreground: #ffffff;
+    --color-secondary: #1a1a1a;
+    --color-secondary-foreground: #ffffff;
+    --color-muted: #1a1a1a;
+    --color-muted-foreground: #888888;
+    --color-accent: #1a1a1a;
+    --color-accent-foreground: #00ff88;
+    --color-destructive: #ff4444;
+    --color-destructive-foreground: #ffffff;
+    --color-border: #222222;
+    --color-input: #222222;
+    --color-ring: #00ff88;
+    
+    --radius-lg: 1rem;
+    --radius-md: 0.75rem;
+    --radius-sm: 0.5rem;
+}
+
+:root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 152 100% 50%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 53%;
+    --accent: 0 0% 10%;
+    --accent-foreground: 152 100% 50%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 13%;
+    --input: 0 0% 13%;
+    --ring: 152 100% 50%;
+    --radius: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased min-h-screen;
+    background-image: 
+      radial-gradient(circle at 50% 50%, rgba(0, 255, 136, 0.03) 0%, transparent 70%),
+      repeating-radial-gradient(circle at 50% 50%, rgba(0, 255, 136, 0.02) 0, rgba(0, 255, 136, 0.02) 1px, transparent 1px, transparent 80px);
+    background-attachment: fixed;
+  }
+}
+
+.neon-glow {
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+}
+
+.neon-text {
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+.glass-card {
+  @apply bg-card/80 backdrop-blur-md border-border/50;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-muted rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-primary/50;
+}
