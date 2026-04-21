@@ -208,8 +208,8 @@ class XUIService {
 
   generateVlessLink(uuid: string, email: string) {
     const host = new URL(this.host).hostname;
-    // Fallback if inbound fetch fails
-    return `vless://${uuid}@${host}:443?type=tcp&security=reality&sni=google.com&pbk=NOT_CONFIGURED&fp=chrome&sid=0000#izinet_${email}`;
+    // Fallback if inbound fetch fails (Standard TLS, no Reality parameters to avoid strict base64 errors in clients like Hiddify)
+    return `vless://${uuid}@${host}:443?type=tcp&security=tls&sni=${host}#izinet_${email}`;
   }
 }
 
