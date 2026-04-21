@@ -33,7 +33,8 @@ export default function Wallet() {
 
     setIsProcessing(true);
     try {
-      const response = await fetch('/api/pay/create', {
+      const apiUrl = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${apiUrl}/api/pay/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
