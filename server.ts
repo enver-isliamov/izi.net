@@ -432,7 +432,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays } = req.body;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit } = req.body;
 
   if (!userId || !planId || !price) {
     return res.status(400).json({ error: 'Missing required parameters' });
@@ -502,7 +502,10 @@ app.post('/api/subscription/buy', async (req, res) => {
         .from('subscriptions')
         .update({
           expires_at: expiresAt.toISOString(),
-          plan_type: planName.toLowerCase()
+          plan_type: planName.toLowerCase(),
+          period_months: periodMonths || 1,
+          server_type: serverType || 'LTE',
+          device_limit: deviceLimit || 1
         })
         .eq('id', lastSub.id)
         .select()
@@ -521,7 +524,10 @@ app.post('/api/subscription/buy', async (req, res) => {
           expires_at: expiresAt.toISOString(),
           v2ray_config: vpnConfig,
           traffic_limit_mb: 100 * 1024,
-          traffic_used_mb: 0
+          traffic_used_mb: 0,
+          period_months: periodMonths || 1,
+          server_type: serverType || 'LTE',
+          device_limit: deviceLimit || 1
         })
         .select()
         .single();

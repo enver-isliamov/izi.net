@@ -21,6 +21,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 
+import { copyToClipboard } from '@/lib/utils';
+
 export default function Instructions() {
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
@@ -49,15 +51,19 @@ export default function Instructions() {
       ? `v2ray://subscription?link=https://api.izinet.app/sub/${subscription.id}` 
       : 'Сначала активируйте подписку';
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!subscription) {
       toast.error('У вас нет активной подписки');
       return;
     }
-    navigator.clipboard.writeText(vpnKey);
-    setCopied(true);
-    toast.success('Ключ скопирован!');
-    setTimeout(() => setCopied(false), 2000);
+    const success = await copyToClipboard(vpnKey);
+    if (success) {
+      setCopied(true);
+      toast.success('Ключ скопирован!');
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error('Не удалось скопировать ключ. Скопируйте вручную.');
+    }
   };
 
   const Step = ({ number, title, description, badge }: { number: number, title: string, description: string, badge?: string }) => (

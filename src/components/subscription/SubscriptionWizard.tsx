@@ -82,7 +82,10 @@ export function SubscriptionWizard({ onClose }: { onClose: () => void }) {
           planId: selectedPeriod.id,
           planName: `${selectedPeriod.label} (${selectedServer.label})`,
           price: totalPrice,
-          durationDays: selectedPeriod.days
+          durationDays: selectedPeriod.days,
+          periodMonths: Math.round(selectedPeriod.days / 30),
+          serverType: selectedServer.label,
+          deviceLimit: deviceCount
         }),
       });
 
