@@ -46,7 +46,22 @@ export default function Referrals() {
           toast.error('Ошибка при загрузке списка рефералов');
         }
 
-        setUserData(userRes);
+        let currentUserData = userRes;
+
+        // If user document exists but has no referral code, generate one
+        if (currentUserData && !currentUserData.referral_code) {
+          const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+          const { error: updateErr } = await supabase
+            .from('users')
+            .update({ referral_code: newCode })
+            .eq('id', user.id);
+            
+          if (!updateErr) {
+            currentUserData.referral_code = newCode;
+          }
+        }
+
+        setUserData(currentUserData);
         setReferrals(refRes || []);
       } catch (error) {
         console.error('Referral data fetch error:', error);
@@ -77,7 +92,8 @@ export default function Referrals() {
   const totalEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
   
   const refCode = userData?.referral_code || 'Генерация...';
-  const siteLink = `https://izinet.app/login?ref=${refCode}`;
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://izinet.vercel.app';
+  const siteLink = `${siteUrl}/login?ref=${refCode}`;
   const botLink = `https://t.me/izinet_bot?start=ref_${refCode}`;
 
   return (

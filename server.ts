@@ -180,9 +180,13 @@ class XUIService {
               host = this.host.split('/')[0].split(':')[0] || host;
             }
 
-            const sni = realitySettings.serverNames[0];
-            const pbk = realitySettings.publicKey;
-            const sid = realitySettings.shortIds[0];
+            const sni = realitySettings.serverNames?.[0] || 'google.com';
+            // Extract from realitySettings.settings.publicKey or realitySettings.publicKey depending on XUI version
+            const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
+            const sid = realitySettings.shortIds?.[0] || '';
+            
+            if (!pbk) throw new Error("Public key not found in inbound");
+            
             link = `vless://${uuid}@${host}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
           } catch (e) {
             console.error('Error parsing inbound settings for link generation:', e);
@@ -208,8 +212,8 @@ class XUIService {
 
   generateVlessLink(uuid: string, email: string) {
     const host = new URL(this.host).hostname;
-    // Fallback if inbound fetch fails
-    return `vless://${uuid}@${host}:443?type=tcp&security=reality&sni=google.com&pbk=NOT_CONFIGURED&fp=chrome&sid=0000#izinet_${email}`;
+    // Fallback if inbound fetch fails (Standard TLS, no Reality parameters to avoid strict base64 errors in clients like Hiddify)
+    return `vless://${uuid}@${host}:443?type=tcp&security=tls&sni=${host}#izinet_${email}`;
   }
 }
 

@@ -149,7 +149,7 @@ export default function Instructions() {
                   <Step number={2} title="Скопируйте ключ" description="Нажмите кнопку копирования выше." />
                   <Step number={3} title="Настройка" description="Откройте приложение, оно само предложит добавить конфиг из буфера." />
                 </div>
-                <Button variant="outline" className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/shadowrocket/id932747118', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
                   <Download className="mr-2 h-4 w-4 text-primary group-hover:scale-110 transition-transform" /> В App Store
                 </Button>
               </CardContent>
@@ -169,7 +169,7 @@ export default function Instructions() {
                   <Step number={2} title="Добавьте подписку" description="Нажмите '+', выберите 'Subscription' и вставьте ссылку." />
                   <Step number={3} title="Подключитесь" description="Выберите ближайший сервер и нажмите кнопку 'Connect'." />
                 </div>
-                <Button variant="outline" className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/streisand/id6450534064', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
                   <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать бесплатно
                 </Button>
               </CardContent>
@@ -191,7 +191,7 @@ export default function Instructions() {
                 <Step number={1} title="Скачайте APK или с Play Market" description="Установите приложение v2rayNG." />
                 <Step number={2} title="Импорт подписки" description="Нажмите 'Меню' -> 'Группы подписок' -> '+' -> Вставьте ссылку." />
                 <Step number={3} title="Обновите сервера" description="Нажмите 'Обновить подписку' и выберите сервер." />
-                <Button className="w-full mt-4 rounded-xl bg-primary text-black font-bold h-12">
+                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=com.v2ray.ang', '_blank')} className="w-full mt-4 rounded-xl bg-primary text-black font-bold h-12">
                   <Download className="mr-2 h-5 w-5" /> Скачать v2rayNG
                 </Button>
               </div>
@@ -218,7 +218,7 @@ export default function Instructions() {
                 <CardContent className="space-y-4">
                   <Step number={1} title="Скачайте архив" description="Распакуйте и запустите v2rayN.exe." />
                   <Step number={2} title="Настройте прокси" description="Установите системный прокси-сервер в настройках приложения." />
-                  <Button variant="outline" className="w-full rounded-xl border-border">Скачать для Windows</Button>
+                  <Button variant="outline" onClick={() => window.open('https://github.com/2dust/v2rayN/releases', '_blank')} className="w-full rounded-xl border-border">Скачать для Windows</Button>
                 </CardContent>
               </Card>
               <Card className="bg-card/50 border-border/40">
@@ -228,7 +228,7 @@ export default function Instructions() {
                 <CardContent className="space-y-4">
                   <Step number={1} title="Установка" description="Скачайте .dmg файл и перенесите в Applications." />
                   <Step number={2} title="Разрешения" description="Разрешите приложению использовать VPN в настройках системы." />
-                  <Button variant="outline" className="w-full rounded-xl border-border">Скачать для macOS</Button>
+                  <Button variant="outline" onClick={() => window.open('https://github.com/MatsuriDayo/nekoray/releases', '_blank')} className="w-full rounded-xl border-border">Скачать для macOS</Button>
                 </CardContent>
               </Card>
             </div>

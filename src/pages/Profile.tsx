@@ -164,7 +164,7 @@ export default function Profile() {
                   <h3 className="text-xl font-bold">{userData?.name || user?.email?.split('@')?.[0] || 'User'}</h3>
                   <p className="text-sm text-muted-foreground">ID: {user?.id?.substring(0, 8)}...</p>
                   <Badge className="bg-primary/20 text-primary border-primary/30 mt-1">
-                    {userData?.email_verified ? 'Подтвержден' : 'Ожидает подтверждения'}
+                    {(userData?.email_verified || userData?.telegram_linked) ? 'Активен' : 'Ожидает подтверждения'}
                   </Badge>
                 </div>
               </div>
