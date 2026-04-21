@@ -24,11 +24,13 @@ import {
   DialogTrigger 
 } from '@/components/ui/dialog';
 import { SubscriptionWizard } from '@/components/subscription/SubscriptionWizard';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
 export default function Subscription() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [subscription, setSubscription] = useState<any>(null);
@@ -236,7 +238,15 @@ export default function Subscription() {
               <Button 
                 variant="outline" 
                 className="w-full rounded-xl border-dashed border-border hover:border-primary/50 hover:bg-primary/5 h-12"
-                disabled={!subscription || deviceCount >= deviceLimit}
+                onClick={() => {
+                  if (!subscription) return;
+                  if (deviceCount >= deviceLimit) {
+                    toast.error('Достигнут лимит устройств на вашем тарифе');
+                  } else {
+                    toast.info('Используйте ваш ключ для настройки нового устройства');
+                    navigate('/instructions');
+                  }
+                }}
               >
                 <Plus className="mr-2 w-4 h-4" /> Добавить новое устройство
               </Button>
