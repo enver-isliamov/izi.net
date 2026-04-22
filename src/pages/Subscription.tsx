@@ -33,56 +33,64 @@ export default function Subscription() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [isWizardOpen, setIsWizardOpen] = useState(false);
-  const [subscription, setSubscription] = useState<any>(null);
-  const [devices, setDevices] = useState<any[]>([]);
+  const [subscriptions, setSubscriptions] = useState<any[]>([]);
+  const [vpnKeys, setVpnKeys] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [wizardMode, setWizardMode] = useState<'extend' | 'new'>('extend');
+
+  const fetchSubscriptionData = async () => {
+    if (!user) return;
+    
+    try {
+      // 1. Fetch active main subscription
+      const { data: mainSubData, error: subError } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (subError) {
+        console.error('Error fetching subscription:', subError);
+        toast.error('Ошибка при загрузке данных подписки');
+        return;
+      }
+
+      setSubscriptions(mainSubData ? [mainSubData] : []);
+
+      if (mainSubData && mainSubData.v2ray_config) {
+        // Parse multiple configs from single field
+        const configs = mainSubData.v2ray_config.split('\n---KEY_SEP---\n');
+        // If we have more than 1 config, the rest are "extra" keys
+        if (configs.length > 1) {
+           const extraKeys = configs.slice(1).map((cfg: string, index: number) => ({
+             id: `extra-${index}`,
+             v2ray_config: cfg,
+             label: `Доп. устройство ${index + 1}`
+           }));
+           setVpnKeys(extraKeys);
+        } else {
+           setVpnKeys([]);
+        }
+      }
+    } catch (error) {
+      console.error('Subscription data fetch error:', error);
+      toast.error('Проблема с подключением к бэкенду');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchSubscriptionData = async () => {
-      if (!user) return;
-      
-      try {
-        // Fetch active subscription
-        const { data: subData, error: subError } = await supabase
-          .from('subscriptions')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (subError && subError.code !== 'PGRST116') {
-          console.error('Error fetching subscription:', subError);
-          toast.error('Ошибка при загрузке данных подписки');
-        } else {
-          setSubscription(subData);
-          
-          // Fetch devices for this subscription
-          if (subData) {
-            const { data: devData, error: devError } = await supabase
-              .from('devices')
-              .select('*')
-              .eq('subscription_id', subData.id);
-              
-            if (devError) {
-              console.error('Error fetching devices:', devError);
-              toast.error('Ошибка при загрузке списка устройств');
-            } else {
-              setDevices(devData || []);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Subscription data fetch error:', error);
-        toast.error('Проблема с подключением к бэкенду');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchSubscriptionData();
   }, [user]);
+
+  const openWizard = (mode: 'extend' | 'new') => {
+    setWizardMode(mode);
+    setIsWizardOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -92,21 +100,22 @@ export default function Subscription() {
     );
   }
 
-  const planName = subscription?.plan_type || 'Нет активной подписки';
+  const mainSub = subscriptions[0] || null;
+  const planName = mainSub?.plan_type || 'Нет активной подписки';
   
-  // Convert MB to GB for display
-  const trafficUsedGB = (subscription?.traffic_used_mb || 0) / 1024;
-  const trafficLimitGB = (subscription?.traffic_limit_mb || 10240) / 1024; // Default 10GB
+  // Sum aggregate traffic for the status card
+  const trafficUsedGB = subscriptions.reduce((acc, sub) => acc + (sub.traffic_used_mb || 0), 0) / 1024;
+  const trafficLimitGB = (mainSub?.traffic_limit_mb || 102400) / 1024; 
   const trafficPercent = Math.min(100, Math.round((trafficUsedGB / trafficLimitGB) * 100)) || 0;
   
-  const deviceCount = devices.length;
-  const deviceLimit = subscription?.device_limit || 2;
+  const deviceCount = subscriptions.length;
+  const deviceLimit = mainSub?.device_limit || 1;
   const devicePercent = Math.min(100, Math.round((deviceCount / deviceLimit) * 100)) || 0;
 
   let daysLeft = 0;
   let endDateStr = 'Неизвестно';
-  if (subscription?.expires_at) {
-    const end = new Date(subscription.expires_at);
+  if (mainSub?.expires_at) {
+    const end = new Date(mainSub.expires_at);
     const now = new Date();
     const diffTime = end.getTime() - now.getTime();
     daysLeft = diffTime > 0 ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
@@ -127,14 +136,21 @@ export default function Subscription() {
         </div>
         
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-          <DialogTrigger render={<Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" />}>
-            <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px] bg-card border-border p-6">
+          <DialogTrigger render={
+            <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
+              <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
+            </Button>
+          } />
+          <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
             <DialogHeader>
-              <DialogTitle>Оформление подписки</DialogTitle>
+              <DialogTitle className="text-xl font-bold">
+                {wizardMode === 'new' ? 'Добавление устройства' : 'Оформление подписки'}
+              </DialogTitle>
             </DialogHeader>
-            <SubscriptionWizard onClose={() => setIsWizardOpen(false)} />
+            <SubscriptionWizard onClose={() => {
+              setIsWizardOpen(false);
+              fetchSubscriptionData();
+            }} forceNew={wizardMode === 'new'} />
           </DialogContent>
         </Dialog>
       </div>
@@ -150,31 +166,31 @@ export default function Subscription() {
                   {planName}
                 </CardTitle>
                 <CardDescription>
-                  {subscription ? `Активен до ${endDateStr}` : 'Подписка не оформлена'}
+                  {mainSub ? `Активен до ${endDateStr}` : 'Подписка не оформлена'}
                 </CardDescription>
               </div>
-              <Badge className={subscription ? "bg-primary/20 text-primary border-primary/50 uppercase" : "bg-muted text-muted-foreground uppercase"}>
-                {subscription ? `● ${subscription.server_type}` : 'ОТКЛЮЧЕНО'}
+              <Badge className={mainSub ? "bg-primary/20 text-primary border-primary/50 uppercase" : "bg-muted text-muted-foreground uppercase"}>
+                {mainSub ? `● ${mainSub.server_type}` : 'ОТКЛЮЧЕНО'}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Использование трафика</span>
+                    <span className="text-muted-foreground">Использование трафика (Всего)</span>
                     <span className="font-medium">{trafficUsedGB.toFixed(1)} GB / {trafficLimitGB.toFixed(1)} GB</span>
                   </div>
                   <Progress value={trafficPercent} className="h-2 bg-muted" />
-                  <p className="text-[10px] text-muted-foreground">Обнуление через {daysLeft} дней</p>
+                  <p className="text-[10px] text-muted-foreground">На основе основного лимита</p>
                 </div>
 
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Подключено устройств</span>
-                    <span className="font-medium">{deviceCount} / {deviceLimit}</span>
+                    <span className="text-muted-foreground">Активных ключей</span>
+                    <span className="font-medium">{deviceCount} шт.</span>
                   </div>
-                  <Progress value={devicePercent} className="h-2 bg-muted" />
-                  <p className="text-[10px] text-muted-foreground">{deviceLimit - deviceCount} свободный слот</p>
+                  <Progress value={Math.min(100, (deviceCount / 10) * 100)} className="h-2 bg-muted" />
+                  <p className="text-[10px] text-muted-foreground">Вы можете добавить больше устройств</p>
                 </div>
               </div>
 
@@ -187,12 +203,12 @@ export default function Subscription() {
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Zap className="w-4 h-4 text-primary mx-auto" />
                   <div className="text-[10px] text-muted-foreground uppercase">Тип</div>
-                  <div className="text-sm font-bold uppercase">{subscription?.server_type || 'N/A'}</div>
+                  <div className="text-sm font-bold uppercase">{mainSub?.server_type || 'N/A'}</div>
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Clock className="w-4 h-4 text-primary mx-auto" />
                   <div className="text-[10px] text-muted-foreground uppercase">Период</div>
-                  <div className="text-sm font-bold">{subscription?.period_months || 0} мес.</div>
+                  <div className="text-sm font-bold">{mainSub?.period_months || 0} мес.</div>
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <RefreshCw className="w-4 h-4 text-primary mx-auto" />
@@ -203,53 +219,79 @@ export default function Subscription() {
             </CardContent>
           </Card>
 
-          {/* Devices List */}
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle>Мои устройства</CardTitle>
-              <CardDescription>Управление подключенными девайсами</CardDescription>
+          {/* My Devices / Keys */}
+          <Card className="glass-card border-border">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-xl">Мои устройства</CardTitle>
+                <CardDescription>Управление VPN-ключами</CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="border-primary/50 hover:bg-primary/10 rounded-xl"
+                onClick={() => openWizard('new')}
+              >
+                <Plus className="mr-2 w-4 h-4" /> Добавить устройство
+              </Button>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
-                {devices.length > 0 ? devices.map((device, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-muted/20 border border-border">
+                {/* 1. Main Subscription Key */}
+                {mainSub?.v2ray_config && (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/20 border border-border">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/10 text-primary">
                         <Smartphone className="w-5 h-5" />
                       </div>
                       <div>
-                        <div className="font-bold text-sm">{device.name || 'Неизвестное устройство'}</div>
-                        <div className="text-[10px] text-muted-foreground">
-                          Последняя активность: {device.last_connected ? new Date(device.last_connected).toLocaleString('ru-RU') : 'Никогда'}
+                        <div className="font-bold text-sm">Основное устройство</div>
+                        <div className="text-[10px] text-muted-foreground italic">
+                           До {new Date(mainSub.expires_at).toLocaleDateString()} • {mainSub.plan_type}
                         </div>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg">
-                      Отключить
+                    <Button size="sm" variant="secondary" className="rounded-lg" onClick={() => {
+                        const firstConfig = mainSub.v2ray_config.split('\n---KEY_SEP---\n')[0];
+                        navigator.clipboard.writeText(firstConfig);
+                        toast.success('Основной ключ скопирован!');
+                    }}>
+                        Копировать
                     </Button>
                   </div>
-                )) : (
+                )}
+
+                {/* 2. Additional Keys from subscription_keys */}
+                {vpnKeys.map((key, i) => (
+                  <div key={key.id} className="flex items-center justify-between p-4 rounded-2xl bg-muted/20 border border-border">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400">
+                        <Smartphone className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm">
+                          {key.label || `Устройство ${i + 2}`}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground italic">
+                           До {key.expires_at ? new Date(key.expires_at).toLocaleDateString() : endDateStr}
+                        </div>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="secondary" className="rounded-lg" onClick={() => {
+                        navigator.clipboard.writeText(key.v2ray_config);
+                        toast.success('Дополнительный ключ скопирован!');
+                    }}>
+                        Копировать
+                    </Button>
+                  </div>
+                ))}
+                
+                {(!mainSub && vpnKeys.length === 0) && (
                   <div className="text-center p-6 text-muted-foreground text-sm border border-dashed border-border rounded-2xl">
-                    У вас пока нет подключенных устройств
+                    У вас пока нет активных ключей
                   </div>
                 )}
               </div>
-              
-              <Button 
-                variant="outline" 
-                className="w-full rounded-xl border-dashed border-border hover:border-primary/50 hover:bg-primary/5 h-12"
-                onClick={() => {
-                  if (!subscription) return;
-                  if (deviceCount >= deviceLimit) {
-                    toast.error('Достигнут лимит устройств на вашем тарифе');
-                  } else {
-                    toast.info('Используйте ваш ключ для настройки нового устройства');
-                    navigate('/instructions');
-                  }
-                }}
-              >
-                <Plus className="mr-2 w-4 h-4" /> Добавить новое устройство
-              </Button>
             </CardContent>
           </Card>
         </div>

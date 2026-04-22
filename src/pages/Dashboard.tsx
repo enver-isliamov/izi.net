@@ -34,6 +34,13 @@ export default function Dashboard() {
     setIsLoading(true);
     
     try {
+      // Trigger traffic sync on load to get real-time data
+      fetch('/api/subscription/sync-traffic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id })
+      }).catch(err => console.warn('Traffic sync failed:', err));
+
       const [
         { data: userRes },
         balanceResult,
@@ -92,7 +99,7 @@ export default function Dashboard() {
   
   // Convert MB to GB for display
   const trafficUsedGB = (subscription?.traffic_used_mb || 0) / 1024;
-  const trafficLimitGB = (subscription?.traffic_limit_mb || 10240) / 1024; // Default 10GB
+  const trafficLimitGB = (subscription?.traffic_limit_mb || 102400) / 1024; // Default 100GB
   const trafficPercent = Math.min(100, Math.round((trafficUsedGB / trafficLimitGB) * 100)) || 0;
   
   const refCount = referrals.length;

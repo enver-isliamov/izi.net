@@ -103,13 +103,12 @@ class XUIService {
     }
   }
 
-  async addClient(email: string, uuid: string, inboundId: number) {
+  async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
 
     // First, let's try to get the inbound to see its settings (for link generation later)
     let inbound;
     try {
-      // API requests usually start with /panel/api/
       const getInboundUrl = `${this.host}/panel/api/inbounds/get/${inboundId}`;
       const resp = await axios.get(getInboundUrl, {
         headers: { 'Cookie': this.sessionCookie },
@@ -131,8 +130,8 @@ class XUIService {
             flow: "xtls-rprx-vision",
             email: email,
             limitIp: 1,
-            totalGB: 0,
-            expiryTime: 0,
+            totalGB: limitBytes,
+            expiryTime: expiryTime,
             enable: true,
             tgId: "",
             subId: ""
@@ -156,7 +155,7 @@ class XUIService {
       );
 
       if (response.data.success) {
-        console.log(`✅ Client ${email} added to 3x-ui`);
+        console.log(`✅ Client ${email} added to 3x-ui with expiry ${expiryTime}`);
         
         // Generate link
         let link = "";
@@ -203,10 +202,90 @@ class XUIService {
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
-        return this.addClient(email, uuid, inboundId);
+        return this.addClient(email, uuid, inboundId, expiryTime);
       }
       console.error('❌ 3x-ui addClient error:', error.message);
       throw error;
+    }
+  }
+
+  async updateClient(email: string, uuid: string, inboundId: number, expiryTime: number, limitBytes: number = 0) {
+    if (!this.sessionCookie) await this.login();
+
+    const clientData = {
+      id: inboundId,
+      settings: JSON.stringify({
+        clients: [
+          {
+            id: uuid,
+            flow: "xtls-rprx-vision",
+            email: email,
+            limitIp: 1,
+            totalGB: limitBytes,
+            expiryTime: expiryTime,
+            enable: true,
+            tgId: "",
+            subId: ""
+          }
+        ]
+      })
+    };
+
+    try {
+      // 3x-ui uses updateClient/{uuid}
+      const updateClientUrl = `${this.host}/panel/api/inbounds/updateClient/${uuid}`;
+      const response = await axios.post(
+        updateClientUrl,
+        clientData,
+        {
+          headers: { 
+            'Cookie': this.sessionCookie,
+            'Content-Type': 'application/json'
+          },
+          httpsAgent: httpsAgent
+        }
+      );
+
+      if (response.data.success) {
+        console.log(`✅ Client ${email} updated in 3x-ui with expiry ${expiryTime}`);
+        return true;
+      } else {
+        console.warn(`⚠️ Failed to update client in 3x-ui: ${response.data.msg}`);
+        return false;
+      }
+    } catch (error: any) {
+      console.error('❌ 3x-ui updateClient error:', error.message);
+      return false;
+    }
+  }
+
+  async getClientTraffic(email: string) {
+    if (!this.sessionCookie) await this.login();
+
+    try {
+      const response = await axios.get(`${this.host}/panel/api/inbounds/getClientTraffics/${email}`, {
+        headers: { 'Cookie': this.sessionCookie },
+        httpsAgent: httpsAgent
+      });
+
+      if (response.data.success && response.data.obj) {
+        const stats = response.data.obj;
+        // up + down in bytes. total field in 3x-ui represents the LIMIT in bytes
+        return {
+          up: stats.up || 0,
+          down: stats.down || 0,
+          used: (stats.up || 0) + (stats.down || 0),
+          limit: stats.total || 0
+        };
+      }
+      return null;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        return this.getClientTraffic(email);
+      }
+      console.error(`❌ 3x-ui getClientTraffic error for ${email}:`, error.message);
+      return null;
     }
   }
 
@@ -332,6 +411,23 @@ app.post('/api/pay/create', async (req, res) => {
   }
 });
 
+// 📊 Sync user traffic manually
+app.post('/api/subscription/sync-traffic', async (req, res) => {
+  const { userId } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
+  }
+
+  try {
+    const updatedSub = await syncUserTraffic(userId);
+    res.json({ success: true, subscription: updatedSub });
+  } catch (error: any) {
+    console.error('❌ Manual traffic sync error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // ⚓ Cryptomus Webhook
 app.post('/api/pay/webhook/cryptomus', async (req, res) => {
   const { sign, ...payload } = req.body;
@@ -435,8 +531,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', config: configStatus });
 });
 
+// --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit } = req.body;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew } = req.body;
 
   if (!userId || !planId || !price) {
     return res.status(400).json({ error: 'Missing required parameters' });
@@ -458,8 +555,8 @@ app.post('/api/subscription/buy', async (req, res) => {
       return res.status(400).json({ error: 'Insufficient balance' });
     }
 
-    // 2. Check for ANY previous subscription to REUSE the same VPN key/config
-    const { data: lastSub, error: lastSubErr } = await supabase
+    // 2. Determine if we extend OR create new
+    const { data: lastSub } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('user_id', userId)
@@ -467,58 +564,89 @@ app.post('/api/subscription/buy', async (req, res) => {
       .limit(1)
       .maybeSingle();
 
-    let vpnConfig = lastSub?.v2ray_config;
+    let vpnConfig = null;
     let expiresAt = new Date();
 
-    // Handling Stacking: If current sub is still active, start from its end date
-    if (lastSub && new Date(lastSub.expires_at) > new Date()) {
+    // Handling Stacking/Extension (only if not forcing a new device)
+    if (!forceNew && lastSub && new Date(lastSub.expires_at) > new Date()) {
       expiresAt = new Date(lastSub.expires_at);
+      vpnConfig = lastSub.v2ray_config;
+    } else if (!forceNew && lastSub) {
+      // If extension but sub is expired, we use existing config to avoid panel clutter
+      vpnConfig = lastSub.v2ray_config;
     }
+    
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-    // 3. If NO previous config found (brand new user), create one in 3x-ui
-    if (!vpnConfig) {
-      // Use a STABLE email for the user in 3x-ui
-      const uuid = crypto.randomUUID();
-      const vpnEmail = `user_${userId.slice(0, 8)}`; // Stable email based on Supabase ID
-      const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    // 3. Sync with 3x-ui
+    // We use a short random suffix to strictly avoid "Duplicate Email" errors
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    let vpnEmail = `user_${userId.slice(0, 8)}`;
+    
+    // If it's a force new device or we don't have a config yet, we need a unique email
+    if (forceNew || !vpnConfig) {
+      vpnEmail = `${vpnEmail}_${randomSuffix}`;
+    }
 
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const expiryTimestamp = expiresAt.getTime(); // ms
+    const trafficLimitMb = 100 * 1024;
+    const limitBytes = trafficLimitMb * 1024 * 1024;
+
+    if (!vpnConfig) {
+      const uuid = crypto.randomUUID();
       try {
-        console.log(`🆕 Creating first-time VPN client for user ${userId}...`);
-        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId);
+        console.log(`🆕 Creating VPN client ${vpnEmail}...`);
+        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
       } catch (apiError: any) {
-        // If 3x-ui says it's a duplicate (maybe leftovers from previous DB installs), 
-        // we could handle it, but for now we follow the "fail-safe" path.
-        console.error('❌ 3x-ui error during first-time setup:', apiError.message);
+        console.error('❌ 3x-ui error:', apiError.message);
         throw apiError;
       }
     } else {
-      console.log(`♻️ Reusing permanent VPN config for user ${userId}`);
+      console.log(`♻️ Syncing expiration for ${vpnEmail}`);
+      const uuidMatch = vpnConfig.match(/vless:\/\/([^@]+)@/);
+      if (uuidMatch) {
+        const existingUuid = uuidMatch[1];
+        await xui.updateClient(vpnEmail, existingUuid, inboundId, expiryTimestamp, limitBytes);
+      }
     }
 
-    // 4. Update or Insert subscription record
-    // We update the most recent active sub or create a new one if it's a fresh start
+    // 4. Update or Insert record
     let subData, subErr;
 
-    if (lastSub && lastSub.status === 'active') {
-      // Update existing active subscription (Extension)
+    if (lastSub) {
+      // We ALWAYS update because user_id is UNIQUE in subscriptions table
+      let finalConfig = vpnConfig;
+      
+      // If adding a new device OR extending, we check if we need to append
+      if (forceNew && lastSub.v2ray_config) {
+        // Append new device config to the list
+        finalConfig = `${lastSub.v2ray_config}\n---KEY_SEP---\n${vpnConfig}`;
+      } else if (!forceNew) {
+        // It's a renewal/extension, keep existing configs but might update the first one if needed
+        // Usually we just keep the whole string as is, just update expiry
+        finalConfig = lastSub.v2ray_config;
+      }
+
       const { data: updatedSub, error: updateErr } = await supabase
         .from('subscriptions')
         .update({
+          status: 'active',
           expires_at: expiresAt.toISOString(),
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || 'LTE',
-          device_limit: deviceLimit || 1
+          device_limit: forceNew ? (lastSub.device_limit || 1) + 1 : (deviceLimit || 1),
+          traffic_limit_mb: trafficLimitMb,
+          v2ray_config: finalConfig
         })
         .eq('id', lastSub.id)
         .select()
         .single();
-      
       subData = updatedSub;
       subErr = updateErr;
     } else {
-      // Create new subscription record (either first time or after total expiry)
+      // Create FIRST primary subscription (only if no record exists at all)
       const { data: newSub, error: insertErr } = await supabase
         .from('subscriptions')
         .insert({
@@ -527,19 +655,17 @@ app.post('/api/subscription/buy', async (req, res) => {
           status: 'active',
           expires_at: expiresAt.toISOString(),
           v2ray_config: vpnConfig,
-          traffic_limit_mb: 100 * 1024,
-          traffic_used_mb: 0,
-          period_months: periodMonths || 1,
           server_type: serverType || 'LTE',
-          device_limit: deviceLimit || 1
+          period_months: periodMonths || 1,
+          device_limit: deviceLimit || 1,
+          traffic_limit_mb: trafficLimitMb,
+          traffic_used_mb: 0
         })
         .select()
         .single();
-      
       subData = newSub;
       subErr = insertErr;
     }
-
     if (subErr) {
       console.error('❌ Supabase sub operation error:', JSON.stringify(subErr, null, 2));
       throw subErr;
@@ -574,6 +700,150 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 const bot = botToken ? new Telegraf(botToken) : null;
+
+// --- Realtime DB Listener ---
+// This listens for manual changes in the database (e.g., via Supabase Dashboard)
+// and syncs them to the 3x-ui panel automatically.
+function setupRealtimeListener() {
+  console.log('🔄 Setting up Realtime DB Listener...');
+  
+  supabase
+    .channel('subscription-sync')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'subscriptions'
+      },
+      async (payload) => {
+        const newData = payload.new;
+        const oldData = payload.old;
+
+        // If expiry date, config or traffic limit changed, sync to XUI
+        if (
+          newData.expires_at !== oldData.expires_at || 
+          newData.v2ray_config !== oldData.v2ray_config ||
+          newData.traffic_limit_mb !== oldData.traffic_limit_mb
+        ) {
+          console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
+          
+          const userId = newData.user_id;
+          const vpnEmail = `user_${userId.slice(0, 8)}`;
+          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+          const expiryTimestamp = new Date(newData.expires_at).getTime();
+          const trafficLimitMb = newData.traffic_limit_mb || 102400;
+          const limitBytes = trafficLimitMb * 1024 * 1024;
+          
+          const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
+          if (uuidMatch) {
+            const uuid = uuidMatch[1];
+            await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
+          }
+        }
+      }
+    )
+    .subscribe((status) => {
+      console.log(`📡 Realtime subscription status: ${status}`);
+    });
+}
+
+// --- Traffic Synchronization Task ---
+/**
+ * Syncs traffic for a specific user.
+ * @param userId - The ID of the user to sync
+ * @returns The subscription data with updated traffic
+ */
+async function syncUserTraffic(userId: string) {
+  // 1. Get current active subscription
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('id, traffic_limit_mb, v2ray_config')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!sub) return null;
+
+  // 2. Identify all emails to check by parsing v2ray_config
+  // Configurations are separated by \n---KEY_SEP---\n
+  const configs = (sub.v2ray_config || '').split('\n---KEY_SEP---\n');
+  const emailsToCheck: string[] = [];
+
+  configs.forEach(config => {
+    // Extract email from link: #izinet_user_email
+    const emailMatch = config.match(/#izinet_([^&?#\s]+)/);
+    if (emailMatch) {
+      emailsToCheck.push(emailMatch[1]);
+    }
+  });
+
+  // Fallback to primary email if no tags found (should not happen with new logic)
+  if (emailsToCheck.length === 0) {
+    emailsToCheck.push(`user_${userId.slice(0, 8)}`);
+  }
+
+  let totalUsedBytes = 0;
+  let maxLimitBytes = 0;
+
+  // 3. Fetch stats for all devices
+  for (const email of emailsToCheck) {
+    const stats = await xui.getClientTraffic(email);
+    if (stats) {
+      totalUsedBytes += stats.used;
+      maxLimitBytes = Math.max(maxLimitBytes, stats.limit);
+    }
+  }
+
+  const trafficUsedMb = Math.round(totalUsedBytes / (1024 * 1024));
+  // Limit is usually the same per device, but we'll take the max or use the one from DB
+  const trafficLimitMb = maxLimitBytes > 0 ? Math.round(maxLimitBytes / (1024 * 1024)) : sub.traffic_limit_mb || 102400;
+
+  // 4. Update the subscription in DB
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .update({ 
+      traffic_used_mb: trafficUsedMb,
+      traffic_limit_mb: trafficLimitMb 
+    })
+    .eq('id', sub.id)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error(`❌ Error updating aggregate traffic for user ${userId}:`, error.message);
+    return null;
+  }
+  return data;
+}
+
+async function syncTrafficStats() {
+  console.log('📊 Starting global traffic synchronization...');
+  
+  try {
+    // 1. Get all active subscriptions
+    const { data: subs, error } = await supabase
+      .from('subscriptions')
+      .select('user_id')
+      .gt('expires_at', new Date().toISOString()); // Only active ones
+
+    if (error) throw error;
+    if (!subs || subs.length === 0) return;
+
+    // Use a Set to avoid duplicate syncs if a user somehow has multiple active subs
+    const userIds = Array.from(new Set(subs.map(s => s.user_id)));
+
+    for (const userId of userIds) {
+      await syncUserTraffic(userId);
+    }
+    
+    console.log(`✅ Successfully synced traffic for ${userIds.length} users`);
+  } catch (err) {
+    console.error('❌ Global traffic sync error:', err);
+  }
+}
 
 // --- Auth Utilities ---
 
@@ -816,6 +1086,13 @@ if (bot) {
 async function startServer() {
   // Check 3x-ui configuration on startup
   xui.checkConfig();
+  
+  // Setup Realtime DB Listener for manual syncing
+  setupRealtimeListener();
+
+  // Initial traffic sync and schedule every 15 minutes
+  syncTrafficStats();
+  setInterval(syncTrafficStats, 15 * 60 * 1000);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
