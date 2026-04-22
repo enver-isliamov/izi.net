@@ -7,6 +7,48 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import crypto from 'crypto';
+
+// --- Types for Advanced Device Management ---
+export interface VpnDevice {
+  id: string;
+  label: string;
+  config: string;
+  email: string;
+  uuid: string;
+  expiresAt: string;
+  serverType: string;
+  trafficUsedBytes: number;
+}
+
+// Support function to migrate legacy v2ray_config text to JSON
+function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootServerType?: string): VpnDevice[] {
+  if (!configStr) return [];
+  
+  if (configStr.trim().startsWith('[')) {
+    try {
+      return JSON.parse(configStr);
+    } catch (e) {
+      console.warn("Failed to parse JSON config, falling back to legacy", e);
+    }
+  }
+
+  // Legacy parsing
+  const configs = configStr.split('\n---KEY_SEP---\n').filter(Boolean);
+  return configs.map((cfg, index) => {
+    const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
+    const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
+    return {
+      id: index === 0 ? 'primary' : `device_${crypto.randomBytes(4).toString('hex')}`,
+      label: index === 0 ? 'Основное устройство' : `Доп. устройство ${index}`,
+      config: cfg,
+      email: emailMatch ? emailMatch[1] : 'unknown',
+      uuid: uuidMatch ? uuidMatch[1] : 'unknown',
+      expiresAt: rootExpiresAt || new Date().toISOString(),
+      serverType: rootServerType || 'Wi-Fi',
+      trafficUsedBytes: 0
+    };
+  });
+}
 import axios from 'axios';
 
 import https from 'https';
@@ -549,7 +591,7 @@ app.get('/api/health', (req, res) => {
     inboundId: process.env.XUI_INBOUND_ID || '1'
   };// --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew } = req.body;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName } = req.body;
   const authHeader = req.headers.authorization;
 
   if (!userId || !planId || !price) {
@@ -573,15 +615,10 @@ app.post('/api/subscription/buy', async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (balanceErr || !balanceData) {
-      throw new Error('Balance not found');
-    }
+    if (balanceErr || !balanceData) throw new Error('Balance not found');
+    if (balanceData.amount < price) return res.status(400).json({ error: 'Insufficient balance' });
 
-    if (balanceData.amount < price) {
-      return res.status(400).json({ error: 'Insufficient balance' });
-    }
-
-    // 2. Determine if we extend OR create new
+    // 2. Fetch last subscription & Parse existing devices
     const { data: lastSub } = await supabase
       .from('subscriptions')
       .select('*')
@@ -590,131 +627,126 @@ app.post('/api/subscription/buy', async (req, res) => {
       .limit(1)
       .maybeSingle();
 
-    let vpnConfig = null;
-    let expiresAt = new Date();
+    const existingDevices: VpnDevice[] = parseVpnDevices(
+      lastSub?.v2ray_config || null,
+      lastSub?.expires_at,
+      lastSub?.server_type
+    );
 
-    // Handling Stacking/Extension (only if not forcing a new device)
-    if (!forceNew && lastSub && new Date(lastSub.expires_at) > new Date()) {
-      expiresAt = new Date(lastSub.expires_at);
-      vpnConfig = lastSub.v2ray_config;
-    } else if (!forceNew && lastSub) {
-      // If extension but sub is expired, we use existing config to avoid panel clutter
-      vpnConfig = lastSub.v2ray_config;
-    }
-    
-    expiresAt.setDate(expiresAt.getDate() + durationDays);
-
-    // 3. Sync with 3x-ui
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-    const expiryTimestamp = expiresAt.getTime(); // ms
-    const trafficLimitMb = 100 * 1024;
+    const trafficLimitMb = 100 * 1024; // 100 GB default limit per device logic (you can tune this)
     const limitBytes = trafficLimitMb * 1024 * 1024;
 
-    // IMPORTANT: If we are extending (!forceNew) and we have multiple configs, 
-    // we MUST update ALL of them in the panel.
-    if (!forceNew && vpnConfig && vpnConfig.includes('\n---KEY_SEP---\n')) {
-      console.log(`♻️ Batch syncing expiration for all devices of user ${userId}`);
-      const configs = vpnConfig.split('\n---KEY_SEP---\n');
-      for (const cfg of configs) {
-         const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
-         const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
-         if (uuidMatch && emailMatch) {
-            await xui.updateClient(emailMatch[1], uuidMatch[1], inboundId, expiryTimestamp, limitBytes);
-         }
+    let targetDevice: VpnDevice | undefined;
+
+    if (forceNew || existingDevices.length === 0) {
+      // 3A. CREATE NEW DEVICE
+      if (existingDevices.length >= 2) {
+        return res.status(400).json({ error: 'Превышен лимит: можно добавить только 1 дополнительное устройство.' });
       }
-    } else if (!vpnConfig || forceNew) {
-      // CREATE NEW CLIENT
+
       const randomSuffix = Math.random().toString(36).substring(2, 6);
-      const vpnEmail = `user_${userId.slice(0, 8)}_${randomSuffix}`;
+      const email = `user_${userId.slice(0, 8)}_${randomSuffix}`;
       const uuid = crypto.randomUUID();
-      try {
-        console.log(`🆕 Creating VPN client ${vpnEmail}...`);
-        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
-      } catch (apiError: any) {
-        console.error('❌ 3x-ui error:', apiError.message);
-        throw apiError;
-      }
-    } else {
-      // UPDATE SINGLE EXISTING CLIENT
-      const vpnEmail = `user_${userId.slice(0, 8)}`;
-      const uuidMatch = vpnConfig.match(/vless:\/\/([^@]+)@/);
-      const emailMatch = vpnConfig.match(/#izinet_([^&?#\s]+)/);
-      const targetEmail = emailMatch ? emailMatch[1] : vpnEmail;
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + durationDays);
+
+      console.log(`🆕 Creating VPN client ${email}...`);
+      const rawConfig = await xui.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
-      if (uuidMatch) {
-         await xui.updateClient(targetEmail, uuidMatch[1], inboundId, expiryTimestamp, limitBytes);
+      const newDevice: VpnDevice = {
+        id: existingDevices.length === 0 ? 'primary' : `device_${crypto.randomBytes(4).toString('hex')}`,
+        label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
+        config: rawConfig,
+        email: email,
+        uuid: uuid,
+        expiresAt: expiresAt.toISOString(),
+        serverType: serverType || 'LTE',
+        trafficUsedBytes: 0
+      };
+      existingDevices.push(newDevice);
+      targetDevice = newDevice;
+
+    } else {
+      // 3B. RENEW SPECIFIC OR PRIMARY DEVICE
+      const idToRenew = targetDeviceId || existingDevices[0].id;
+      targetDevice = existingDevices.find(d => d.id === idToRenew);
+      
+      if (!targetDevice) {
+        return res.status(404).json({ error: 'Устройство для продления не найдено.' });
       }
+
+      const currentExpiry = new Date(targetDevice.expiresAt);
+      const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
+      newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
+      
+      targetDevice.expiresAt = newExpiresAt.toISOString();
+      targetDevice.serverType = serverType || targetDevice.serverType;
+      
+      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email}`);
+      await xui.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
     }
 
-    // 4. Update or Insert record
+    // Determine absolute max expiry for the subscription row
+    const maxExpiryDate = existingDevices.reduce((max, d) => {
+      const dDate = new Date(d.expiresAt);
+      return dDate > max ? dDate : max;
+    }, new Date(0));
+
+    const finalConfigJson = JSON.stringify(existingDevices);
+
+    // 4. Update or Insert Database Record
     let subData, subErr;
-
     if (lastSub) {
-      // We ALWAYS update because user_id is UNIQUE in subscriptions table
-      let finalConfig = vpnConfig || '';
-      
-      // If adding a new device, we append the new config to the existing ones
-      if (forceNew && lastSub.v2ray_config && vpnConfig !== lastSub.v2ray_config) {
-        finalConfig = `${lastSub.v2ray_config}\n---KEY_SEP---\n${vpnConfig}`;
-      } else if (!forceNew) {
-        // Keep current config string during extension
-        finalConfig = lastSub.v2ray_config;
-      }
-
       const { data: updatedSub, error: updateErr } = await supabase
         .from('subscriptions')
         .update({
           status: 'active',
-          expires_at: expiresAt.toISOString(),
+          expires_at: maxExpiryDate.toISOString(),
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
-          server_type: serverType || 'LTE',
-          device_limit: forceNew ? (lastSub.device_limit || 1) + 1 : Math.max(lastSub.device_limit || 1, deviceLimit || 1),
-          traffic_limit_mb: trafficLimitMb,
-          v2ray_config: finalConfig
+          server_type: serverType || lastSub.server_type,
+          device_limit: existingDevices.length,
+          v2ray_config: finalConfigJson
         })
         .eq('id', lastSub.id)
         .select()
         .single();
-      subData = updatedSub;
-      subErr = updateErr;
+      subData = updatedSub; subErr = updateErr;
     } else {
-      // Create FIRST primary subscription (only if no record exists at all)
       const { data: newSub, error: insertErr } = await supabase
         .from('subscriptions')
         .insert({
           user_id: userId,
           plan_type: planName.toLowerCase(),
           status: 'active',
-          expires_at: expiresAt.toISOString(),
-          v2ray_config: vpnConfig,
-          server_type: serverType || 'LTE',
+          expires_at: maxExpiryDate.toISOString(),
+          v2ray_config: finalConfigJson,
+          server_type: serverType,
           period_months: periodMonths || 1,
-          device_limit: deviceLimit || 1,
+          device_limit: existingDevices.length,
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0
         })
         .select()
         .single();
-      subData = newSub;
-      subErr = insertErr;
+      subData = newSub; subErr = insertErr;
     }
+
     if (subErr) {
       console.error('❌ Supabase sub operation error:', JSON.stringify(subErr, null, 2));
       throw subErr;
     }
 
-    // 5. FINAL STEP: Deduct balance
+    // 5. Deduct balance
     const { error: deductErr } = await supabase
       .from('balances')
       .update({ amount: balanceData.amount - price })
       .eq('user_id', userId);
 
-    if (deductErr) {
-      console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
-    }
+    if (deductErr) console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
 
-    res.json({ success: true, subscription: subData });
+    res.json({ success: true, subscription: subData, updatedDevice: targetDevice });
 
   } catch (error: any) {
     console.error('❌ Subscription purchase error details:', error);
@@ -791,7 +823,7 @@ async function syncUserTraffic(userId: string) {
   // 1. Get current active subscription
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, traffic_limit_mb, v2ray_config')
+    .select('*')
     .eq('user_id', userId)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
@@ -800,46 +832,36 @@ async function syncUserTraffic(userId: string) {
 
   if (!sub) return null;
 
-  // 2. Identify all emails to check by parsing v2ray_config
-  // Configurations are separated by \n---KEY_SEP---\n
-  const configs = (sub.v2ray_config || '').split('\n---KEY_SEP---\n');
-  const emailsToCheck: string[] = [];
-
-  configs.forEach(config => {
-    // Extract email from link: #izinet_user_email
-    const emailMatch = config.match(/#izinet_([^&?#\s]+)/);
-    if (emailMatch) {
-      emailsToCheck.push(emailMatch[1]);
-    }
-  });
-
-  // Fallback to primary email if no tags found (should not happen with new logic)
-  if (emailsToCheck.length === 0) {
-    emailsToCheck.push(`user_${userId.slice(0, 8)}`);
-  }
+  // 2. Identify all devices by parsing VpnDevice JSON
+  const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
 
   let totalUsedBytes = 0;
   let maxLimitBytes = 0;
 
   // 3. Fetch stats for all devices
-  for (const email of emailsToCheck) {
-    const stats = await xui.getClientTraffic(email);
-    if (stats) {
-      totalUsedBytes += stats.used;
-      maxLimitBytes = Math.max(maxLimitBytes, stats.limit);
+  for (const device of devices) {
+    try {
+      const stats = await xui.getClientTraffic(device.email);
+      if (stats) {
+        device.trafficUsedBytes = stats.used;
+        totalUsedBytes += stats.used;
+        maxLimitBytes = Math.max(maxLimitBytes, stats.limit);
+      }
+    } catch (e) {
+      console.warn(`Could not sync traffic for individual device ${device.email}`, e);
     }
   }
 
   const trafficUsedMb = Math.round(totalUsedBytes / (1024 * 1024));
-  // Limit is usually the same per device, but we'll take the max or use the one from DB
   const trafficLimitMb = maxLimitBytes > 0 ? Math.round(maxLimitBytes / (1024 * 1024)) : sub.traffic_limit_mb || 102400;
 
-  // 4. Update the subscription in DB
+  // 4. Update the subscription in DB, saving back the updated devices JSON
   const { data, error } = await supabase
     .from('subscriptions')
     .update({ 
       traffic_used_mb: trafficUsedMb,
-      traffic_limit_mb: trafficLimitMb 
+      traffic_limit_mb: trafficLimitMb,
+      v2ray_config: JSON.stringify(devices)
     })
     .eq('id', sub.id)
     .select()

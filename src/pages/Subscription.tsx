@@ -24,19 +24,21 @@ import {
   DialogTrigger 
 } from '@/components/ui/dialog';
 import { SubscriptionWizard } from '@/components/subscription/SubscriptionWizard';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
 export default function Subscription() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [vpnKeys, setVpnKeys] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [wizardMode, setWizardMode] = useState<'extend' | 'new'>('extend');
+  const [targetDevice, setTargetDevice] = useState<string | undefined>(undefined);
 
   const fetchSubscriptionData = async () => {
     if (!user) return;
@@ -61,16 +63,27 @@ export default function Subscription() {
       setSubscriptions(mainSubData ? [mainSubData] : []);
 
       if (mainSubData && mainSubData.v2ray_config) {
-        // Parse multiple configs from single field
-        const configs = mainSubData.v2ray_config.split('\n---KEY_SEP---\n');
-        // If we have more than 1 config, the rest are "extra" keys
-        if (configs.length > 1) {
-           const extraKeys = configs.slice(1).map((cfg: string, index: number) => ({
-             id: `extra-${index}`,
-             v2ray_config: cfg,
-             label: `Доп. устройство ${index + 1}`
-           }));
-           setVpnKeys(extraKeys);
+        // Parse devices from v2ray_config either JSON or legacy
+        let parsedDevices: any[] = [];
+        if (mainSubData.v2ray_config.trim().startsWith('[')) {
+          try {
+            parsedDevices = JSON.parse(mainSubData.v2ray_config);
+          } catch (e) {
+            console.warn('Failed to parse JSON config');
+          }
+        } else {
+          const configs = mainSubData.v2ray_config.split('\n---KEY_SEP---\n').filter(Boolean);
+          parsedDevices = configs.map((cfg: string, i: number) => ({
+             id: i === 0 ? 'primary' : `device_${i}`,
+             label: i === 0 ? 'Основное устройство' : `Доп. устройство ${i}`,
+             config: cfg,
+             trafficUsedBytes: 0
+          }));
+        }
+        
+        // Remove primary from "Keys" list to not duplicate, or keep all? Let's keep all except primary
+        if (parsedDevices.length > 1) {
+           setVpnKeys(parsedDevices.slice(1));
         } else {
            setVpnKeys([]);
         }
@@ -87,8 +100,24 @@ export default function Subscription() {
     fetchSubscriptionData();
   }, [user]);
 
+  useEffect(() => {
+    // Check URL params for auto-open wizard
+    const action = searchParams.get('action');
+    const target = searchParams.get('targetDeviceId');
+    
+    if (action === 'new-device') {
+      openWizard('new');
+      setSearchParams({}); // Clear params after open
+    } else if (target) {
+      setTargetDevice(target);
+      openWizard('extend');
+      setSearchParams({}); // Clear params after open
+    }
+  }, [searchParams, setSearchParams]);
+
   const openWizard = (mode: 'extend' | 'new') => {
     setWizardMode(mode);
+    if (mode === 'new') setTargetDevice(undefined);
     setIsWizardOpen(true);
   };
 
@@ -147,10 +176,14 @@ export default function Subscription() {
                 {wizardMode === 'new' ? 'Добавление устройства' : 'Оформление подписки'}
               </DialogTitle>
             </DialogHeader>
-            <SubscriptionWizard onClose={() => {
-              setIsWizardOpen(false);
-              fetchSubscriptionData();
-            }} forceNew={wizardMode === 'new'} />
+            <SubscriptionWizard 
+              onClose={() => {
+                setIsWizardOpen(false);
+                fetchSubscriptionData();
+              }} 
+              forceNew={wizardMode === 'new'}
+              targetDeviceId={targetDevice}
+            />
           </DialogContent>
         </Dialog>
       </div>
