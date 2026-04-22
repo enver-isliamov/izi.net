@@ -531,8 +531,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', config: configStatus });
 });
 
+// --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit } = req.body;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew } = req.body;
 
   if (!userId || !planId || !price) {
     return res.status(400).json({ error: 'Missing required parameters' });
@@ -554,8 +555,8 @@ app.post('/api/subscription/buy', async (req, res) => {
       return res.status(400).json({ error: 'Insufficient balance' });
     }
 
-    // 2. Check for ANY previous subscription to REUSE the same VPN key/config
-    const { data: lastSub, error: lastSubErr } = await supabase
+    // 2. Determine if we extend OR create new
+    const { data: lastSub } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('user_id', userId)
@@ -563,37 +564,46 @@ app.post('/api/subscription/buy', async (req, res) => {
       .limit(1)
       .maybeSingle();
 
-    let vpnConfig = lastSub?.v2ray_config;
+    let vpnConfig = null;
     let expiresAt = new Date();
 
-    // Handling Stacking: If current sub is still active, start from its end date
-    if (lastSub && new Date(lastSub.expires_at) > new Date()) {
+    // Handling Stacking/Extension (only if not forcing a new device)
+    if (!forceNew && lastSub && new Date(lastSub.expires_at) > new Date()) {
       expiresAt = new Date(lastSub.expires_at);
+      vpnConfig = lastSub.v2ray_config;
+    } else if (!forceNew && lastSub) {
+      // If extension but sub is expired, we use existing config to avoid panel clutter
+      vpnConfig = lastSub.v2ray_config;
     }
+    
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
     // 3. Sync with 3x-ui
-    const vpnEmail = `user_${userId.slice(0, 8)}`;
+    // We use a short random suffix to strictly avoid "Duplicate Email" errors
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    let vpnEmail = `user_${userId.slice(0, 8)}`;
+    
+    // If it's a force new device or we don't have a config yet, we need a unique email
+    if (forceNew || !vpnConfig) {
+      vpnEmail = `${vpnEmail}_${randomSuffix}`;
+    }
+
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const expiryTimestamp = expiresAt.getTime(); // ms
-
-    // Traffic Limit: 100GB
     const trafficLimitMb = 100 * 1024;
     const limitBytes = trafficLimitMb * 1024 * 1024;
 
     if (!vpnConfig) {
       const uuid = crypto.randomUUID();
       try {
-        console.log(`🆕 Creating first-time VPN client for user ${userId} with 100GB limit...`);
+        console.log(`🆕 Creating VPN client ${vpnEmail}...`);
         vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
       } catch (apiError: any) {
-        console.error('❌ 3x-ui error during first-time setup:', apiError.message);
+        console.error('❌ 3x-ui error:', apiError.message);
         throw apiError;
       }
     } else {
-      // User already has a config, let's update their expiration and limit in the panel
-      console.log(`♻️ Syncing expiration and limit to 3x-ui for user ${userId}`);
-      // Extract UUID from existing config: vless://UUID@
+      console.log(`♻️ Syncing expiration for ${vpnEmail}`);
       const uuidMatch = vpnConfig.match(/vless:\/\/([^@]+)@/);
       if (uuidMatch) {
         const existingUuid = uuidMatch[1];
@@ -601,30 +611,42 @@ app.post('/api/subscription/buy', async (req, res) => {
       }
     }
 
-    // 4. Update or Insert subscription record
-    // We update the most recent active sub or create a new one if it's a fresh start
+    // 4. Update or Insert record
     let subData, subErr;
 
-    if (lastSub && lastSub.status === 'active') {
-      // Update existing active subscription (Extension)
+    if (lastSub) {
+      // We ALWAYS update because user_id is UNIQUE in subscriptions table
+      let finalConfig = vpnConfig;
+      
+      // If adding a new device OR extending, we check if we need to append
+      if (forceNew && lastSub.v2ray_config) {
+        // Append new device config to the list
+        finalConfig = `${lastSub.v2ray_config}\n---KEY_SEP---\n${vpnConfig}`;
+      } else if (!forceNew) {
+        // It's a renewal/extension, keep existing configs but might update the first one if needed
+        // Usually we just keep the whole string as is, just update expiry
+        finalConfig = lastSub.v2ray_config;
+      }
+
       const { data: updatedSub, error: updateErr } = await supabase
         .from('subscriptions')
         .update({
+          status: 'active',
           expires_at: expiresAt.toISOString(),
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || 'LTE',
-          device_limit: deviceLimit || 1,
-          traffic_limit_mb: trafficLimitMb
+          device_limit: forceNew ? (lastSub.device_limit || 1) + 1 : (deviceLimit || 1),
+          traffic_limit_mb: trafficLimitMb,
+          v2ray_config: finalConfig
         })
         .eq('id', lastSub.id)
         .select()
         .single();
-      
       subData = updatedSub;
       subErr = updateErr;
     } else {
-      // Create new subscription record (either first time or after total expiry)
+      // Create FIRST primary subscription (only if no record exists at all)
       const { data: newSub, error: insertErr } = await supabase
         .from('subscriptions')
         .insert({
@@ -636,11 +658,11 @@ app.post('/api/subscription/buy', async (req, res) => {
           server_type: serverType || 'LTE',
           period_months: periodMonths || 1,
           device_limit: deviceLimit || 1,
-          traffic_limit_mb: trafficLimitMb
+          traffic_limit_mb: trafficLimitMb,
+          traffic_used_mb: 0
         })
         .select()
         .single();
-      
       subData = newSub;
       subErr = insertErr;
     }
@@ -733,34 +755,68 @@ function setupRealtimeListener() {
  * @returns The subscription data with updated traffic
  */
 async function syncUserTraffic(userId: string) {
-  const vpnEmail = `user_${userId.slice(0, 8)}`;
-  const stats = await xui.getClientTraffic(vpnEmail);
-  
-  if (stats) {
-    const trafficUsedMb = Math.round(stats.used / (1024 * 1024));
-    const trafficLimitMb = stats.limit > 0 ? Math.round(stats.limit / (1024 * 1024)) : 102400; // Default 100GB if not set
-    
-    // Update active subscription
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .update({ 
-        traffic_used_mb: trafficUsedMb,
-        traffic_limit_mb: trafficLimitMb 
-      })
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .select()
-      .maybeSingle();
+  // 1. Get current active subscription
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('id, traffic_limit_mb, v2ray_config')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-    if (error) {
-      console.error(`❌ Error updating traffic for user ${userId}:`, error.message);
-      return null;
+  if (!sub) return null;
+
+  // 2. Identify all emails to check by parsing v2ray_config
+  // Configurations are separated by \n---KEY_SEP---\n
+  const configs = (sub.v2ray_config || '').split('\n---KEY_SEP---\n');
+  const emailsToCheck: string[] = [];
+
+  configs.forEach(config => {
+    // Extract email from link: #izinet_user_email
+    const emailMatch = config.match(/#izinet_([^&?#\s]+)/);
+    if (emailMatch) {
+      emailsToCheck.push(emailMatch[1]);
     }
-    return data;
+  });
+
+  // Fallback to primary email if no tags found (should not happen with new logic)
+  if (emailsToCheck.length === 0) {
+    emailsToCheck.push(`user_${userId.slice(0, 8)}`);
   }
-  return null;
+
+  let totalUsedBytes = 0;
+  let maxLimitBytes = 0;
+
+  // 3. Fetch stats for all devices
+  for (const email of emailsToCheck) {
+    const stats = await xui.getClientTraffic(email);
+    if (stats) {
+      totalUsedBytes += stats.used;
+      maxLimitBytes = Math.max(maxLimitBytes, stats.limit);
+    }
+  }
+
+  const trafficUsedMb = Math.round(totalUsedBytes / (1024 * 1024));
+  // Limit is usually the same per device, but we'll take the max or use the one from DB
+  const trafficLimitMb = maxLimitBytes > 0 ? Math.round(maxLimitBytes / (1024 * 1024)) : sub.traffic_limit_mb || 102400;
+
+  // 4. Update the subscription in DB
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .update({ 
+      traffic_used_mb: trafficUsedMb,
+      traffic_limit_mb: trafficLimitMb 
+    })
+    .eq('id', sub.id)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error(`❌ Error updating aggregate traffic for user ${userId}:`, error.message);
+    return null;
+  }
+  return data;
 }
 
 async function syncTrafficStats() {

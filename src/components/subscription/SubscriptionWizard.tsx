@@ -40,7 +40,7 @@ const serverTypes = [
   { id: 'wifi', label: 'Wi-Fi', description: 'Стандартный доступ', price: 0 },
 ];
 
-export function SubscriptionWizard({ onClose }: { onClose: () => void }) {
+export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () => void, forceNew?: boolean }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedPeriod, setSelectedPeriod] = useState(periods[0]);
@@ -58,11 +58,27 @@ export function SubscriptionWizard({ onClose }: { onClose: () => void }) {
     fetchBalance();
   }, [user]);
 
-  const totalPrice = selectedPeriod.price + selectedServer.price + (deviceCount > 1 ? (deviceCount - 1) * 25 : 0);
+  // Price calculation: (Base Period Price + Server Price) * Device Count
+  // No more fixed 25 RUB additions. Each device costs the full subscription price.
+  const totalPrice = (selectedPeriod.price + selectedServer.price) * deviceCount;
   const hasEnoughFunds = balance !== null && balance >= totalPrice;
 
-  const nextStep = () => setStep(s => Math.min(s + 1, 4));
-  const prevStep = () => setStep(s => Math.max(s - 1, 1));
+  const nextStep = () => {
+    // Skip device selection step if we are in forceNew (Adding additional device) mode
+    if (forceNew && step === 2) {
+      setStep(4);
+    } else {
+      setStep(s => Math.min(s + 1, 4));
+    }
+  };
+  const prevStep = () => {
+    // If we skipped step 3, go back from 4 straight to 2
+    if (forceNew && step === 4) {
+      setStep(2);
+    } else {
+      setStep(s => Math.max(s - 1, 1));
+    }
+  };
 
   const handlePayment = async () => {
     if (!user || !hasEnoughFunds || isProcessing) return;
@@ -85,7 +101,8 @@ export function SubscriptionWizard({ onClose }: { onClose: () => void }) {
           durationDays: selectedPeriod.days,
           periodMonths: Math.round(selectedPeriod.days / 30),
           serverType: selectedServer.label,
-          deviceLimit: deviceCount
+          deviceLimit: deviceCount,
+          forceNew: forceNew
         }),
       });
 
@@ -112,7 +129,7 @@ export function SubscriptionWizard({ onClose }: { onClose: () => void }) {
       {/* Progress */}
       <div className="space-y-4">
         <div className="flex justify-between text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <span>Шаг {step} из 4</span>
+          <span>Шаг {step === 3 && forceNew ? '???' : step} из 4</span>
           <span>{steps[step - 1].title}</span>
         </div>
         <Progress value={(step / 4) * 100} className="h-1.5 bg-muted" />
@@ -249,8 +266,8 @@ export function SubscriptionWizard({ onClose }: { onClose: () => void }) {
                 </div>
                 {deviceCount > 1 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Доп. устройства ({deviceCount - 1})</span>
-                    <span>{(deviceCount - 1) * 25} ₽</span>
+                    <span className="text-muted-foreground font-medium">Устройства ({deviceCount})</span>
+                    <span className="text-primary font-bold">x{deviceCount}</span>
                   </div>
                 )}
                 <div className="pt-3 border-t border-border flex justify-between font-bold text-lg">
