@@ -118,7 +118,14 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
         }),
       });
 
-      const result = await response.json();
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Non-JSON API response:', responseText);
+        throw new Error(`Неизвестная ошибка сервера (Код: ${response.status}). Пожалуйста, обратитесь в поддержку.`);
+      }
 
       if (!response.ok) {
         throw new Error(result.error || 'Ошибка при покупке');
@@ -155,7 +162,14 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
               exit={{ opacity: 0, x: -20 }}
               className="space-y-4"
             >
-              <h3 className="text-lg font-bold">Выберите период подписки</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Выберите период подписки</h3>
+                {targetDeviceId && deviceName && (
+                  <Badge variant="outline" className="border-primary/50 text-primary text-xs">
+                    Продление: {deviceName}
+                  </Badge>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 {periods.map((p) => (
                   <Card 
@@ -190,7 +204,14 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
               exit={{ opacity: 0, x: -20 }}
               className="space-y-4"
             >
-              <h3 className="text-lg font-bold">Тип сервера</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Тип сервера</h3>
+                {targetDeviceId && deviceName && (
+                  <Badge variant="outline" className="border-primary/50 text-primary text-xs">
+                    Продление: {deviceName}
+                  </Badge>
+                )}
+              </div>
               <div className="space-y-3">
                 {serverTypes.map((s) => (
                   <Card 
