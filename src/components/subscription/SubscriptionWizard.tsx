@@ -29,15 +29,15 @@ const steps = [
 ];
 
 const periods = [
-  { id: '1m', label: '1 месяц', price: 149, originalPrice: 149, days: 30 },
-  { id: '2m', label: '2 месяца', price: 289, originalPrice: 298, discount: '3%', days: 60 },
-  { id: '6m', label: '6 месяцев', price: 799, originalPrice: 894, discount: '10%', days: 180 },
-  { id: '12m', label: '12 месяцев', price: 1490, originalPrice: 1788, discount: '17%', days: 365 },
+  { id: '1m', label: '1 месяц', price: 100, originalPrice: 100, days: 30 },
+  { id: '2m', label: '2 месяца', price: 190, originalPrice: 200, discount: '5%', days: 60 },
+  { id: '6m', label: '6 месяцев', price: 500, originalPrice: 600, discount: '17%', days: 180 },
+  { id: '12m', label: '12 месяцев', price: 900, originalPrice: 1200, discount: '25%', days: 365 },
 ];
 
 const serverTypes = [
-  { id: 'lte', label: 'LTE', description: 'Высокая скорость', price: 100 },
-  { id: 'wifi', label: 'Wi-Fi', description: 'Стандартный доступ', price: 0 },
+  { id: 'wifi', label: 'Wi-Fi', description: 'Стандартный доступ (100 ₽/мес)', price: 0 },
+  { id: 'lte', label: 'LTE', description: 'Премиум скорость (150 ₽/мес)', price: 50 },
 ];
 
 export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () => void, forceNew?: boolean }) {
@@ -88,19 +88,24 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || '';
+      const displayPlanName = selectedServer.id === 'lte' ? 'LTE' : 'Wi-Fi';
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      
       const response = await fetch(`${apiUrl}/api/subscription/buy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({
           userId: user.id,
           planId: selectedPeriod.id,
-          planName: `${selectedPeriod.label} (${selectedServer.label})`,
+          planName: displayPlanName,
           price: totalPrice,
           durationDays: selectedPeriod.days,
           periodMonths: Math.round(selectedPeriod.days / 30),
-          serverType: selectedServer.label,
+          serverType: selectedServer.id.toUpperCase(),
           deviceLimit: deviceCount,
           forceNew: forceNew
         }),
@@ -114,8 +119,6 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
 
       toast.success('Подписка успешно активирована!', { id: toastId });
       onClose();
-      // Use a smoother way to refresh data if possible, but reload works for now
-      window.location.reload(); 
     } catch (error: any) {
       console.error('Payment error:', error);
       toast.error(error.message || 'Ошибка при оплате. Попробуйте позже.', { id: toastId });
@@ -239,9 +242,9 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
                   +
                 </Button>
               </div>
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">1 устройство включено в тариф</p>
-                <p className="text-xs text-primary font-medium">+25.00 ₽ за каждое доп. устройство</p>
+              <div className="space-y-2 text-muted-foreground text-sm">
+                <p>Вы заказываете {deviceCount} {deviceCount === 1 ? 'ключ' : deviceCount < 5 ? 'ключа' : 'ключей'}</p>
+                <p className="text-xs italic">Каждое устройство получит индивидуальный доступ</p>
               </div>
             </motion.div>
           )}
@@ -256,23 +259,25 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
             >
               <h3 className="text-lg font-bold">Подтверждение заказа</h3>
               <div className="space-y-3 p-4 rounded-2xl bg-muted/30 border border-border">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Тариф ({selectedPeriod.label})</span>
-                  <span>{selectedPeriod.price} ₽</span>
+                <div className="flex justify-between text-sm py-1">
+                  <span className="text-muted-foreground italic">Выбранный тариф</span>
+                  <span className="font-bold text-primary uppercase">{selectedServer.id === 'lte' ? 'LTE' : 'Wi-Fi'}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Серверы ({selectedServer.label})</span>
-                  <span>{selectedServer.price} ₽</span>
+                <div className="flex justify-between text-sm py-1 border-t border-border/50">
+                  <span className="text-muted-foreground italic">Срок подписки</span>
+                  <span>{selectedPeriod.label}</span>
                 </div>
                 {deviceCount > 1 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground font-medium">Устройства ({deviceCount})</span>
-                    <span className="text-primary font-bold">x{deviceCount}</span>
+                  <div className="flex justify-between text-sm py-1 border-t border-border/50">
+                    <span className="text-muted-foreground italic">Количество устройств</span>
+                    <span>x{deviceCount}</span>
                   </div>
                 )}
-                <div className="pt-3 border-t border-border flex justify-between font-bold text-lg">
-                  <span>Итого к оплате</span>
-                  <span className="text-primary neon-text">{totalPrice} ₽</span>
+                <div className="pt-3 border-t border-primary/20 flex justify-between items-center">
+                  <span className="font-bold">Итого к оплате</span>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-primary neon-text">{totalPrice} ₽</span>
+                  </div>
                 </div>
               </div>
 

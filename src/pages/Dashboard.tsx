@@ -9,7 +9,8 @@ import {
   Globe,
   Smartphone,
   LifeBuoy,
-  Loader2
+  Loader2,
+  Plus
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,11 +36,18 @@ export default function Dashboard() {
     
     try {
       // Trigger traffic sync on load to get real-time data
-      fetch('/api/subscription/sync-traffic', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id })
-      }).catch(err => console.warn('Traffic sync failed:', err));
+      // Using a small delay to not compete with initial layout
+      setTimeout(async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        fetch('/api/subscription/sync-traffic', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`
+          },
+          body: JSON.stringify({ userId: user.id })
+        }).catch(err => console.debug('Traffic sync silent error:', err));
+      }, 500);
 
       const [
         { data: userRes },
@@ -95,7 +103,7 @@ export default function Dashboard() {
 
   const currentBalance = balance?.amount || 0;
   const currency = balance?.currency || 'RUB';
-  const planName = subscription?.plan_type || 'Нет активной подписки';
+  const planName = subscription ? (subscription.server_type === 'LTE' ? 'LTE' : 'Wi-Fi') : 'Нет активной подписки';
   
   // Convert MB to GB for display
   const trafficUsedGB = (subscription?.traffic_used_mb || 0) / 1024;
@@ -104,6 +112,11 @@ export default function Dashboard() {
   
   const refCount = referrals.length;
   const refEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
+
+  // Parse multiple configs from single field
+  const vpnConfigs = (subscription?.v2ray_config || '').split('\n---KEY_SEP---\n').filter(Boolean);
+  const activeDeviceCount = vpnConfigs.length;
+  const deviceLimit = subscription?.device_limit || 1;
 
   let daysLeft = 0;
   if (subscription?.expires_at) {
@@ -226,43 +239,57 @@ export default function Dashboard() {
 
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-muted/30 border border-border">
-                <div className="text-sm text-muted-foreground">Подключить устройство</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <code className="flex-1 bg-black/50 p-2 rounded-lg text-xs truncate border border-border">
-                    {subscription?.v2ray_config || 'Нет конфигурации'}
-                  </code>
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    className="rounded-lg border-primary/50 text-primary hover:bg-primary/10"
-                    onClick={() => {
-                      if (subscription?.v2ray_config) {
-                        navigator.clipboard.writeText(subscription.v2ray_config);
-                        toast.success('Скопировано в буфер обмена');
-                      } else {
-                        toast.error('Нет активной подписки или конфигурации');
-                      }
-                    }}
-                  >
-                    Копировать
-                  </Button>
+                <div className="text-sm text-muted-foreground mb-3">Подключенные устройства</div>
+                <div className="space-y-2">
+                  {vpnConfigs.length > 0 ? vpnConfigs.map((config, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <code className="flex-1 bg-black/50 p-2 rounded-lg text-[10px] truncate border border-border">
+                        {config}
+                      </code>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="rounded-lg border-primary/50 text-primary hover:bg-primary/10 h-8 px-2 text-[10px]"
+                        onClick={() => {
+                          navigator.clipboard.writeText(config);
+                          toast.success(`Устройство ${i + 1}: Ключ скопирован`);
+                        }}
+                      >
+                        Копировать
+                      </Button>
+                    </div>
+                  )) : (
+                    <div className="text-xs text-muted-foreground italic p-2 border border-dashed border-border rounded-lg text-center">
+                      Нет активных устройств
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
-                  <div className="text-[10px] text-muted-foreground uppercase">Устройства</div>
-                  <div className="text-lg font-bold">
-                    {subscription?.devices_connected || 0} / {subscription?.device_limit || 2}
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Ключи / Лимит</div>
+                  <div className="text-lg font-black text-primary">
+                    {activeDeviceCount} / {deviceLimit}
                   </div>
                 </div>
                 <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
-                  <div className="text-[10px] text-muted-foreground uppercase">Локация</div>
-                  <div className="text-lg font-bold flex items-center justify-center gap-1">
-                    <Globe className="w-4 h-4 text-primary" /> RU
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Локация</div>
+                  <div className="text-lg font-black flex items-center justify-center gap-1 leading-none">
+                    <Globe className="w-4 h-4 text-primary" /> {subscription?.server_type === 'LTE' ? 'LTE' : 'Wi-Fi'}
                   </div>
                 </div>
               </div>
+              
+              {activeDeviceCount < deviceLimit && (
+                 <Button 
+                   onClick={() => navigate('/subscription')} 
+                   variant="outline" 
+                   className="w-full rounded-xl border-dashed border-primary/40 hover:bg-primary/5 text-xs h-10"
+                 >
+                   <Plus className="w-3 h-3 mr-2" /> Добавить новое устройство
+                 </Button>
+              )}
             </div>
           </div>
 

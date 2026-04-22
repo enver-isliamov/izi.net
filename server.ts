@@ -372,9 +372,19 @@ const xui = new XUIService();
 // 💰 Create Payment Link
 app.post('/api/pay/create', async (req, res) => {
   const { userId, amount, method } = req.body;
+  const authHeader = req.headers.authorization;
   
   if (!userId || !amount || !method) {
     return res.status(400).json({ error: 'Missing parameters' });
+  }
+
+  // Security check: Verify token
+  if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user || user.id !== userId) {
+      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
+    }
   }
 
   const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -414,9 +424,19 @@ app.post('/api/pay/create', async (req, res) => {
 // 📊 Sync user traffic manually
 app.post('/api/subscription/sync-traffic', async (req, res) => {
   const { userId } = req.body;
+  const authHeader = req.headers.authorization;
   
   if (!userId) {
     return res.status(400).json({ error: 'Missing userId' });
+  }
+
+  // Security check: Verify token
+  if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user || user.id !== userId) {
+      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
+    }
   }
 
   try {
@@ -527,16 +547,22 @@ app.get('/api/health', (req, res) => {
     bot: !!process.env.TELEGRAM_BOT_TOKEN,
     xui: !!process.env.XUI_HOST && !!process.env.XUI_USERNAME && !!process.env.XUI_PASSWORD,
     inboundId: process.env.XUI_INBOUND_ID || '1'
-  };
-  res.json({ status: 'ok', config: configStatus });
-});
-
-// --- Subscription Routes ---
+  };// --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
   const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew } = req.body;
+  const authHeader = req.headers.authorization;
 
   if (!userId || !planId || !price) {
     return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  // 0. Security check: Verify token
+  if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user || user.id !== userId) {
+      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
+    }
   }
 
   try {
@@ -579,21 +605,27 @@ app.post('/api/subscription/buy', async (req, res) => {
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
     // 3. Sync with 3x-ui
-    // We use a short random suffix to strictly avoid "Duplicate Email" errors
-    const randomSuffix = Math.random().toString(36).substring(2, 6);
-    let vpnEmail = `user_${userId.slice(0, 8)}`;
-    
-    // If it's a force new device or we don't have a config yet, we need a unique email
-    if (forceNew || !vpnConfig) {
-      vpnEmail = `${vpnEmail}_${randomSuffix}`;
-    }
-
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const expiryTimestamp = expiresAt.getTime(); // ms
     const trafficLimitMb = 100 * 1024;
     const limitBytes = trafficLimitMb * 1024 * 1024;
 
-    if (!vpnConfig) {
+    // IMPORTANT: If we are extending (!forceNew) and we have multiple configs, 
+    // we MUST update ALL of them in the panel.
+    if (!forceNew && vpnConfig && vpnConfig.includes('\n---KEY_SEP---\n')) {
+      console.log(`♻️ Batch syncing expiration for all devices of user ${userId}`);
+      const configs = vpnConfig.split('\n---KEY_SEP---\n');
+      for (const cfg of configs) {
+         const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
+         const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
+         if (uuidMatch && emailMatch) {
+            await xui.updateClient(emailMatch[1], uuidMatch[1], inboundId, expiryTimestamp, limitBytes);
+         }
+      }
+    } else if (!vpnConfig || forceNew) {
+      // CREATE NEW CLIENT
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const vpnEmail = `user_${userId.slice(0, 8)}_${randomSuffix}`;
       const uuid = crypto.randomUUID();
       try {
         console.log(`🆕 Creating VPN client ${vpnEmail}...`);
@@ -603,11 +635,14 @@ app.post('/api/subscription/buy', async (req, res) => {
         throw apiError;
       }
     } else {
-      console.log(`♻️ Syncing expiration for ${vpnEmail}`);
+      // UPDATE SINGLE EXISTING CLIENT
+      const vpnEmail = `user_${userId.slice(0, 8)}`;
       const uuidMatch = vpnConfig.match(/vless:\/\/([^@]+)@/);
+      const emailMatch = vpnConfig.match(/#izinet_([^&?#\s]+)/);
+      const targetEmail = emailMatch ? emailMatch[1] : vpnEmail;
+      
       if (uuidMatch) {
-        const existingUuid = uuidMatch[1];
-        await xui.updateClient(vpnEmail, existingUuid, inboundId, expiryTimestamp, limitBytes);
+         await xui.updateClient(targetEmail, uuidMatch[1], inboundId, expiryTimestamp, limitBytes);
       }
     }
 
@@ -616,15 +651,13 @@ app.post('/api/subscription/buy', async (req, res) => {
 
     if (lastSub) {
       // We ALWAYS update because user_id is UNIQUE in subscriptions table
-      let finalConfig = vpnConfig;
+      let finalConfig = vpnConfig || '';
       
-      // If adding a new device OR extending, we check if we need to append
-      if (forceNew && lastSub.v2ray_config) {
-        // Append new device config to the list
+      // If adding a new device, we append the new config to the existing ones
+      if (forceNew && lastSub.v2ray_config && vpnConfig !== lastSub.v2ray_config) {
         finalConfig = `${lastSub.v2ray_config}\n---KEY_SEP---\n${vpnConfig}`;
       } else if (!forceNew) {
-        // It's a renewal/extension, keep existing configs but might update the first one if needed
-        // Usually we just keep the whole string as is, just update expiry
+        // Keep current config string during extension
         finalConfig = lastSub.v2ray_config;
       }
 
@@ -636,7 +669,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || 'LTE',
-          device_limit: forceNew ? (lastSub.device_limit || 1) + 1 : (deviceLimit || 1),
+          device_limit: forceNew ? (lastSub.device_limit || 1) + 1 : Math.max(lastSub.device_limit || 1, deviceLimit || 1),
           traffic_limit_mb: trafficLimitMb,
           v2ray_config: finalConfig
         })
