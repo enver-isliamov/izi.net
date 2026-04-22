@@ -34,6 +34,13 @@ export default function Dashboard() {
     setIsLoading(true);
     
     try {
+      // Trigger traffic sync on load to get real-time data
+      fetch('/api/subscription/sync-traffic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id })
+      }).catch(err => console.warn('Traffic sync failed:', err));
+
       const [
         { data: userRes },
         balanceResult,

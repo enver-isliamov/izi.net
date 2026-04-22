@@ -103,13 +103,12 @@ class XUIService {
     }
   }
 
-  async addClient(email: string, uuid: string, inboundId: number) {
+  async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0) {
     if (!this.sessionCookie) await this.login();
 
     // First, let's try to get the inbound to see its settings (for link generation later)
     let inbound;
     try {
-      // API requests usually start with /panel/api/
       const getInboundUrl = `${this.host}/panel/api/inbounds/get/${inboundId}`;
       const resp = await axios.get(getInboundUrl, {
         headers: { 'Cookie': this.sessionCookie },
@@ -132,7 +131,7 @@ class XUIService {
             email: email,
             limitIp: 1,
             totalGB: 0,
-            expiryTime: 0,
+            expiryTime: expiryTime,
             enable: true,
             tgId: "",
             subId: ""
@@ -156,7 +155,7 @@ class XUIService {
       );
 
       if (response.data.success) {
-        console.log(`✅ Client ${email} added to 3x-ui`);
+        console.log(`✅ Client ${email} added to 3x-ui with expiry ${expiryTime}`);
         
         // Generate link
         let link = "";
@@ -203,10 +202,89 @@ class XUIService {
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
-        return this.addClient(email, uuid, inboundId);
+        return this.addClient(email, uuid, inboundId, expiryTime);
       }
       console.error('❌ 3x-ui addClient error:', error.message);
       throw error;
+    }
+  }
+
+  async updateClient(email: string, uuid: string, inboundId: number, expiryTime: number) {
+    if (!this.sessionCookie) await this.login();
+
+    const clientData = {
+      id: inboundId,
+      settings: JSON.stringify({
+        clients: [
+          {
+            id: uuid,
+            flow: "xtls-rprx-vision",
+            email: email,
+            limitIp: 1,
+            totalGB: 0,
+            expiryTime: expiryTime,
+            enable: true,
+            tgId: "",
+            subId: ""
+          }
+        ]
+      })
+    };
+
+    try {
+      // 3x-ui uses updateClient/{uuid}
+      const updateClientUrl = `${this.host}/panel/api/inbounds/updateClient/${uuid}`;
+      const response = await axios.post(
+        updateClientUrl,
+        clientData,
+        {
+          headers: { 
+            'Cookie': this.sessionCookie,
+            'Content-Type': 'application/json'
+          },
+          httpsAgent: httpsAgent
+        }
+      );
+
+      if (response.data.success) {
+        console.log(`✅ Client ${email} updated in 3x-ui with expiry ${expiryTime}`);
+        return true;
+      } else {
+        console.warn(`⚠️ Failed to update client in 3x-ui: ${response.data.msg}`);
+        return false;
+      }
+    } catch (error: any) {
+      console.error('❌ 3x-ui updateClient error:', error.message);
+      return false;
+    }
+  }
+
+  async getClientTraffic(email: string) {
+    if (!this.sessionCookie) await this.login();
+
+    try {
+      const response = await axios.get(`${this.host}/panel/api/inbounds/getClientTraffics/${email}`, {
+        headers: { 'Cookie': this.sessionCookie },
+        httpsAgent: httpsAgent
+      });
+
+      if (response.data.success && response.data.obj) {
+        const stats = response.data.obj;
+        // up + down in bytes
+        return {
+          up: stats.up || 0,
+          down: stats.down || 0,
+          total: (stats.up || 0) + (stats.down || 0)
+        };
+      }
+      return null;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        return this.getClientTraffic(email);
+      }
+      console.error(`❌ 3x-ui getClientTraffic error for ${email}:`, error.message);
+      return null;
     }
   }
 
@@ -329,6 +407,23 @@ app.post('/api/pay/create', async (req, res) => {
   } catch (error: any) {
     console.error('Payment creation error:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 📊 Sync user traffic manually
+app.post('/api/subscription/sync-traffic', async (req, res) => {
+  const { userId } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
+  }
+
+  try {
+    const updatedSub = await syncUserTraffic(userId);
+    res.json({ success: true, subscription: updatedSub });
+  } catch (error: any) {
+    console.error('❌ Manual traffic sync error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 });
 
@@ -476,24 +571,29 @@ app.post('/api/subscription/buy', async (req, res) => {
     }
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-    // 3. If NO previous config found (brand new user), create one in 3x-ui
-    if (!vpnConfig) {
-      // Use a STABLE email for the user in 3x-ui
-      const uuid = crypto.randomUUID();
-      const vpnEmail = `user_${userId.slice(0, 8)}`; // Stable email based on Supabase ID
-      const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    // 3. Sync with 3x-ui
+    const vpnEmail = `user_${userId.slice(0, 8)}`;
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const expiryTimestamp = expiresAt.getTime(); // ms
 
+    if (!vpnConfig) {
+      const uuid = crypto.randomUUID();
       try {
         console.log(`🆕 Creating first-time VPN client for user ${userId}...`);
-        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId);
+        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId, expiryTimestamp);
       } catch (apiError: any) {
-        // If 3x-ui says it's a duplicate (maybe leftovers from previous DB installs), 
-        // we could handle it, but for now we follow the "fail-safe" path.
         console.error('❌ 3x-ui error during first-time setup:', apiError.message);
         throw apiError;
       }
     } else {
-      console.log(`♻️ Reusing permanent VPN config for user ${userId}`);
+      // User already has a config, let's update their expiration in the panel
+      console.log(`♻️ Syncing expiration to 3x-ui for user ${userId}`);
+      // Extract UUID from existing config: vless://UUID@
+      const uuidMatch = vpnConfig.match(/vless:\/\/([^@]+)@/);
+      if (uuidMatch) {
+        const existingUuid = uuidMatch[1];
+        await xui.updateClient(vpnEmail, existingUuid, inboundId, expiryTimestamp);
+      }
     }
 
     // 4. Update or Insert subscription record
@@ -574,6 +674,106 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 const bot = botToken ? new Telegraf(botToken) : null;
+
+// --- Realtime DB Listener ---
+// This listens for manual changes in the database (e.g., via Supabase Dashboard)
+// and syncs them to the 3x-ui panel automatically.
+function setupRealtimeListener() {
+  console.log('🔄 Setting up Realtime DB Listener...');
+  
+  supabase
+    .channel('subscription-sync')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'subscriptions'
+      },
+      async (payload) => {
+        const newData = payload.new;
+        const oldData = payload.old;
+
+        // If expiry date or config changed, sync to XUI
+        if (newData.expires_at !== oldData.expires_at || newData.v2ray_config !== oldData.v2ray_config) {
+          console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
+          
+          const userId = newData.user_id;
+          const vpnEmail = `user_${userId.slice(0, 8)}`;
+          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+          const expiryTimestamp = new Date(newData.expires_at).getTime();
+          
+          const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
+          if (uuidMatch) {
+            const uuid = uuidMatch[1];
+            await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp);
+          }
+        }
+      }
+    )
+    .subscribe((status) => {
+      console.log(`📡 Realtime subscription status: ${status}`);
+    });
+}
+
+// --- Traffic Synchronization Task ---
+/**
+ * Syncs traffic for a specific user.
+ * @param userId - The ID of the user to sync
+ * @returns The subscription data with updated traffic
+ */
+async function syncUserTraffic(userId: string) {
+  const vpnEmail = `user_${userId.slice(0, 8)}`;
+  const stats = await xui.getClientTraffic(vpnEmail);
+  
+  if (stats) {
+    const trafficUsedMb = Math.round(stats.total / (1024 * 1024));
+    
+    // Update active subscription
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .update({ traffic_used_mb: trafficUsedMb })
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error(`❌ Error updating traffic for user ${userId}:`, error.message);
+      return null;
+    }
+    return data;
+  }
+  return null;
+}
+
+async function syncTrafficStats() {
+  console.log('📊 Starting global traffic synchronization...');
+  
+  try {
+    // 1. Get all active subscriptions
+    const { data: subs, error } = await supabase
+      .from('subscriptions')
+      .select('user_id')
+      .gt('expires_at', new Date().toISOString()); // Only active ones
+
+    if (error) throw error;
+    if (!subs || subs.length === 0) return;
+
+    // Use a Set to avoid duplicate syncs if a user somehow has multiple active subs
+    const userIds = Array.from(new Set(subs.map(s => s.user_id)));
+
+    for (const userId of userIds) {
+      await syncUserTraffic(userId);
+    }
+    
+    console.log(`✅ Successfully synced traffic for ${userIds.length} users`);
+  } catch (err) {
+    console.error('❌ Global traffic sync error:', err);
+  }
+}
 
 // --- Auth Utilities ---
 
@@ -816,6 +1016,13 @@ if (bot) {
 async function startServer() {
   // Check 3x-ui configuration on startup
   xui.checkConfig();
+  
+  // Setup Realtime DB Listener for manual syncing
+  setupRealtimeListener();
+
+  // Initial traffic sync and schedule every 15 minutes
+  syncTrafficStats();
+  setInterval(syncTrafficStats, 15 * 60 * 1000);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
