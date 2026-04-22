@@ -280,13 +280,13 @@ export default function Dashboard() {
                     const devTrafficGB = (device.trafficUsedBytes || 0) / (1024 * 1024 * 1024);
 
                     return (
-                      <div key={i} className="flex flex-col gap-2 p-3 bg-black/40 rounded-xl border border-border relative overflow-hidden">
+                      <div key={i} className="flex flex-col gap-2 p-3 bg-background/50 rounded-xl border border-border/50 relative overflow-hidden">
                         <div className="flex items-center justify-between">
                           <div className="font-medium text-sm text-primary flex items-center gap-1.5">
                             <Smartphone className="w-4 h-4" /> 
                             {device.label || `Устройство ${i + 1}`}
                           </div>
-                          <Badge variant="outline" className={`text-[9px] h-5 ${devDaysLeft > 0 ? 'border-primary/50 text-primary' : 'border-destructive/50 text-destructive'}`}>
+                          <Badge variant="outline" className={`text-[9px] h-5 px-2 ${devDaysLeft > 0 ? 'border-primary/50 text-primary' : 'border-destructive/50 text-destructive'}`}>
                             {devDaysLeft > 0 ? `${devDaysLeft} дней` : 'Истек'}
                           </Badge>
                         </div>
@@ -294,11 +294,11 @@ export default function Dashboard() {
                           <span>🌐 {device.serverType || 'Wi-Fi'}</span>
                           <span>↓ {(devTrafficGB).toFixed(2)} GB</span>
                         </div>
-                        <div className="flex gap-2 mt-2">
+                        <div className="flex gap-2 mt-2 w-full">
                           <Button 
                             size="sm" 
                             variant="secondary" 
-                            className="w-full text-[10px] h-7 bg-muted hover:bg-muted/80 text-foreground"
+                            className="flex-1 text-[10px] h-8 bg-muted/80 hover:bg-muted text-foreground"
                             onClick={() => {
                               navigator.clipboard.writeText(device.config);
                               toast.success(`Ключ скопирован (${device.label})`);
@@ -308,7 +308,7 @@ export default function Dashboard() {
                           </Button>
                           <Button 
                             size="sm"
-                            className="text-[10px] h-7 px-3 bg-primary text-black hover:bg-primary/90"
+                            className="flex-none text-[10px] h-8 px-4 bg-primary text-black hover:bg-primary/90"
                             onClick={() => navigate(`/subscription?targetDeviceId=${device.id}`)}
                           >
                             Продлить
