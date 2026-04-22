@@ -103,7 +103,7 @@ class XUIService {
     }
   }
 
-  async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0) {
+  async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
 
     // First, let's try to get the inbound to see its settings (for link generation later)
@@ -130,7 +130,7 @@ class XUIService {
             flow: "xtls-rprx-vision",
             email: email,
             limitIp: 1,
-            totalGB: 0,
+            totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
             tgId: "",
@@ -209,7 +209,7 @@ class XUIService {
     }
   }
 
-  async updateClient(email: string, uuid: string, inboundId: number, expiryTime: number) {
+  async updateClient(email: string, uuid: string, inboundId: number, expiryTime: number, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
 
     const clientData = {
@@ -221,7 +221,7 @@ class XUIService {
             flow: "xtls-rprx-vision",
             email: email,
             limitIp: 1,
-            totalGB: 0,
+            totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
             tgId: "",
@@ -270,11 +270,12 @@ class XUIService {
 
       if (response.data.success && response.data.obj) {
         const stats = response.data.obj;
-        // up + down in bytes
+        // up + down in bytes. total field in 3x-ui represents the LIMIT in bytes
         return {
           up: stats.up || 0,
           down: stats.down || 0,
-          total: (stats.up || 0) + (stats.down || 0)
+          used: (stats.up || 0) + (stats.down || 0),
+          limit: stats.total || 0
         };
       }
       return null;
@@ -576,23 +577,27 @@ app.post('/api/subscription/buy', async (req, res) => {
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const expiryTimestamp = expiresAt.getTime(); // ms
 
+    // Traffic Limit: 100GB
+    const trafficLimitMb = 100 * 1024;
+    const limitBytes = trafficLimitMb * 1024 * 1024;
+
     if (!vpnConfig) {
       const uuid = crypto.randomUUID();
       try {
-        console.log(`🆕 Creating first-time VPN client for user ${userId}...`);
-        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId, expiryTimestamp);
+        console.log(`🆕 Creating first-time VPN client for user ${userId} with 100GB limit...`);
+        vpnConfig = await xui.addClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
       } catch (apiError: any) {
         console.error('❌ 3x-ui error during first-time setup:', apiError.message);
         throw apiError;
       }
     } else {
-      // User already has a config, let's update their expiration in the panel
-      console.log(`♻️ Syncing expiration to 3x-ui for user ${userId}`);
+      // User already has a config, let's update their expiration and limit in the panel
+      console.log(`♻️ Syncing expiration and limit to 3x-ui for user ${userId}`);
       // Extract UUID from existing config: vless://UUID@
       const uuidMatch = vpnConfig.match(/vless:\/\/([^@]+)@/);
       if (uuidMatch) {
         const existingUuid = uuidMatch[1];
-        await xui.updateClient(vpnEmail, existingUuid, inboundId, expiryTimestamp);
+        await xui.updateClient(vpnEmail, existingUuid, inboundId, expiryTimestamp, limitBytes);
       }
     }
 
@@ -609,7 +614,8 @@ app.post('/api/subscription/buy', async (req, res) => {
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || 'LTE',
-          device_limit: deviceLimit || 1
+          device_limit: deviceLimit || 1,
+          traffic_limit_mb: trafficLimitMb
         })
         .eq('id', lastSub.id)
         .select()
@@ -627,11 +633,10 @@ app.post('/api/subscription/buy', async (req, res) => {
           status: 'active',
           expires_at: expiresAt.toISOString(),
           v2ray_config: vpnConfig,
-          traffic_limit_mb: 100 * 1024,
-          traffic_used_mb: 0,
-          period_months: periodMonths || 1,
           server_type: serverType || 'LTE',
-          device_limit: deviceLimit || 1
+          period_months: periodMonths || 1,
+          device_limit: deviceLimit || 1,
+          traffic_limit_mb: trafficLimitMb
         })
         .select()
         .single();
@@ -639,7 +644,6 @@ app.post('/api/subscription/buy', async (req, res) => {
       subData = newSub;
       subErr = insertErr;
     }
-
     if (subErr) {
       console.error('❌ Supabase sub operation error:', JSON.stringify(subErr, null, 2));
       throw subErr;
@@ -694,19 +698,25 @@ function setupRealtimeListener() {
         const newData = payload.new;
         const oldData = payload.old;
 
-        // If expiry date or config changed, sync to XUI
-        if (newData.expires_at !== oldData.expires_at || newData.v2ray_config !== oldData.v2ray_config) {
+        // If expiry date, config or traffic limit changed, sync to XUI
+        if (
+          newData.expires_at !== oldData.expires_at || 
+          newData.v2ray_config !== oldData.v2ray_config ||
+          newData.traffic_limit_mb !== oldData.traffic_limit_mb
+        ) {
           console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
           
           const userId = newData.user_id;
           const vpnEmail = `user_${userId.slice(0, 8)}`;
           const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
           const expiryTimestamp = new Date(newData.expires_at).getTime();
+          const trafficLimitMb = newData.traffic_limit_mb || 102400;
+          const limitBytes = trafficLimitMb * 1024 * 1024;
           
           const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
           if (uuidMatch) {
             const uuid = uuidMatch[1];
-            await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp);
+            await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
           }
         }
       }
@@ -727,12 +737,16 @@ async function syncUserTraffic(userId: string) {
   const stats = await xui.getClientTraffic(vpnEmail);
   
   if (stats) {
-    const trafficUsedMb = Math.round(stats.total / (1024 * 1024));
+    const trafficUsedMb = Math.round(stats.used / (1024 * 1024));
+    const trafficLimitMb = stats.limit > 0 ? Math.round(stats.limit / (1024 * 1024)) : 102400; // Default 100GB if not set
     
     // Update active subscription
     const { data, error } = await supabase
       .from('subscriptions')
-      .update({ traffic_used_mb: trafficUsedMb })
+      .update({ 
+        traffic_used_mb: trafficUsedMb,
+        traffic_limit_mb: trafficLimitMb 
+      })
       .eq('user_id', userId)
       .eq('status', 'active')
       .order('created_at', { ascending: false })
