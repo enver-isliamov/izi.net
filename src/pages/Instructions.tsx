@@ -135,22 +135,25 @@ export default function Instructions() {
 
         <TabsContent value="ios" className="space-y-6 outline-none">
           <div className="grid md:grid-cols-2 gap-6">
-            <Card className="bg-card/50 border-border/40">
+            <Card className="bg-card/50 border-primary/20 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4">
+                <Badge className="bg-primary/20 text-primary">Рекомендуем</Badge>
+              </div>
               <CardHeader>
                 <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center mb-2 shadow-lg">
-                  <img src="https://picsum.photos/seed/shadow/100/100" className="rounded-lg" alt="Shadowrocket" />
+                  <div className="font-black text-black">IN</div>
                 </div>
-                <CardTitle>Shadowrocket</CardTitle>
-                <CardDescription>Лучшее решение для iOS. Платное (~3$), но самое стабильное.</CardDescription>
+                <CardTitle>INCY</CardTitle>
+                <CardDescription>Официальное приложение. Быстрое, простое и надежное.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-1">
-                  <Step number={1} title="Скачайте приложение" description="Установите Shadowrocket из App Store." />
-                  <Step number={2} title="Скопируйте ключ" description="Нажмите кнопку копирования выше." />
-                  <Step number={3} title="Настройка" description="Откройте приложение, оно само предложит добавить конфиг из буфера." />
+                  <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из App Store." />
+                  <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
+                  <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
                 </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/shadowrocket/id932747118', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
-                  <Download className="mr-2 h-4 w-4 text-primary group-hover:scale-110 transition-transform" /> В App Store
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/incy/id6756943388', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
+                  <Download className="mr-2 h-4 w-4 text-primary group-hover:scale-110 transition-transform" /> Скачать в App Store
                 </Button>
               </CardContent>
             </Card>
@@ -160,17 +163,17 @@ export default function Instructions() {
                 <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center mb-2">
                   <Zap className="text-primary w-6 h-6" />
                 </div>
-                <CardTitle>Streisand (Бесплатно)</CardTitle>
-                <CardDescription>Отличный бесплатный аналог для iPhone и iPad.</CardDescription>
+                <CardTitle>Hiddify (Бесплатно)</CardTitle>
+                <CardDescription>Ультимативное решение для обхода любых блокировок.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-1">
-                  <Step number={1} title="Установите Streisand" description="Найдите в App Store и скачайте." />
-                  <Step number={2} title="Добавьте подписку" description="Нажмите '+', выберите 'Subscription' и вставьте ссылку." />
-                  <Step number={3} title="Подключитесь" description="Выберите ближайший сервер и нажмите кнопку 'Connect'." />
+                  <Step number={1} title="Установите Hiddify" description="Найдите в App Store и скачайте." />
+                  <Step number={2} title="Добавьте профиль" description="Нажмите '+' и выберите 'Добавить из буфера'." />
+                  <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
                 </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/streisand/id6450534064', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
-                  <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать бесплатно
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
+                  <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
                 </Button>
               </CardContent>
             </Card>
@@ -178,34 +181,50 @@ export default function Instructions() {
         </TabsContent>
 
         <TabsContent value="android" className="outline-none">
-          <Card className="bg-card/50 border-border/40">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-2xl">v2rayNG</CardTitle>
-                <CardDescription>Стандарт индустрии для Android</CardDescription>
+          <div className="grid md:grid-cols-2 gap-6">
+            <Card className="bg-card/50 border-primary/20 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4">
+                <Badge className="bg-primary/20 text-primary">Рекомендуем</Badge>
               </div>
-              <Badge className="bg-primary/10 text-primary border-primary/20">Рекомендуем</Badge>
-            </CardHeader>
-            <CardContent className="grid md:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <Step number={1} title="Скачайте APK или с Play Market" description="Установите приложение v2rayNG." />
-                <Step number={2} title="Импорт подписки" description="Нажмите 'Меню' -> 'Группы подписок' -> '+' -> Вставьте ссылку." />
-                <Step number={3} title="Обновите сервера" description="Нажмите 'Обновить подписку' и выберите сервер." />
-                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=com.v2ray.ang', '_blank')} className="w-full mt-4 rounded-xl bg-primary text-black font-bold h-12">
-                  <Download className="mr-2 h-5 w-5" /> Скачать v2rayNG
-                </Button>
-              </div>
-              <div className="bg-black/40 rounded-2xl p-6 border border-border/50 flex flex-col justify-center">
-                <div className="flex items-center gap-3 mb-4">
-                  <Info className="w-5 h-5 text-primary" />
-                  <span className="font-semibold uppercase text-xs tracking-wider">Полезный совет</span>
+              <CardHeader>
+                <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center mb-2 shadow-lg">
+                  <div className="font-black text-black">IN</div>
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  Если приложение не подключается, попробуйте изменить тип DNS в настройках или включите режим "Разрешить только выбранные приложения".
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+                <CardTitle>INCY</CardTitle>
+                <CardDescription>Официальное приложение. Быстрое, простое и надежное.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-1">
+                  <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из Google Play." />
+                  <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
+                  <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
+                </div>
+                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=llc.itdev.incy', '_blank')} className="w-full mt-6 rounded-xl bg-primary text-black font-bold group">
+                  <Download className="mr-2 h-4 w-4 text-black group-hover:scale-110 transition-transform" /> Скачать в Google Play
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/50 border-border/40">
+              <CardHeader>
+                <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center mb-2">
+                  <Zap className="text-primary w-6 h-6" />
+                </div>
+                <CardTitle>Hiddify</CardTitle>
+                <CardDescription>Ультимативное решение для обхода любых блокировок.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-1">
+                  <Step number={1} title="Установите Hiddify" description="Найдите в Google Play и скачайте." />
+                  <Step number={2} title="Добавьте профиль" description="Нажмите '+ Новая конфигурация' -> 'Из буфера'." />
+                  <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
+                </div>
+                <Button variant="outline" onClick={() => window.open('https://play.google.com/store/apps/details?id=app.hiddify.com', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
+                  <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="pc" className="outline-none">
@@ -213,22 +232,22 @@ export default function Instructions() {
             <div className="grid md:grid-cols-2 gap-6">
               <Card className="bg-card/50 border-border/40">
                 <CardHeader>
-                  <CardTitle>Windows (v2rayN)</CardTitle>
+                  <CardTitle>Windows (Hiddify)</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <Step number={1} title="Скачайте архив" description="Распакуйте и запустите v2rayN.exe." />
-                  <Step number={2} title="Настройте прокси" description="Установите системный прокси-сервер в настройках приложения." />
-                  <Button variant="outline" onClick={() => window.open('https://github.com/2dust/v2rayN/releases', '_blank')} className="w-full rounded-xl border-border">Скачать для Windows</Button>
+                  <Step number={1} title="Установка для ПК" description="Перейдите на GitHub и скачайте Hiddify-Windows-Setup." />
+                  <Step number={2} title="Импорт" description="Ткните на плюс справа вверху и выберите 'Добавить из буфера'." />
+                  <Button variant="outline" onClick={() => window.open('https://github.com/hiddify/hiddify-next/releases', '_blank')} className="w-full rounded-xl border-border">Скачать Hiddify для Windows</Button>
                 </CardContent>
               </Card>
               <Card className="bg-card/50 border-border/40">
                 <CardHeader>
-                  <CardTitle>macOS (Nekoray)</CardTitle>
+                  <CardTitle>macOS (Hiddify)</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <Step number={1} title="Установка" description="Скачайте .dmg файл и перенесите в Applications." />
-                  <Step number={2} title="Разрешения" description="Разрешите приложению использовать VPN в настройках системы." />
-                  <Button variant="outline" onClick={() => window.open('https://github.com/MatsuriDayo/nekoray/releases', '_blank')} className="w-full rounded-xl border-border">Скачать для macOS</Button>
+                  <Step number={1} title="Установка для Mac" description="Скачайте .dmg с GitHub или установите из App Store." />
+                  <Step number={2} title="Настройка" description="Разрешите VPN в настройках системы и добавьте конфиг." />
+                  <Button variant="outline" onClick={() => window.open('https://github.com/hiddify/hiddify-next/releases', '_blank')} className="w-full rounded-xl border-border">Скачать Hiddify для macOS</Button>
                 </CardContent>
               </Card>
             </div>

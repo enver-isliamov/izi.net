@@ -130,7 +130,7 @@ class XUIService {
             id: uuid,
             flow: "xtls-rprx-vision",
             email: email,
-            limitIp: 0,
+            limitIp: 1,
             totalGB: 0,
             expiryTime: 0,
             enable: true,
@@ -824,6 +824,17 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
+    
+    // Catch-all for dev mode if Vite middleware didn't handle it
+    app.get('*', async (req, res, next) => {
+      if (req.url.startsWith('/api')) return next();
+      try {
+        const template = await vite.transformIndexHtml(req.url, '<html>...</html>'); // Minimal template
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
