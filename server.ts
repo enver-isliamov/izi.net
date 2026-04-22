@@ -38,7 +38,7 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
     const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
     const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
     return {
-      id: index === 0 ? 'primary' : `device_${crypto.randomBytes(4).toString('hex')}`,
+      id: index === 0 ? 'primary' : `device_${index}`,
       label: index === 0 ? 'Основное устройство' : `Доп. устройство ${index}`,
       config: cfg,
       email: emailMatch ? emailMatch[1] : 'unknown',
@@ -655,7 +655,7 @@ app.post('/api/subscription/buy', async (req, res) => {
       const rawConfig = await xui.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
       const newDevice: VpnDevice = {
-        id: existingDevices.length === 0 ? 'primary' : `device_${crypto.randomBytes(4).toString('hex')}`,
+        id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
         label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
         config: rawConfig,
         email: email,
