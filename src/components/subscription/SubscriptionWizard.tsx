@@ -139,7 +139,7 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
       {/* Progress */}
       <div className="space-y-4">
         <div className="flex justify-between text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <span>Шаг {step === 3 && forceNew ? '???' : step} из 4</span>
+          <span>Шаг {step} из 4</span>
           <span>{steps[step - 1].title}</span>
         </div>
         <Progress value={(step / 4) * 100} className="h-1.5 bg-muted" />
@@ -296,10 +296,22 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
                   <span className="text-muted-foreground italic">Срок подписки</span>
                   <span>{selectedPeriod.label}</span>
                 </div>
-                {deviceCount > 1 && (
+                {deviceCount > 1 && !forceNew && !targetDeviceId && (
                   <div className="flex justify-between text-sm py-1 border-t border-border/50">
                     <span className="text-muted-foreground italic">Количество устройств</span>
                     <span>x{deviceCount}</span>
+                  </div>
+                )}
+                {forceNew && deviceName && (
+                  <div className="flex justify-between text-sm py-1 border-t border-border/50">
+                    <span className="text-muted-foreground italic">Доп. устройство</span>
+                    <span className="font-medium text-foreground">{deviceName}</span>
+                  </div>
+                )}
+                {targetDeviceId && (
+                  <div className="flex justify-between text-sm py-1 border-t border-border/50">
+                    <span className="text-muted-foreground italic">Операция</span>
+                    <span className="font-medium text-primary">Продление устройства</span>
                   </div>
                 )}
                 <div className="pt-3 border-t border-primary/20 flex justify-between items-center">

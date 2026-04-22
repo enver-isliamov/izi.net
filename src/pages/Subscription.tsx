@@ -81,12 +81,8 @@ export default function Subscription() {
           }));
         }
         
-        // Remove primary from "Keys" list to not duplicate, or keep all? Let's keep all except primary
-        if (parsedDevices.length > 1) {
-           setVpnKeys(parsedDevices.slice(1));
-        } else {
-           setVpnKeys([]);
-        }
+        // Keep all devices in vpnKeys array to easily render the full list
+        setVpnKeys(parsedDevices);
       }
     } catch (error) {
       console.error('Subscription data fetch error:', error);
@@ -270,56 +266,56 @@ export default function Subscription() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
-                {/* 1. Main Subscription Key */}
-                {mainSub?.v2ray_config && (
-                  <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/20 border border-border">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/10 text-primary">
-                        <Smartphone className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm">Основное устройство</div>
-                        <div className="text-[10px] text-muted-foreground italic">
-                           До {new Date(mainSub.expires_at).toLocaleDateString()} • {mainSub.plan_type}
+                {vpnKeys.map((device, i) => {
+                  const devExpiry = new Date(device.expiresAt || device.expires_at || mainSub?.expires_at);
+                  const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+                  const devLabel = device.label || (i === 0 ? 'Основное устройство' : `Доп. устройство ${i + 1}`);
+                  
+                  return (
+                    <div key={device.id || i} className="flex flex-col sm:flex-row items-center justify-between p-4 rounded-2xl bg-muted/20 border border-border gap-4">
+                      <div className="flex items-center gap-4 w-full sm:w-auto">
+                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", i === 0 ? "bg-primary/10 text-primary" : "bg-blue-500/10 text-blue-400")}>
+                          <Smartphone className="w-5 h-5" />
                         </div>
+                        <div>
+                          <div className="font-bold text-sm">{devLabel}</div>
+                          <div className="text-[10px] text-muted-foreground flex gap-2">
+                             <span>До {devExpiry.toLocaleDateString()}</span>
+                             <span className={devDaysLeft > 0 ? "text-primary" : "text-destructive"}>
+                               {devDaysLeft > 0 ? `(${devDaysLeft} дн.)` : '(Истек)'}
+                             </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 w-full sm:w-auto">
+                        <Button 
+                          size="sm" 
+                          variant="secondary" 
+                          className="flex-1 sm:flex-none rounded-lg text-xs" 
+                          onClick={() => {
+                            navigator.clipboard.writeText(device.config || device.v2ray_config);
+                            toast.success(`Ключ скопирован (${devLabel})`);
+                          }}
+                        >
+                          Копировать
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          className="flex-1 sm:flex-none bg-primary text-black hover:bg-primary/90 rounded-lg text-xs" 
+                          onClick={() => setTargetDevice(device.id)}
+                          onMouseDown={() => {
+                            setTargetDevice(device.id);
+                            openWizard('extend');
+                          }}
+                        >
+                          Продлить
+                        </Button>
                       </div>
                     </div>
-                    <Button size="sm" variant="secondary" className="rounded-lg" onClick={() => {
-                        const firstConfig = mainSub.v2ray_config.split('\n---KEY_SEP---\n')[0];
-                        navigator.clipboard.writeText(firstConfig);
-                        toast.success('Основной ключ скопирован!');
-                    }}>
-                        Копировать
-                    </Button>
-                  </div>
-                )}
-
-                {/* 2. Additional Keys from subscription_keys */}
-                {vpnKeys.map((key, i) => (
-                  <div key={key.id} className="flex items-center justify-between p-4 rounded-2xl bg-muted/20 border border-border">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400">
-                        <Smartphone className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm">
-                          {key.label || `Устройство ${i + 2}`}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground italic">
-                           До {key.expires_at ? new Date(key.expires_at).toLocaleDateString() : endDateStr}
-                        </div>
-                      </div>
-                    </div>
-                    <Button size="sm" variant="secondary" className="rounded-lg" onClick={() => {
-                        navigator.clipboard.writeText(key.v2ray_config);
-                        toast.success('Дополнительный ключ скопирован!');
-                    }}>
-                        Копировать
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
                 
-                {(!mainSub && vpnKeys.length === 0) && (
+                {vpnKeys.length === 0 && (
                   <div className="text-center p-6 text-muted-foreground text-sm border border-dashed border-border rounded-2xl">
                     У вас пока нет активных ключей
                   </div>
