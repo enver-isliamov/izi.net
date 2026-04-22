@@ -34,9 +34,14 @@ export default function Wallet() {
     setIsProcessing(true);
     try {
       const apiUrl = import.meta.env.VITE_API_URL || '';
+      const { data: { session } } = await supabase.auth.getSession();
+      
       const response = await fetch(`${apiUrl}/api/pay/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
         body: JSON.stringify({
           userId: user?.id,
           amount: numAmount,
