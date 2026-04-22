@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '@/lib/supabase';
@@ -40,12 +41,13 @@ const serverTypes = [
   { id: 'lte', label: 'LTE', description: 'Премиум скорость (150 ₽/мес)', price: 50 },
 ];
 
-export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () => void, forceNew?: boolean }) {
+export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedPeriod, setSelectedPeriod] = useState(periods[0]);
   const [selectedServer, setSelectedServer] = useState(serverTypes[0]);
   const [deviceCount, setDeviceCount] = useState(1);
+  const [deviceName, setDeviceName] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -58,22 +60,25 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
     fetchBalance();
   }, [user]);
 
-  // Price calculation: (Base Period Price + Server Price) * Device Count
-  // No more fixed 25 RUB additions. Each device costs the full subscription price.
-  const totalPrice = (selectedPeriod.price + selectedServer.price) * deviceCount;
+  // If forceNew is true or targetDeviceId is present, we enforce count = 1 for the transaction
+  const effectiveDeviceCount = (forceNew || targetDeviceId) ? 1 : deviceCount;
+
+  // Price calculation
+  const totalPrice = (selectedPeriod.price + selectedServer.price) * effectiveDeviceCount;
   const hasEnoughFunds = balance !== null && balance >= totalPrice;
 
   const nextStep = () => {
-    // Skip device selection step if we are in forceNew (Adding additional device) mode
-    if (forceNew && step === 2) {
+    // Skip device selection step if we are targetting a specific device to renew
+    if (targetDeviceId && step === 2) {
       setStep(4);
     } else {
       setStep(s => Math.min(s + 1, 4));
     }
   };
+  
   const prevStep = () => {
     // If we skipped step 3, go back from 4 straight to 2
-    if (forceNew && step === 4) {
+    if (targetDeviceId && step === 4) {
       setStep(2);
     } else {
       setStep(s => Math.max(s - 1, 1));
@@ -106,8 +111,10 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
           durationDays: selectedPeriod.days,
           periodMonths: Math.round(selectedPeriod.days / 30),
           serverType: selectedServer.id.toUpperCase(),
-          deviceLimit: deviceCount,
-          forceNew: forceNew
+          deviceLimit: effectiveDeviceCount,
+          forceNew: forceNew,
+          targetDeviceId: targetDeviceId,
+          deviceName: deviceName
         }),
       });
 
@@ -222,30 +229,52 @@ export function SubscriptionWizard({ onClose, forceNew = false }: { onClose: () 
               exit={{ opacity: 0, x: -20 }}
               className="space-y-6 text-center"
             >
-              <h3 className="text-lg font-bold">Количество устройств</h3>
-              <div className="flex items-center justify-center gap-8">
-                <Button 
-                  variant="outline" 
-                  size="icon" 
-                  className="rounded-full w-12 h-12 border-primary/50 text-primary"
-                  onClick={() => setDeviceCount(Math.max(1, deviceCount - 1))}
-                >
-                  -
-                </Button>
-                <div className="text-5xl font-bold">{deviceCount}</div>
-                <Button 
-                  variant="outline" 
-                  size="icon" 
-                  className="rounded-full w-12 h-12 border-primary/50 text-primary"
-                  onClick={() => setDeviceCount(Math.min(10, deviceCount + 1))}
-                >
-                  +
-                </Button>
-              </div>
-              <div className="space-y-2 text-muted-foreground text-sm">
-                <p>Вы заказываете {deviceCount} {deviceCount === 1 ? 'ключ' : deviceCount < 5 ? 'ключа' : 'ключей'}</p>
-                <p className="text-xs italic">Каждое устройство получит индивидуальный доступ</p>
-              </div>
+              {forceNew ? (
+                <>
+                  <h3 className="text-lg font-bold">Название устройства</h3>
+                  <div className="flex flex-col items-center justify-center gap-4 text-left">
+                    <p className="text-sm text-muted-foreground w-full">
+                      Задайте понятное имя для вашего нового устройства (например: Ноутбук, Телефон Жены).
+                    </p>
+                    <Input 
+                      placeholder="Например: Мой ПК"
+                      value={deviceName}
+                      onChange={(e) => setDeviceName(e.target.value)}
+                      className="h-12 w-full text-lg border-primary/30 focus-visible:ring-primary/50"
+                    />
+                  </div>
+                  <div className="space-y-2 text-muted-foreground text-sm">
+                    <p className="text-xs italic">Это поможет вам отличать устройства в списке</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-bold">Количество устройств</h3>
+                  <div className="flex items-center justify-center gap-8">
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      className="rounded-full w-12 h-12 border-primary/50 text-primary"
+                      onClick={() => setDeviceCount(Math.max(1, deviceCount - 1))}
+                    >
+                      -
+                    </Button>
+                    <div className="text-5xl font-bold">{deviceCount}</div>
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      className="rounded-full w-12 h-12 border-primary/50 text-primary"
+                      onClick={() => setDeviceCount(Math.min(10, deviceCount + 1))}
+                    >
+                      +
+                    </Button>
+                  </div>
+                  <div className="space-y-2 text-muted-foreground text-sm">
+                    <p>Вы заказываете {deviceCount} {deviceCount === 1 ? 'ключ' : deviceCount < 5 ? 'ключа' : 'ключей'}</p>
+                    <p className="text-xs italic">Каждое устройство получит индивидуальный доступ</p>
+                  </div>
+                </>
+              )}
             </motion.div>
           )}
 

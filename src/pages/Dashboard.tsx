@@ -113,10 +113,31 @@ export default function Dashboard() {
   const refCount = referrals.length;
   const refEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
 
-  // Parse multiple configs from single field
-  const vpnConfigs = (subscription?.v2ray_config || '').split('\n---KEY_SEP---\n').filter(Boolean);
-  const activeDeviceCount = vpnConfigs.length;
-  const deviceLimit = subscription?.device_limit || 1;
+  // Parse devices from v2ray_config
+  let vpnDevices: any[] = [];
+  if (subscription?.v2ray_config) {
+    if (subscription.v2ray_config.trim().startsWith('[')) {
+      try {
+        vpnDevices = JSON.parse(subscription.v2ray_config);
+      } catch (e) {
+        console.warn('Failed to parse JSON config');
+      }
+    } else {
+      // Legacy fallback
+      const configs = subscription.v2ray_config.split('\n---KEY_SEP---\n').filter(Boolean);
+      vpnDevices = configs.map((cfg: string, i: number) => ({
+        id: i === 0 ? 'primary' : `device_${i}`,
+        label: i === 0 ? 'Основное устройство' : `Доп. устройство ${i}`,
+        config: cfg,
+        serverType: subscription.server_type || 'Wi-Fi',
+        expiresAt: subscription.expires_at,
+        trafficUsedBytes: 0
+      }));
+    }
+  }
+
+  const activeDeviceCount = vpnDevices.length;
+  const deviceLimit = subscription?.device_limit || 2; // Hardcode to 2 as per requirement or use DB
 
   let daysLeft = 0;
   if (subscription?.expires_at) {
@@ -239,26 +260,63 @@ export default function Dashboard() {
 
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-muted/30 border border-border">
-                <div className="text-sm text-muted-foreground mb-3">Подключенные устройства</div>
-                <div className="space-y-2">
-                  {vpnConfigs.length > 0 ? vpnConfigs.map((config, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <code className="flex-1 bg-black/50 p-2 rounded-lg text-[10px] truncate border border-border">
-                        {config}
-                      </code>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="rounded-lg border-primary/50 text-primary hover:bg-primary/10 h-8 px-2 text-[10px]"
-                        onClick={() => {
-                          navigator.clipboard.writeText(config);
-                          toast.success(`Устройство ${i + 1}: Ключ скопирован`);
-                        }}
-                      >
-                        Копировать
-                      </Button>
-                    </div>
-                  )) : (
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-bold">Подключенные устройства</div>
+                  {activeDeviceCount < deviceLimit && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      className="h-7 px-2 text-[10px] rounded-lg border-primary/50 text-primary hover:bg-primary/10"
+                      onClick={() => navigate('/subscription?action=new-device')}
+                    >
+                      <Plus className="w-3 h-3 mr-1" /> Добавить
+                    </Button>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
+                    const devExpiry = new Date(device.expiresAt);
+                    const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+                    const devTrafficGB = (device.trafficUsedBytes || 0) / (1024 * 1024 * 1024);
+
+                    return (
+                      <div key={i} className="flex flex-col gap-2 p-3 bg-black/40 rounded-xl border border-border relative overflow-hidden">
+                        <div className="flex items-center justify-between">
+                          <div className="font-medium text-sm text-primary flex items-center gap-1.5">
+                            <Smartphone className="w-4 h-4" /> 
+                            {device.label || `Устройство ${i + 1}`}
+                          </div>
+                          <Badge variant="outline" className={`text-[9px] h-5 ${devDaysLeft > 0 ? 'border-primary/50 text-primary' : 'border-destructive/50 text-destructive'}`}>
+                            {devDaysLeft > 0 ? `${devDaysLeft} дней` : 'Истек'}
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] text-muted-foreground mt-1">
+                          <span>🌐 {device.serverType || 'Wi-Fi'}</span>
+                          <span>↓ {(devTrafficGB).toFixed(2)} GB</span>
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <Button 
+                            size="sm" 
+                            variant="secondary" 
+                            className="w-full text-[10px] h-7 bg-muted hover:bg-muted/80 text-foreground"
+                            onClick={() => {
+                              navigator.clipboard.writeText(device.config);
+                              toast.success(`Ключ скопирован (${device.label})`);
+                            }}
+                          >
+                            Копировать ключ
+                          </Button>
+                          <Button 
+                            size="sm"
+                            className="text-[10px] h-7 px-3 bg-primary text-black hover:bg-primary/90"
+                            onClick={() => navigate(`/subscription?targetDeviceId=${device.id}`)}
+                          >
+                            Продлить
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }) : (
                     <div className="text-xs text-muted-foreground italic p-2 border border-dashed border-border rounded-lg text-center">
                       Нет активных устройств
                     </div>
@@ -268,28 +326,18 @@ export default function Dashboard() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Ключи / Лимит</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Устройства / Лимит</div>
                   <div className="text-lg font-black text-primary">
                     {activeDeviceCount} / {deviceLimit}
                   </div>
                 </div>
                 <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Локация</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Базовый Тариф</div>
                   <div className="text-lg font-black flex items-center justify-center gap-1 leading-none">
                     <Globe className="w-4 h-4 text-primary" /> {subscription?.server_type === 'LTE' ? 'LTE' : 'Wi-Fi'}
                   </div>
                 </div>
               </div>
-              
-              {activeDeviceCount < deviceLimit && (
-                 <Button 
-                   onClick={() => navigate('/subscription')} 
-                   variant="outline" 
-                   className="w-full rounded-xl border-dashed border-primary/40 hover:bg-primary/5 text-xs h-10"
-                 >
-                   <Plus className="w-3 h-3 mr-2" /> Добавить новое устройство
-                 </Button>
-              )}
             </div>
           </div>
 
