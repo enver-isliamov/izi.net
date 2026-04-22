@@ -23,7 +23,8 @@ async function fix() {
     
     const loginResp = await axios.post(`${host}/login`, { username: user, password: pass }, { httpsAgent });
     const cookie = loginResp.headers['set-cookie'][0];
-    const inboundResp = await axios.get(`${host}/panel/api/inbounds/get/1`, { headers: { Cookie: cookie }, httpsAgent });
+    const inboundId = process.env.XUI_INBOUND_ID || '4';
+    const inboundResp = await axios.get(`${host}/panel/api/inbounds/get/${inboundId}`, { headers: { Cookie: cookie }, httpsAgent });
     
     const streamSettings = JSON.parse(inboundResp.data.obj.streamSettings);
     port = inboundResp.data.obj.port;
