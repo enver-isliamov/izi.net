@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 
 const PRESET_AMOUNTS = [100, 500, 1000, 2500, 5000];
 
@@ -49,7 +50,17 @@ export default function Wallet() {
         })
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Non-JSON API response:', responseText);
+        if (responseText.includes('Please wait while your application starts')) {
+          throw new Error('Сервер обновляется. Пожалуйста, подождите пару секунд и попробуйте снова.');
+        }
+        throw new Error(`Неизвестная ошибка сервера (Код: ${response.status}). Пожалуйста, обратитесь в поддержку.`);
+      }
       
       if (data.url) {
         window.location.href = data.url;

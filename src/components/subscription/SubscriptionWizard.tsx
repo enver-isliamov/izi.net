@@ -41,7 +41,7 @@ const serverTypes = [
   { id: 'lte', label: 'LTE', description: 'Премиум скорость (150 ₽/мес)', price: 50 },
 ];
 
-export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string }) {
+export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedPeriod, setSelectedPeriod] = useState(periods[0]);
@@ -124,6 +124,9 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
         result = JSON.parse(responseText);
       } catch (e) {
         console.error('Non-JSON API response:', responseText);
+        if (responseText.includes('Please wait while your application starts')) {
+          throw new Error('Сервер обновляется. Пожалуйста, подождите пару секунд и попробуйте снова.');
+        }
         throw new Error(`Неизвестная ошибка сервера (Код: ${response.status}). Пожалуйста, обратитесь в поддержку.`);
       }
 
@@ -164,9 +167,9 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold">Выберите период подписки</h3>
-                {targetDeviceId && deviceName && (
+                {targetDeviceId && targetDeviceName && (
                   <Badge variant="outline" className="border-primary/50 text-primary text-xs">
-                    Продление: {deviceName}
+                    Продление: {targetDeviceName}
                   </Badge>
                 )}
               </div>
@@ -206,9 +209,9 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold">Тип сервера</h3>
-                {targetDeviceId && deviceName && (
+                {targetDeviceId && targetDeviceName && (
                   <Badge variant="outline" className="border-primary/50 text-primary text-xs">
-                    Продление: {deviceName}
+                    Продление: {targetDeviceName}
                   </Badge>
                 )}
               </div>

@@ -185,7 +185,7 @@ export default function Subscription() {
               }} 
               forceNew={wizardMode === 'new'}
               targetDeviceId={targetDevice}
-              deviceName={targetDeviceName}
+              targetDeviceName={targetDeviceName}
             />
           </DialogContent>
         </Dialog>
