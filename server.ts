@@ -589,7 +589,11 @@ app.get('/api/health', (req, res) => {
     bot: !!process.env.TELEGRAM_BOT_TOKEN,
     xui: !!process.env.XUI_HOST && !!process.env.XUI_USERNAME && !!process.env.XUI_PASSWORD,
     inboundId: process.env.XUI_INBOUND_ID || '1'
-  };// --- Subscription Routes ---
+  };
+  res.json({ status: 'ok', config: configStatus });
+});
+
+// --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
   const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName } = req.body;
   const authHeader = req.headers.authorization;
