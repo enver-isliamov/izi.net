@@ -39,6 +39,7 @@ export default function Subscription() {
   const [isLoading, setIsLoading] = useState(true);
   const [wizardMode, setWizardMode] = useState<'extend' | 'new'>('extend');
   const [targetDevice, setTargetDevice] = useState<string | undefined>(undefined);
+  const [targetDeviceName, setTargetDeviceName] = useState<string | undefined>(undefined);
 
   const fetchSubscriptionData = async () => {
     if (!user) return;
@@ -105,11 +106,16 @@ export default function Subscription() {
       openWizard('new');
       setSearchParams({}); // Clear params after open
     } else if (target) {
+      // Ищем устройство в vpnKeys (массив уже загрузился)
+      const dev = vpnKeys.find((d: any) => d.id === target);
+      if (dev) {
+        setTargetDeviceName(dev.label);
+      }
       setTargetDevice(target);
       openWizard('extend');
       setSearchParams({}); // Clear params after open
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, vpnKeys]);
 
   const openWizard = (mode: 'extend' | 'new') => {
     setWizardMode(mode);
@@ -179,6 +185,7 @@ export default function Subscription() {
               }} 
               forceNew={wizardMode === 'new'}
               targetDeviceId={targetDevice}
+              targetDeviceName={targetDeviceName}
             />
           </DialogContent>
         </Dialog>
@@ -302,10 +309,10 @@ export default function Subscription() {
                         <Button 
                           size="sm" 
                           className="flex-1 sm:flex-none bg-primary text-black hover:bg-primary/90 rounded-lg text-xs" 
-                          onClick={() => setTargetDevice(device.id)}
-                          onMouseDown={() => {
+                          onClick={() => {
                             setTargetDevice(device.id);
-                            openWizard('extend');
+                            setTargetDeviceName(devLabel);
+                            navigate(`/subscription?targetDeviceId=${device.id}`);
                           }}
                         >
                           Продлить

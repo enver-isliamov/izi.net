@@ -38,7 +38,7 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
     const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
     const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
     return {
-      id: index === 0 ? 'primary' : `device_${crypto.randomBytes(4).toString('hex')}`,
+      id: index === 0 ? 'primary' : `device_${index}`,
       label: index === 0 ? 'Основное устройство' : `Доп. устройство ${index}`,
       config: cfg,
       email: emailMatch ? emailMatch[1] : 'unknown',
@@ -93,14 +93,12 @@ class XUIService {
   }
 
   async checkConfig() {
-    console.log(`🔍 Checking 3x-ui connection to ${this.host}...`);
     if (!this.host || !this.username || !this.password) {
       console.warn('⚠️ 3x-ui credentials missing in environment variables!');
       return false;
     }
     try {
       await this.login();
-      console.log('✅ 3x-ui connection successful');
       return true;
     } catch (e: any) {
       console.error('❌ 3x-ui connection failed:', e.message);
@@ -115,7 +113,6 @@ class XUIService {
     try {
       // 3x-ui login URL usually ends in /login
       const loginUrl = `${this.host}/login`;
-      console.log(`📡 Attempting login to: ${loginUrl}`);
       
       const response = await axios.post(
         loginUrl,
@@ -134,7 +131,6 @@ class XUIService {
       const cookie = response.headers['set-cookie']?.[0];
       if (!cookie) throw new Error('No cookie received from 3x-ui. Check if host URL is correct and starts with http/https.');
       this.sessionCookie = cookie;
-      console.log('✅ Logged in to 3x-ui');
       return cookie;
     } catch (error: any) {
       console.error('❌ 3x-ui login error:', error.message);
@@ -589,7 +585,11 @@ app.get('/api/health', (req, res) => {
     bot: !!process.env.TELEGRAM_BOT_TOKEN,
     xui: !!process.env.XUI_HOST && !!process.env.XUI_USERNAME && !!process.env.XUI_PASSWORD,
     inboundId: process.env.XUI_INBOUND_ID || '1'
-  };// --- Subscription Routes ---
+  };
+  res.json({ status: 'ok', config: configStatus });
+});
+
+// --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
   const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName } = req.body;
   const authHeader = req.headers.authorization;
@@ -655,7 +655,7 @@ app.post('/api/subscription/buy', async (req, res) => {
       const rawConfig = await xui.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
       const newDevice: VpnDevice = {
-        id: existingDevices.length === 0 ? 'primary' : `device_${crypto.randomBytes(4).toString('hex')}`,
+        id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
         label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
         config: rawConfig,
         email: email,
@@ -875,8 +875,6 @@ async function syncUserTraffic(userId: string) {
 }
 
 async function syncTrafficStats() {
-  console.log('📊 Starting global traffic synchronization...');
-  
   try {
     // 1. Get all active subscriptions
     const { data: subs, error } = await supabase
@@ -894,7 +892,6 @@ async function syncTrafficStats() {
       await syncUserTraffic(userId);
     }
     
-    console.log(`✅ Successfully synced traffic for ${userIds.length} users`);
   } catch (err) {
     console.error('❌ Global traffic sync error:', err);
   }

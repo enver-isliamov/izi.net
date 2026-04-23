@@ -230,124 +230,154 @@ export default function Dashboard() {
           </CardTitle>
           <CardDescription>Управление вашим активным тарифом</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-muted/30 border border-border">
-                <div className="text-sm text-muted-foreground">Тариф</div>
-                <div className="text-xl font-bold mt-1 capitalize">{planName}</div>
-                {subscription && (
-                  <div className="flex items-center gap-2 mt-3 text-sm">
-                    <Clock className="w-4 h-4 text-primary" />
-                    <span>{daysLeft} дней осталось</span>
-                  </div>
-                )}
+        <CardContent className="p-6 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+            {/* Left Column: Plan & Usage */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-primary" /> Тариф и Лимиты
+                </h3>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Использование трафика</span>
-                  <span className="font-medium">{trafficPercent}%</span>
+              <div className="p-6 rounded-3xl bg-muted/40 border border-border/50 space-y-6 shadow-inner">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Активный тариф</div>
+                    <div className="text-3xl font-black mt-1 text-foreground flex items-center gap-2">
+                       {planName}
+                    </div>
+                  </div>
+                  {subscription && (
+                    <div className="text-right">
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Осталось</div>
+                      <div className="text-2xl font-black text-primary flex items-center justify-end gap-1">
+                        <Clock className="w-5 h-5" /> {daysLeft}д.
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <Progress value={trafficPercent} className="h-2 bg-muted" />
-                <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
-                  <span>0 GB</span>
-                  <span>{(trafficLimitGB / 2).toFixed(1)} GB</span>
-                  <span>{trafficLimitGB.toFixed(1)} GB</span>
+
+                <div className="pt-4 border-t border-border/30 space-y-3">
+                  <div className="flex justify-between items-end">
+                    <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Трафик использовано</div>
+                    <div className="text-sm font-bold">{trafficUsedGB.toFixed(1)} GB / {trafficLimitGB.toFixed(1)} GB</div>
+                  </div>
+                  <Progress value={trafficPercent} className="h-2.5 bg-muted rounded-full" />
+                  <div className="flex justify-between text-[9px] text-muted-foreground font-mono">
+                    <span>0%</span>
+                    <span>50%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                   <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
+                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Локация</div>
+                      <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
+                        🇷🇺 Moscow
+                      </div>
+                   </div>
+                   <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
+                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Лимит девайсов</div>
+                      <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
+                        <Smartphone className="w-3.5 h-3.5 text-primary" /> {activeDeviceCount}/{deviceLimit}
+                      </div>
+                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-muted/30 border border-border">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-bold">Подключенные устройства</div>
-                  {activeDeviceCount < deviceLimit && (
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      className="h-7 px-2 text-[10px] rounded-lg border-primary/50 text-primary hover:bg-primary/10"
-                      onClick={() => navigate('/subscription?action=new-device')}
-                    >
-                      <Plus className="w-3 h-3 mr-1" /> Добавить
-                    </Button>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
-                    const devExpiry = new Date(device.expiresAt);
-                    const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
-                    const devTrafficGB = (device.trafficUsedBytes || 0) / (1024 * 1024 * 1024);
-
-                    return (
-                      <div key={i} className="flex flex-col gap-2 p-3 bg-black/40 rounded-xl border border-border relative overflow-hidden">
-                        <div className="flex items-center justify-between">
-                          <div className="font-medium text-sm text-primary flex items-center gap-1.5">
-                            <Smartphone className="w-4 h-4" /> 
-                            {device.label || `Устройство ${i + 1}`}
-                          </div>
-                          <Badge variant="outline" className={`text-[9px] h-5 ${devDaysLeft > 0 ? 'border-primary/50 text-primary' : 'border-destructive/50 text-destructive'}`}>
-                            {devDaysLeft > 0 ? `${devDaysLeft} дней` : 'Истек'}
-                          </Badge>
-                        </div>
-                        <div className="flex justify-between items-center text-[10px] text-muted-foreground mt-1">
-                          <span>🌐 {device.serverType || 'Wi-Fi'}</span>
-                          <span>↓ {(devTrafficGB).toFixed(2)} GB</span>
-                        </div>
-                        <div className="flex gap-2 mt-2">
-                          <Button 
-                            size="sm" 
-                            variant="secondary" 
-                            className="w-full text-[10px] h-7 bg-muted hover:bg-muted/80 text-foreground"
-                            onClick={() => {
-                              navigator.clipboard.writeText(device.config);
-                              toast.success(`Ключ скопирован (${device.label})`);
-                            }}
-                          >
-                            Копировать ключ
-                          </Button>
-                          <Button 
-                            size="sm"
-                            className="text-[10px] h-7 px-3 bg-primary text-black hover:bg-primary/90"
-                            onClick={() => navigate(`/subscription?targetDeviceId=${device.id}`)}
-                          >
-                            Продлить
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  }) : (
-                    <div className="text-xs text-muted-foreground italic p-2 border border-dashed border-border rounded-lg text-center">
-                      Нет активных устройств
-                    </div>
-                  )}
-                </div>
+            {/* Right Column: Connected Devices */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-primary" /> Ваши Устройства
+                </h3>
+                {activeDeviceCount < deviceLimit && (
+                  <Button 
+                    size="sm" 
+                    variant="ghost"
+                    className="h-8 px-3 text-[10px] rounded-xl text-primary hover:text-primary hover:bg-primary/10 transition-all"
+                    onClick={() => navigate('/subscription?action=new-device')}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" /> Добавить еще
+                  </Button>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Устройства / Лимит</div>
-                  <div className="text-lg font-black text-primary">
-                    {activeDeviceCount} / {deviceLimit}
+              <div className="space-y-3 overflow-y-auto max-h-[400px] pr-1 custom-scrollbar">
+                {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
+                  const devExpiry = new Date(device.expiresAt);
+                  const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+                  const devTrafficGB = (device.trafficUsedBytes || 0) / (1024 * 1024 * 1024);
+
+                  return (
+                    <div key={i} className="group p-4 bg-muted/20 hover:bg-muted/30 rounded-2xl border border-border/40 transition-all duration-300">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                           <div className="w-10 h-10 rounded-xl bg-background flex items-center justify-center border border-border/30 shadow-sm group-hover:scale-105 transition-transform">
+                              <Smartphone className="w-5 h-5 text-primary" />
+                           </div>
+                           <div>
+                              <div className="font-bold text-sm tracking-tight">{device.label || `Device ${i + 1}`}</div>
+                              <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-0.5">
+                                <span className="flex items-center gap-1">🌐 {device.serverType || 'Wi-Fi'}</span>
+                                <span className="flex items-center gap-1">↓ {devTrafficGB.toFixed(2)} GB</span>
+                              </div>
+                           </div>
+                        </div>
+                        <div className="text-right">
+                           <Badge variant="outline" className={`text-[10px] h-6 px-3 rounded-full ${devDaysLeft > 0 ? 'border-primary/30 text-primary bg-primary/5' : 'border-destructive/30 text-destructive bg-destructive/5'}`}>
+                              {devDaysLeft > 0 ? `${devDaysLeft}д` : 'Истек'}
+                           </Badge>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2 mt-4 opacity-70 group-hover:opacity-100 transition-opacity">
+                        <Button 
+                          size="sm" 
+                          variant="secondary" 
+                          className="flex-1 text-[11px] h-9 rounded-xl font-medium"
+                          onClick={() => {
+                            navigator.clipboard.writeText(device.config);
+                            toast.success(`Ключ скопирован (${device.label})`);
+                          }}
+                        >
+                          Копировать
+                        </Button>
+                        <Button 
+                          size="sm"
+                          className="flex-none text-[11px] h-9 px-4 rounded-xl bg-primary text-black hover:bg-primary/90 font-bold"
+                          onClick={() => navigate(`/subscription?targetDeviceId=${device.id}`)}
+                        >
+                          Продлить
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <div className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-border/20 rounded-3xl bg-muted/10 opacity-60">
+                    <Smartphone className="w-8 h-8 text-muted-foreground mb-2" />
+                    <p className="text-xs font-medium">Устройства не найдены</p>
                   </div>
-                </div>
-                <div className="p-3 rounded-xl bg-muted/20 border border-border text-center">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Базовый Тариф</div>
-                  <div className="text-lg font-black flex items-center justify-center gap-1 leading-none">
-                    <Globe className="w-4 h-4 text-primary" /> {subscription?.server_type === 'LTE' ? 'LTE' : 'Wi-Fi'}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
 
-          <div className="pt-4 border-t border-border flex flex-wrap gap-3">
-            <Button onClick={() => navigate('/subscription')} className="flex-1 md:flex-none bg-primary text-black hover:bg-primary/90 rounded-xl">
-              Управление подпиской
-            </Button>
-            <Button onClick={() => navigate('/installation')} variant="outline" className="flex-1 md:flex-none rounded-xl border-border hover:bg-muted">
-              Инструкции
-            </Button>
+          <div className="pt-8 border-t border-border/30 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex gap-3">
+              <Button onClick={() => navigate('/subscription')} className="bg-primary text-black hover:bg-primary/90 rounded-2xl px-6 font-bold shadow-lg shadow-primary/20">
+                Подробнее о подписке
+              </Button>
+              <Button onClick={() => navigate('/installation')} variant="outline" className="rounded-2xl border-border hover:bg-muted/50 px-6">
+                Инструкции
+              </Button>
+            </div>
+            <div className="text-[10px] text-muted-foreground italic font-medium">
+              * Синхронизация данных происходит автоматически каждые 15 минут
+            </div>
           </div>
         </CardContent>
       </Card>

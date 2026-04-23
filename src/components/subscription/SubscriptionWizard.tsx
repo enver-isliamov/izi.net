@@ -41,7 +41,7 @@ const serverTypes = [
   { id: 'lte', label: 'LTE', description: 'Премиум скорость (150 ₽/мес)', price: 50 },
 ];
 
-export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string }) {
+export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedPeriod, setSelectedPeriod] = useState(periods[0]);
@@ -118,7 +118,17 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
         }),
       });
 
-      const result = await response.json();
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Non-JSON API response:', responseText);
+        if (responseText.includes('Please wait while your application starts')) {
+          throw new Error('Сервер обновляется. Пожалуйста, подождите пару секунд и попробуйте снова.');
+        }
+        throw new Error(`Неизвестная ошибка сервера (Код: ${response.status}). Пожалуйста, обратитесь в поддержку.`);
+      }
 
       if (!response.ok) {
         throw new Error(result.error || 'Ошибка при покупке');
@@ -155,7 +165,14 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
               exit={{ opacity: 0, x: -20 }}
               className="space-y-4"
             >
-              <h3 className="text-lg font-bold">Выберите период подписки</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Выберите период подписки</h3>
+                {targetDeviceId && targetDeviceName && (
+                  <Badge variant="outline" className="border-primary/50 text-primary text-xs">
+                    Продление: {targetDeviceName}
+                  </Badge>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 {periods.map((p) => (
                   <Card 
@@ -190,7 +207,14 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId }
               exit={{ opacity: 0, x: -20 }}
               className="space-y-4"
             >
-              <h3 className="text-lg font-bold">Тип сервера</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Тип сервера</h3>
+                {targetDeviceId && targetDeviceName && (
+                  <Badge variant="outline" className="border-primary/50 text-primary text-xs">
+                    Продление: {targetDeviceName}
+                  </Badge>
+                )}
+              </div>
               <div className="space-y-3">
                 {serverTypes.map((s) => (
                   <Card 
