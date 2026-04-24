@@ -9,7 +9,8 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -123,6 +124,43 @@ export default function Subscription() {
     setWizardMode(mode);
     if (mode === 'new') setTargetDevice(undefined);
     setIsWizardOpen(true);
+  };
+
+  const handleDeleteDevice = async (deviceId: string, isPrimary: boolean) => {
+    if (isPrimary) {
+      toast.error('Невозможно удалить основное устройство. Вы можете только заменить его ключ.');
+      return;
+    }
+    if (!window.confirm('Удалить это устройство? Лимиты и трафик будут пересчитаны на оставшиеся подключения.')) {
+      return;
+    }
+    
+    const newKeys = vpnKeys.filter((k: any) => k.id !== deviceId);
+    // Optimistic UI update
+    setVpnKeys(newKeys);
+    toast.success('Устройство удалено. Лимиты пересчитаны.');
+    
+    if (subscriptions[0] && subscriptions[0].id) {
+       try {
+         const mainSubData = subscriptions[0];
+         // Only handle legacy string format separation since it's the main way keys are stored based on earlier code
+         const sep = '\n---KEY_SEP---\n';
+         const updatedConfigStr = newKeys.map((k: any) => k.config || k.v2ray_config).join(sep);
+         
+         const { error } = await supabase.from('subscriptions').update({
+           v2ray_config: updatedConfigStr,
+           device_limit: Math.max(1, (mainSubData.device_limit || 2) - 1)
+         }).eq('id', mainSubData.id);
+         
+         if (error) {
+            console.error('Update err:', error);
+         } else {
+           fetchSubscriptionData();
+         }
+       } catch (err) {
+         console.warn(err);
+       }
+    }
   };
 
   if (isLoading) {
@@ -247,13 +285,13 @@ export default function Subscription() {
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Clock className="w-4 h-4 text-primary mx-auto" />
-                  <div className="text-[10px] text-muted-foreground uppercase">Период</div>
-                  <div className="text-sm font-bold">{mainSub?.period_months || 0} мес.</div>
+                  <div className="text-[10px] text-muted-foreground uppercase">Осталось</div>
+                  <div className="text-sm font-bold">{daysLeft} дн.</div>
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
-                  <RefreshCw className="w-4 h-4 text-primary mx-auto" />
-                  <div className="text-[10px] text-muted-foreground uppercase">Автопродление</div>
-                  <div className="text-sm font-bold">Выкл</div>
+                  <ShieldCheck className="w-4 h-4 text-primary mx-auto" />
+                  <div className="text-[10px] text-muted-foreground uppercase">Статус</div>
+                  <div className="text-sm font-bold text-primary">Активен</div>
                 </div>
               </div>
             </CardContent>
@@ -300,7 +338,16 @@ export default function Subscription() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex gap-2 w-full sm:w-auto">
+                      <div className="flex gap-2 w-full sm:w-auto mt-3 sm:mt-0">
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive" 
+                          onClick={() => handleDeleteDevice(device.id, i === 0)}
+                          title="Удалить устройство"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                         <Button 
                           size="sm" 
                           variant="secondary" 
