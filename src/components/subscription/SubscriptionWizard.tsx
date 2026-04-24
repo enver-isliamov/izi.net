@@ -24,7 +24,7 @@ import { toast } from 'sonner';
 
 const steps = [
   { id: 1, title: 'Период', icon: Clock },
-  { id: 2, title: 'Серверы', icon: Server },
+  { id: 2, title: 'Класс', icon: Server },
   { id: 3, title: 'Устройства', icon: Smartphone },
   { id: 4, title: 'Оплата', icon: CreditCard },
 ];
@@ -208,7 +208,7 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
               className="space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold">Тип сервера</h3>
+                <h3 className="text-lg font-bold">Класс подключения</h3>
                 {targetDeviceId && targetDeviceName && (
                   <Badge variant="outline" className="border-primary/50 text-primary text-xs">
                     Продление: {targetDeviceName}

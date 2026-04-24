@@ -242,7 +242,7 @@ export default function Login() {
                 {refCode && (
                   <div className="mt-2 p-3 rounded-xl bg-primary/10 border border-primary/20 animate-pulse">
                     <p className="text-xs text-primary font-bold flex items-center gap-2">
-                       🎁 Вы получите бонус 60₽ после регистрации!
+                       🎁 Вы получите бонус 50₽ после регистрации!
                     </p>
                   </div>
                 )}

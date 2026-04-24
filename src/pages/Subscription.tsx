@@ -237,8 +237,8 @@ export default function Subscription() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Globe className="w-4 h-4 text-primary mx-auto" />
-                  <div className="text-[10px] text-muted-foreground uppercase">Локация</div>
-                  <div className="text-sm font-bold">Russia</div>
+                  <div className="text-[10px] text-muted-foreground uppercase">Стриминг</div>
+                  <div className="text-sm font-bold">YouTube 4K</div>
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Zap className="w-4 h-4 text-primary mx-auto" />
@@ -349,7 +349,7 @@ export default function Subscription() {
                 <h3 className="font-bold">Ускорьте свой VPN</h3>
               </div>
               <p className="text-sm text-muted-foreground">
-                Перейдите на тариф <span className="text-primary font-bold">Premium</span> и получите неограниченный трафик и доступ ко всем локациям мира.
+                Перейдите на тариф <span className="text-primary font-bold">LTE</span> и получите приоритетную работу сети с повышенной стабильностью.
               </p>
               <Button className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl">
                 Улучшить тариф

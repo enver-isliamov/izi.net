@@ -276,9 +276,9 @@ export default function Dashboard() {
 
                 <div className="grid grid-cols-2 gap-4 pt-2">
                    <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
-                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Локация</div>
+                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Протокол</div>
                       <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
-                        🇷🇺 Moscow
+                        <ShieldCheck className="w-3.5 h-3.5 text-primary" /> VLESS
                       </div>
                    </div>
                    <div className="bg-background/40 p-3 rounded-2xl border border-border/30">

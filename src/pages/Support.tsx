@@ -26,20 +26,20 @@ import { toast } from 'sonner';
 
 const faqs = [
   {
-    q: "Как оплатить подписку?",
-    a: "Вы можете пополнить баланс в разделе 'Дашборд' или 'Подписка' через СБП, банковские карты или криптовалюту. После пополнения баланса выберите нужный тариф и нажмите 'Купить'."
+    q: "Как оплатить подписку и какие способы оплаты есть?",
+    a: "Пополнить баланс можно в разделе 'Кошелек' через СБП, любые банковские карты (Platega), через Telegram Stars или криптовалютой. После зачисления средств, перейдите в 'Подписку' и выберите план."
   },
   {
-    q: "Не работает сервер LTE, что делать?",
-    a: "Попробуйте сменить локацию в настройках подписки или переподключиться. Если проблема сохраняется, проверьте настройки вашего клиента или обратитесь в поддержку."
+    q: "Чем отличается INCY от Hiddify?",
+    a: "INCY — это наше рекомендуемое легковесное приложение, поддерживающее быстрое подключение. Hiddify — это мощный комбайн для продвинутых юзеров. Оба приложения отлично работают с нашими ключами VLESS."
   },
   {
     q: "Сколько устройств можно подключить?",
-    a: "По умолчанию в тариф Wi-Fi Стандарт включено 2 устройства. Вы можете добавить дополнительные устройства (до 10 штук) при оформлении подписки или позже в личном кабинете."
+    a: "По умолчанию в подписку включены ключи для 2-х устройств. Вы можете докупить ключи для дополнительных устройств прямо в разделе 'Подписка'."
   },
   {
-    q: "Как получить бесплатный пробный период?",
-    a: "Новым пользователям доступен пробный период на 24 часа. Активировать его можно на главной странице дашборда."
+    q: "Как получить бонус за друга?",
+    a: "Перейдите в раздел 'Рефералы' и скопируйте свою ссылку. Каждый, кто по ней зарегистрируется, моментально получит 50₽ на счет, а вы будете получать 10% со всех его пополнений."
   }
 ];
 
@@ -119,7 +119,7 @@ export default function Support() {
           <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
           <p className="text-muted-foreground mt-1">Мы всегда готовы помочь вам с любыми вопросами</p>
         </div>
-        <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2">
+        <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open('https://t.me/izinet_bot', '_blank')}>
           <Send className="w-4 h-4" /> Telegram Поддержка
         </Button>
       </div>
@@ -234,7 +234,7 @@ export default function Support() {
                   </AccordionItem>
                 ))}
               </Accordion>
-              <Button variant="link" className="w-full mt-4 text-primary text-xs gap-1">
+              <Button variant="link" className="w-full mt-4 text-primary text-xs gap-1" onClick={() => window.location.href='/faq'}>
                 Смотреть все вопросы <ExternalLink className="w-3 h-3" />
               </Button>
             </CardContent>
@@ -242,12 +242,12 @@ export default function Support() {
 
           <Card className="glass-card bg-primary/5 border-primary/20">
             <CardContent className="p-6 space-y-4">
-              <h3 className="font-bold">База знаний</h3>
+              <h3 className="font-bold">Нужна инструкция по установке?</h3>
               <p className="text-sm text-muted-foreground">
-                Мы собрали подробные руководства по всем аспектам работы нашего сервиса.
+                Мы подготовили подробные пошаговые инструкции со скриншотами для настройки на вашей платформе.
               </p>
-              <Button variant="outline" className="w-full rounded-xl border-primary/30 text-primary hover:bg-primary/10">
-                Открыть Wiki
+              <Button variant="outline" className="w-full rounded-xl border-primary/30 text-primary hover:bg-primary/10" onClick={() => window.location.href='/instructions'}>
+                Открыть Инструкции
               </Button>
             </CardContent>
           </Card>

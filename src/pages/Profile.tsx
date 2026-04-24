@@ -266,8 +266,8 @@ export default function Profile() {
                 </Button>
               </div>
               <p className="text-[10px] text-muted-foreground text-center">
-                Получайте 25% от пополнений друзей. <br />
-                Друг получит <span className="text-primary font-bold">60₽</span> при регистрации.
+                Получайте 10% от пополнений друзей. <br />
+                Друг получит <span className="text-primary font-bold">50₽</span> при регистрации.
               </p>
             </CardContent>
           </Card>
