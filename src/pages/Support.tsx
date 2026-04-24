@@ -254,7 +254,7 @@ export default function Support() {
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className={`space-y-6 ${activeTab === 'chat' ? 'hidden lg:block' : 'block'}`}>
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
