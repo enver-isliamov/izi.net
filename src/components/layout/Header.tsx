@@ -2,6 +2,11 @@ import React from 'react';
 import { Bell, Globe, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -33,17 +38,30 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary">
-          <Globe className="w-5 h-5" />
-        </Button>
-        <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary relative">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full neon-glow" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary">
+              <Globe className="w-5 h-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Сменить сервер</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary relative">
+              <Bell className="w-5 h-5" />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full neon-glow" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Уведомления</TooltipContent>
+        </Tooltip>
         
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="rounded-full bg-muted/50 border border-border ml-2" />}>
-            <User className="w-5 h-5" />
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 border border-border ml-2">
+              <User className="w-5 h-5" />
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56 bg-card border-border">
             <DropdownMenuGroup>

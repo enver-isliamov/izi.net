@@ -103,7 +103,10 @@ export default function Dashboard() {
 
   const currentBalance = balance?.amount || 0;
   const currency = balance?.currency || 'RUB';
-  const planName = subscription ? (subscription.server_type === 'LTE' ? 'LTE' : 'Wi-Fi') : 'Нет активной подписки';
+  const planName = subscription ? 
+    (subscription.plan_type === 'trial' ? 'Пробный' : 
+    (subscription.server_type?.toUpperCase() === 'LTE' ? 'LTE Премиум' : 'Wi-Fi Стандарт')) 
+    : 'Нет активной подписки';
   
   // Convert MB to GB for display
   const trafficUsedGB = (subscription?.traffic_used_mb || 0) / 1024;
@@ -112,7 +115,7 @@ export default function Dashboard() {
   
   const refCount = referrals.length;
   const refEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
-
+  
   // Parse devices from v2ray_config
   let vpnDevices: any[] = [];
   if (subscription?.v2ray_config) {
@@ -129,7 +132,7 @@ export default function Dashboard() {
         id: i === 0 ? 'primary' : `device_${i}`,
         label: i === 0 ? 'Основное устройство' : `Доп. устройство ${i}`,
         config: cfg,
-        serverType: subscription.server_type || 'Wi-Fi',
+        serverType: subscription.server_type?.toUpperCase() || 'WI-FI',
         expiresAt: subscription.expires_at,
         trafficUsedBytes: 0
       }));
@@ -220,7 +223,7 @@ export default function Dashboard() {
       <Card className="glass-card overflow-hidden border-primary/30 relative">
         <div className="absolute top-0 right-0 p-4 z-10">
           <Badge className={subscription ? "bg-primary/20 text-primary border-primary/50 uppercase" : "bg-muted text-muted-foreground uppercase"}>
-            {subscription ? `● ${subscription.server_type}` : 'ОТКЛЮЧЕНО'}
+            {subscription ? `● ${subscription.server_type?.toUpperCase()}` : 'ОТКЛЮЧЕНО'}
           </Badge>
         </div>
         <CardHeader>
@@ -384,7 +387,7 @@ export default function Dashboard() {
       
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card onClick={() => navigate('/installation')} className="glass-card hover:border-primary/50 transition-colors cursor-pointer group">
+        <Card onClick={() => navigate('/installation')} className="glass-card hover:border-primary/50 transition-all cursor-pointer group hover:scale-[1.01] active:scale-[0.99]">
           <CardContent className="p-6 flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
               <Smartphone className="w-6 h-6 text-primary" />
@@ -397,7 +400,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
         
-        <Card onClick={() => navigate('/support')} className="glass-card hover:border-primary/50 transition-colors cursor-pointer group">
+        <Card onClick={() => navigate('/support')} className="glass-card hover:border-primary/50 transition-all cursor-pointer group hover:scale-[1.01] active:scale-[0.99]">
           <CardContent className="p-6 flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
               <LifeBuoy className="w-6 h-6 text-primary" />

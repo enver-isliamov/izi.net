@@ -78,6 +78,8 @@ export default function Subscription() {
              id: i === 0 ? 'primary' : `device_${i}`,
              label: i === 0 ? 'Основное устройство' : `Доп. устройство ${i}`,
              config: cfg,
+             serverType: mainSubData.server_type?.toUpperCase() || 'WI-FI',
+             expiresAt: mainSubData.expires_at,
              trafficUsedBytes: 0
           }));
         }
@@ -132,15 +134,15 @@ export default function Subscription() {
   }
 
   const mainSub = subscriptions[0] || null;
-  const planName = mainSub?.plan_type || 'Нет активной подписки';
+  const planName = mainSub ? (mainSub.plan_type === 'trial' ? 'Пробный' : (mainSub.server_type?.toUpperCase() === 'LTE' ? 'LTE Премиум' : 'Wi-Fi Стандарт')) : 'Нет активной подписки';
   
   // Sum aggregate traffic for the status card
   const trafficUsedGB = subscriptions.reduce((acc, sub) => acc + (sub.traffic_used_mb || 0), 0) / 1024;
   const trafficLimitGB = (mainSub?.traffic_limit_mb || 102400) / 1024; 
   const trafficPercent = Math.min(100, Math.round((trafficUsedGB / trafficLimitGB) * 100)) || 0;
   
-  const deviceCount = subscriptions.length;
-  const deviceLimit = mainSub?.device_limit || 1;
+  const deviceCount = vpnKeys.length;
+  const deviceLimit = mainSub?.device_limit || 2;
   const devicePercent = Math.min(100, Math.round((deviceCount / deviceLimit) * 100)) || 0;
 
   let daysLeft = 0;
@@ -167,11 +169,11 @@ export default function Subscription() {
         </div>
         
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-          <DialogTrigger render={
+          <DialogTrigger asChild>
             <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
               <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
             </Button>
-          } />
+          </DialogTrigger>
           <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-xl font-bold">
@@ -206,7 +208,7 @@ export default function Subscription() {
                 </CardDescription>
               </div>
               <Badge className={mainSub ? "bg-primary/20 text-primary border-primary/50 uppercase" : "bg-muted text-muted-foreground uppercase"}>
-                {mainSub ? `● ${mainSub.server_type}` : 'ОТКЛЮЧЕНО'}
+                {mainSub ? `● ${mainSub.server_type?.toUpperCase()}` : 'ОТКЛЮЧЕНО'}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-8">
@@ -223,9 +225,9 @@ export default function Subscription() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Активных ключей</span>
-                    <span className="font-medium">{deviceCount} шт.</span>
+                    <span className="font-medium">{deviceCount} / {deviceLimit} шт.</span>
                   </div>
-                  <Progress value={Math.min(100, (deviceCount / 10) * 100)} className="h-2 bg-muted" />
+                  <Progress value={devicePercent} className="h-2 bg-muted" />
                   <p className="text-[10px] text-muted-foreground">Вы можете добавить больше устройств</p>
                 </div>
               </div>
@@ -262,14 +264,16 @@ export default function Subscription() {
                 <CardTitle className="text-xl">Мои устройства</CardTitle>
                 <CardDescription>Управление VPN-ключами</CardDescription>
               </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="border-primary/50 hover:bg-primary/10 rounded-xl"
-                onClick={() => openWizard('new')}
-              >
-                <Plus className="mr-2 w-4 h-4" /> Добавить устройство
-              </Button>
+              {deviceCount < deviceLimit && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="border-primary/50 hover:bg-primary/10 rounded-xl"
+                  onClick={() => openWizard('new')}
+                >
+                  <Plus className="mr-2 w-4 h-4" /> Добавить устройство
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
