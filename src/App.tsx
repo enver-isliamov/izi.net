@@ -14,6 +14,7 @@ import Profile from '@/pages/Profile';
 import Referrals from '@/pages/Referrals';
 import FAQ from '@/pages/FAQ';
 import Login from '@/pages/Login';
+import UpdatePassword from '@/pages/UpdatePassword';
 import Wallet from '@/pages/Wallet';
 
 import Terms from '@/pages/Terms';
@@ -41,6 +42,7 @@ export default function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/update-password" element={<UpdatePassword />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/refund" element={<RefundPolicy />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
