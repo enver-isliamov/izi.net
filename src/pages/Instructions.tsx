@@ -21,9 +21,11 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 
+import { useNavigate } from 'react-router-dom';
 import { copyToClipboard } from '@/lib/utils';
 
 export default function Instructions() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [subscription, setSubscription] = useState<any>(null);
@@ -263,7 +265,13 @@ export default function Instructions() {
           <h3 className="text-xl font-bold">Нужна помощь с настройкой?</h3>
           <p className="text-muted-foreground text-sm">Наши специалисты поддержки помогут вам установить VPN на любое устройство 24/7.</p>
         </div>
-        <Button variant="secondary" className="rounded-xl px-8 h-12">Написать в поддержку</Button>
+        <Button 
+          variant="secondary" 
+          className="rounded-xl px-8 h-12"
+          onClick={() => navigate('/support')}
+        >
+          Написать в поддержку
+        </Button>
       </div>
     </div>
   );

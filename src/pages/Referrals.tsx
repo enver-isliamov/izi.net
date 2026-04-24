@@ -92,8 +92,9 @@ export default function Referrals() {
   const totalEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
   
   const refCode = userData?.referral_code || 'Генерация...';
-  const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://izinet.vercel.app';
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const siteLink = `${siteUrl}/login?ref=${refCode}`;
+  const cleanLink = `${siteUrl}/ref/${refCode}`;
   const botLink = `https://t.me/izinet_bot?start=ref_${refCode}`;
 
   return (
@@ -101,7 +102,7 @@ export default function Referrals() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Реферальная программа</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Приглашайте друзей и получайте <span className="text-primary font-bold">25%</span> от их пополнений пожизненно</p>
+          <p className="text-muted-foreground mt-1 text-sm">Приглашайте друзей и получайте <span className="text-primary font-bold">10%</span> от их пополнений пожизненно</p>
         </div>
         <Badge variant="outline" className="w-fit border-primary/50 text-tertiary px-3 py-1 rounded-full bg-primary/5">
           Ваш код: <span className="ml-2 font-mono font-bold text-primary">{refCode}</span>
@@ -147,7 +148,7 @@ export default function Referrals() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Ваша комиссия</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">25%</div>
+            <div className="text-3xl font-bold">10%</div>
             <p className="text-xs text-muted-foreground mt-2">Пожизненные отчисления</p>
           </CardContent>
         </Card>
@@ -164,7 +165,22 @@ export default function Referrals() {
             <CardContent className="space-y-6">
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Ссылка на сайт</label>
+                  <label className="text-sm font-medium">Короткая ссылка</label>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 p-3 rounded-xl bg-muted/30 border border-border text-sm truncate">
+                      {cleanLink}
+                    </div>
+                    <Button onClick={() => handleCopy(cleanLink)} size="icon" variant="outline" className="rounded-xl border-border hover:text-primary">
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                    <Button size="icon" variant="outline" className="rounded-xl border-border hover:text-primary">
+                      <Share2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Ссылка на сайт (через логин)</label>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 p-3 rounded-xl bg-muted/30 border border-border text-sm truncate">
                       {siteLink}
@@ -211,12 +227,12 @@ export default function Referrals() {
                 <div className="space-y-3">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">2</div>
                   <h4 className="font-bold text-sm">Друг регистрируется</h4>
-                  <p className="text-xs text-muted-foreground">Ваш друг получает бонус 60₽ на баланс при регистрации по вашей ссылке.</p>
+                  <p className="text-xs text-muted-foreground">Ваш друг получает бонус 50₽ на баланс при регистрации по вашей ссылке.</p>
                 </div>
                 <div className="space-y-3">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">3</div>
                   <h4 className="font-bold text-sm">Получайте доход</h4>
-                  <p className="text-xs text-muted-foreground">Вы получаете 25% от каждого пополнения баланса вашим другом навсегда.</p>
+                  <p className="text-xs text-muted-foreground">Вы получаете 10% от каждого пополнения баланса вашим другом навсегда.</p>
                 </div>
               </div>
             </CardContent>
@@ -261,7 +277,8 @@ export default function Referrals() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-[10px] text-muted-foreground leading-relaxed">
-              <p>• Минимальная сумма для вывода: 500₽</p>
+              <p>• Бонусные средства не подлежат выводу</p>
+              <p>• Вы можете использовать их только для оплаты подписки</p>
               <p>• Запрещен спам и контекстная реклама на бренд</p>
               <p>• Бонусы начисляются автоматически в течение 5 минут после оплаты рефералом</p>
               <Button variant="link" className="p-0 h-auto text-[10px] text-primary">Полные правила программы</Button>

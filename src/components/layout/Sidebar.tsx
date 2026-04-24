@@ -62,7 +62,11 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border space-y-4">
+        <div className="flex flex-col gap-2 px-4 text-[10px] text-muted-foreground w-full">
+          <Link to="/terms" className="hover:text-primary transition-colors">Правила сервиса</Link>
+          <Link to="/refund" className="hover:text-primary transition-colors">Политика возвратов</Link>
+        </div>
         <Button
           variant="ghost"
           onClick={signOut}

@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -15,6 +15,10 @@ import Referrals from '@/pages/Referrals';
 import FAQ from '@/pages/FAQ';
 import Login from '@/pages/Login';
 import Wallet from '@/pages/Wallet';
+
+import Terms from '@/pages/Terms';
+import RefundPolicy from '@/pages/RefundPolicy';
+import PrivacyPolicy from '@/pages/PrivacyPolicy';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
@@ -37,6 +41,9 @@ export default function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/refund" element={<RefundPolicy />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route 
               path="/*" 
               element={
@@ -51,6 +58,7 @@ export default function App() {
                       <Route path="/referrals" element={<Referrals />} />
                       <Route path="/wallet" element={<Wallet />} />
                       <Route path="/faq" element={<FAQ />} />
+                      <Route path="/ref/:refCode" element={<NavigateWithRef />} />
                       <Route path="/" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                   </PageContainer>
@@ -63,4 +71,14 @@ export default function App() {
       </TooltipProvider>
     </AuthProvider>
   );
+}
+
+function NavigateWithRef() {
+  const { refCode } = useParams();
+  useEffect(() => {
+    if (refCode) {
+      sessionStorage.setItem('referral_code', refCode);
+    }
+  }, [refCode]);
+  return <Navigate to="/login" replace />;
 }

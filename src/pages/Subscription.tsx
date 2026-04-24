@@ -9,7 +9,8 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -78,6 +79,8 @@ export default function Subscription() {
              id: i === 0 ? 'primary' : `device_${i}`,
              label: i === 0 ? 'Основное устройство' : `Доп. устройство ${i}`,
              config: cfg,
+             serverType: mainSubData.server_type?.toUpperCase() || 'WI-FI',
+             expiresAt: mainSubData.expires_at,
              trafficUsedBytes: 0
           }));
         }
@@ -123,6 +126,43 @@ export default function Subscription() {
     setIsWizardOpen(true);
   };
 
+  const handleDeleteDevice = async (deviceId: string, isPrimary: boolean) => {
+    if (isPrimary) {
+      toast.error('Невозможно удалить основное устройство. Вы можете только заменить его ключ.');
+      return;
+    }
+    if (!window.confirm('Удалить это устройство? Лимиты и трафик будут пересчитаны на оставшиеся подключения.')) {
+      return;
+    }
+    
+    const newKeys = vpnKeys.filter((k: any) => k.id !== deviceId);
+    // Optimistic UI update
+    setVpnKeys(newKeys);
+    toast.success('Устройство удалено. Лимиты пересчитаны.');
+    
+    if (subscriptions[0] && subscriptions[0].id) {
+       try {
+         const mainSubData = subscriptions[0];
+         // Only handle legacy string format separation since it's the main way keys are stored based on earlier code
+         const sep = '\n---KEY_SEP---\n';
+         const updatedConfigStr = newKeys.map((k: any) => k.config || k.v2ray_config).join(sep);
+         
+         const { error } = await supabase.from('subscriptions').update({
+           v2ray_config: updatedConfigStr,
+           device_limit: Math.max(1, (mainSubData.device_limit || 2) - 1)
+         }).eq('id', mainSubData.id);
+         
+         if (error) {
+            console.error('Update err:', error);
+         } else {
+           fetchSubscriptionData();
+         }
+       } catch (err) {
+         console.warn(err);
+       }
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -132,15 +172,15 @@ export default function Subscription() {
   }
 
   const mainSub = subscriptions[0] || null;
-  const planName = mainSub?.plan_type || 'Нет активной подписки';
+  const planName = mainSub ? (mainSub.plan_type === 'trial' ? 'Пробный' : (mainSub.server_type?.toUpperCase() === 'LTE' ? 'LTE Премиум' : 'Wi-Fi Стандарт')) : 'Нет активной подписки';
   
   // Sum aggregate traffic for the status card
   const trafficUsedGB = subscriptions.reduce((acc, sub) => acc + (sub.traffic_used_mb || 0), 0) / 1024;
   const trafficLimitGB = (mainSub?.traffic_limit_mb || 102400) / 1024; 
   const trafficPercent = Math.min(100, Math.round((trafficUsedGB / trafficLimitGB) * 100)) || 0;
   
-  const deviceCount = subscriptions.length;
-  const deviceLimit = mainSub?.device_limit || 1;
+  const deviceCount = vpnKeys.length;
+  const deviceLimit = mainSub?.device_limit || 2;
   const devicePercent = Math.min(100, Math.round((deviceCount / deviceLimit) * 100)) || 0;
 
   let daysLeft = 0;
@@ -167,11 +207,13 @@ export default function Subscription() {
         </div>
         
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-          <DialogTrigger render={
-            <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
-              <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
-            </Button>
-          } />
+          <DialogTrigger 
+            render={
+              <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
+                <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
+              </Button>
+            }
+          />
           <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-xl font-bold">
@@ -206,7 +248,7 @@ export default function Subscription() {
                 </CardDescription>
               </div>
               <Badge className={mainSub ? "bg-primary/20 text-primary border-primary/50 uppercase" : "bg-muted text-muted-foreground uppercase"}>
-                {mainSub ? `● ${mainSub.server_type}` : 'ОТКЛЮЧЕНО'}
+                {mainSub ? `● ${mainSub.server_type?.toUpperCase()}` : 'ОТКЛЮЧЕНО'}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-8">
@@ -223,9 +265,9 @@ export default function Subscription() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Активных ключей</span>
-                    <span className="font-medium">{deviceCount} шт.</span>
+                    <span className="font-medium">{deviceCount} / {deviceLimit} шт.</span>
                   </div>
-                  <Progress value={Math.min(100, (deviceCount / 10) * 100)} className="h-2 bg-muted" />
+                  <Progress value={devicePercent} className="h-2 bg-muted" />
                   <p className="text-[10px] text-muted-foreground">Вы можете добавить больше устройств</p>
                 </div>
               </div>
@@ -233,8 +275,8 @@ export default function Subscription() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Globe className="w-4 h-4 text-primary mx-auto" />
-                  <div className="text-[10px] text-muted-foreground uppercase">Локация</div>
-                  <div className="text-sm font-bold">Russia</div>
+                  <div className="text-[10px] text-muted-foreground uppercase">Стриминг</div>
+                  <div className="text-sm font-bold">YouTube 4K</div>
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Zap className="w-4 h-4 text-primary mx-auto" />
@@ -243,13 +285,13 @@ export default function Subscription() {
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
                   <Clock className="w-4 h-4 text-primary mx-auto" />
-                  <div className="text-[10px] text-muted-foreground uppercase">Период</div>
-                  <div className="text-sm font-bold">{mainSub?.period_months || 0} мес.</div>
+                  <div className="text-[10px] text-muted-foreground uppercase">Осталось</div>
+                  <div className="text-sm font-bold">{daysLeft} дн.</div>
                 </div>
                 <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center space-y-1">
-                  <RefreshCw className="w-4 h-4 text-primary mx-auto" />
-                  <div className="text-[10px] text-muted-foreground uppercase">Автопродление</div>
-                  <div className="text-sm font-bold">Выкл</div>
+                  <ShieldCheck className="w-4 h-4 text-primary mx-auto" />
+                  <div className="text-[10px] text-muted-foreground uppercase">Статус</div>
+                  <div className="text-sm font-bold text-primary">Активен</div>
                 </div>
               </div>
             </CardContent>
@@ -262,14 +304,16 @@ export default function Subscription() {
                 <CardTitle className="text-xl">Мои устройства</CardTitle>
                 <CardDescription>Управление VPN-ключами</CardDescription>
               </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="border-primary/50 hover:bg-primary/10 rounded-xl"
-                onClick={() => openWizard('new')}
-              >
-                <Plus className="mr-2 w-4 h-4" /> Добавить устройство
-              </Button>
+              {deviceCount < deviceLimit && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="border-primary/50 hover:bg-primary/10 rounded-xl"
+                  onClick={() => openWizard('new')}
+                >
+                  <Plus className="mr-2 w-4 h-4" /> Добавить устройство
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
@@ -294,7 +338,16 @@ export default function Subscription() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex gap-2 w-full sm:w-auto">
+                      <div className="flex gap-2 w-full sm:w-auto mt-3 sm:mt-0">
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive" 
+                          onClick={() => handleDeleteDevice(device.id, i === 0)}
+                          title="Удалить устройство"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                         <Button 
                           size="sm" 
                           variant="secondary" 
@@ -343,7 +396,7 @@ export default function Subscription() {
                 <h3 className="font-bold">Ускорьте свой VPN</h3>
               </div>
               <p className="text-sm text-muted-foreground">
-                Перейдите на тариф <span className="text-primary font-bold">Premium</span> и получите неограниченный трафик и доступ ко всем локациям мира.
+                Перейдите на тариф <span className="text-primary font-bold">LTE</span> и получите приоритетную работу сети с повышенной стабильностью.
               </p>
               <Button className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl">
                 Улучшить тариф
