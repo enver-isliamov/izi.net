@@ -39,30 +39,36 @@ export function Header() {
 
       <div className="flex items-center gap-3">
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary">
-              <Globe className="w-5 h-5" />
-            </Button>
-          </TooltipTrigger>
+          <TooltipTrigger 
+            render={
+              <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary">
+                <Globe className="w-5 h-5" />
+              </Button>
+            } 
+          />
           <TooltipContent>Сменить сервер</TooltipContent>
         </Tooltip>
 
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full neon-glow" />
-            </Button>
-          </TooltipTrigger>
+          <TooltipTrigger 
+            render={
+              <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary relative">
+                <Bell className="w-5 h-5" />
+                <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full neon-glow" />
+              </Button>
+            } 
+          />
           <TooltipContent>Уведомления</TooltipContent>
         </Tooltip>
         
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 border border-border ml-2">
-              <User className="w-5 h-5" />
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger 
+            render={
+              <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 border border-border ml-2">
+                <User className="w-5 h-5" />
+              </Button>
+            } 
+          />
           <DropdownMenuContent align="end" className="w-56 bg-card border-border">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Мой аккаунт</DropdownMenuLabel>

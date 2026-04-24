@@ -169,11 +169,13 @@ export default function Subscription() {
         </div>
         
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
-              <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
-            </Button>
-          </DialogTrigger>
+          <DialogTrigger 
+            render={
+              <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
+                <Plus className="mr-2 w-4 h-4" /> Купить / Продлить
+              </Button>
+            }
+          />
           <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-xl font-bold">
