@@ -294,6 +294,14 @@ export default function Login() {
             </Card>
           </TabsContent>
         </Tabs>
+        
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 text-xs text-muted-foreground">
+          <a href="/terms" className="hover:text-primary transition-colors">Пользовательское соглашение</a>
+          <span className="hidden sm:inline text-border">•</span>
+          <a href="/refund" className="hover:text-primary transition-colors">Политика возвратов</a>
+          <span className="hidden sm:inline text-border">•</span>
+          <a href="/privacy" className="hover:text-primary transition-colors">Политика конфиденциальности</a>
+        </div>
       </motion.div>
     </div>
   );

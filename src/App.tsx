@@ -16,6 +16,10 @@ import FAQ from '@/pages/FAQ';
 import Login from '@/pages/Login';
 import Wallet from '@/pages/Wallet';
 
+import Terms from '@/pages/Terms';
+import RefundPolicy from '@/pages/RefundPolicy';
+import PrivacyPolicy from '@/pages/PrivacyPolicy';
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
 
@@ -37,6 +41,9 @@ export default function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/refund" element={<RefundPolicy />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route 
               path="/*" 
               element={

@@ -98,7 +98,11 @@ export function Header() {
                 );
               })}
             </nav>
-            <div className="absolute bottom-4 left-4 right-4">
+            <div className="absolute bottom-4 left-4 right-4 space-y-4">
+              <div className="flex flex-col gap-2 px-4 text-[10px] text-muted-foreground w-full">
+                <Link to="/terms" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-primary transition-colors">Правила сервиса</Link>
+                <Link to="/refund" onClick={() => setIsMobileMenuOpen(false)} className="hover:text-primary transition-colors">Политика возвратов</Link>
+              </div>
               <Button
                 variant="ghost"
                 onClick={handleLogout}
