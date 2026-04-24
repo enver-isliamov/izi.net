@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -51,6 +51,7 @@ export default function App() {
                       <Route path="/referrals" element={<Referrals />} />
                       <Route path="/wallet" element={<Wallet />} />
                       <Route path="/faq" element={<FAQ />} />
+                      <Route path="/ref/:refCode" element={<NavigateWithRef />} />
                       <Route path="/" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                   </PageContainer>
@@ -63,4 +64,14 @@ export default function App() {
       </TooltipProvider>
     </AuthProvider>
   );
+}
+
+function NavigateWithRef() {
+  const { refCode } = useParams();
+  useEffect(() => {
+    if (refCode) {
+      sessionStorage.setItem('referral_code', refCode);
+    }
+  }, [refCode]);
+  return <Navigate to="/login" replace />;
 }

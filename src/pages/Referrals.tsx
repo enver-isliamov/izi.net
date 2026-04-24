@@ -92,8 +92,9 @@ export default function Referrals() {
   const totalEarned = referrals.reduce((sum, ref) => sum + (Number(ref.commission_earned) || 0), 0);
   
   const refCode = userData?.referral_code || 'Генерация...';
-  const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://izinet.vercel.app';
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const siteLink = `${siteUrl}/login?ref=${refCode}`;
+  const cleanLink = `${siteUrl}/ref/${refCode}`;
   const botLink = `https://t.me/izinet_bot?start=ref_${refCode}`;
 
   return (
@@ -164,7 +165,22 @@ export default function Referrals() {
             <CardContent className="space-y-6">
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Ссылка на сайт</label>
+                  <label className="text-sm font-medium">Короткая ссылка</label>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 p-3 rounded-xl bg-muted/30 border border-border text-sm truncate">
+                      {cleanLink}
+                    </div>
+                    <Button onClick={() => handleCopy(cleanLink)} size="icon" variant="outline" className="rounded-xl border-border hover:text-primary">
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                    <Button size="icon" variant="outline" className="rounded-xl border-border hover:text-primary">
+                      <Share2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Ссылка на сайт (через логин)</label>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 p-3 rounded-xl bg-muted/30 border border-border text-sm truncate">
                       {siteLink}

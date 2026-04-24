@@ -15,12 +15,25 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [refCode, setRefCode] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user } = useAuth();
 
   useEffect(() => {
     if (user) {
       navigate('/dashboard');
+    }
+    
+    // Check for referral code in URL
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (ref) {
+      setRefCode(ref);
+      sessionStorage.setItem('referral_code', ref);
+    } else {
+      // Check if it's already in session
+      const savedRef = sessionStorage.getItem('referral_code');
+      if (savedRef) setRefCode(savedRef);
     }
   }, [user, navigate]);
 
@@ -226,6 +239,13 @@ export default function Login() {
               <CardHeader>
                 <CardTitle>Создать аккаунт</CardTitle>
                 <CardDescription>Начните пользоваться безопасным VPN уже сегодня</CardDescription>
+                {refCode && (
+                  <div className="mt-2 p-3 rounded-xl bg-primary/10 border border-primary/20 animate-pulse">
+                    <p className="text-xs text-primary font-bold flex items-center gap-2">
+                       🎁 Вы получите бонус 60₽ после регистрации!
+                    </p>
+                  </div>
+                )}
               </CardHeader>
               <form onSubmit={handleRegister}>
                 <CardContent className="space-y-4">

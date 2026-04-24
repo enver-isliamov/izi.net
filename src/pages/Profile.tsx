@@ -57,9 +57,12 @@ export default function Profile() {
     fetchProfile();
   }, [user]);
 
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const cleanRefLink = userData?.referral_code ? `${siteUrl}/ref/${userData.referral_code}` : 'Код не сгенерирован';
+
   const handleCopyRef = () => {
     if (userData?.referral_code) {
-      navigator.clipboard.writeText(`izinet.app/ref/${userData.referral_code}`);
+      navigator.clipboard.writeText(cleanRefLink);
       toast.success('Ссылка скопирована!');
     } else {
       toast.error('Реферальный код не найден');
@@ -256,14 +259,15 @@ export default function Profile() {
             <CardContent className="space-y-4">
               <div className="p-3 rounded-xl bg-muted/30 border border-border flex items-center gap-2">
                 <code className="text-[10px] truncate flex-1">
-                  {userData?.referral_code ? `izinet.app/ref/${userData.referral_code}` : 'Код не сгенерирован'}
+                  {cleanRefLink}
                 </code>
                 <Button onClick={handleCopyRef} size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:text-primary">
                   <Copy className="w-4 h-4" />
                 </Button>
               </div>
               <p className="text-[10px] text-muted-foreground text-center">
-                Получайте 25% от всех пополнений ваших друзей
+                Получайте 25% от пополнений друзей. <br />
+                Друг получит <span className="text-primary font-bold">60₽</span> при регистрации.
               </p>
             </CardContent>
           </Card>
