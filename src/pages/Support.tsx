@@ -119,7 +119,7 @@ export default function Support() {
           <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
           <p className="text-muted-foreground mt-1">Мы всегда готовы помочь вам с любыми вопросами</p>
         </div>
-        <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open('https://t.me/izinet_bot', '_blank')}>
+        <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open(`https://t.me/${import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot'}`, '_blank')}>
           <Send className="w-4 h-4" /> Telegram Поддержка
         </Button>
       </div>

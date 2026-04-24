@@ -117,7 +117,7 @@ export default function Profile() {
       }
       
       // 3. Open Telegram
-      const botName = 'izinet_bot';
+      const botName = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot';
       const link = `https://t.me/${botName}?start=link_${token}`;
       
       toast.success('Ссылка готова! Переходим в Telegram...', { id: toastId });

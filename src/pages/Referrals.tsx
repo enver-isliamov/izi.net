@@ -95,7 +95,7 @@ export default function Referrals() {
   const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const siteLink = `${siteUrl}/login?ref=${refCode}`;
   const cleanLink = `${siteUrl}/ref/${refCode}`;
-  const botLink = `https://t.me/izinet_bot?start=ref_${refCode}`;
+  const botLink = `https://t.me/${import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot'}?start=ref_${refCode}`;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">

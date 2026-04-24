@@ -764,7 +764,14 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
+const botName = process.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot';
+const botAdminId = process.env.TELEGRAM_ADMIN_ID;
 const bot = botToken ? new Telegraf(botToken) : null;
+
+// Bot Session and State Management
+const botSessions = new Map<number, { state: string }>();
+const adminReplyMap = new Map<number, number>(); // Maps admin's message ID to user's chat ID
+
 
 // --- Realtime DB Listener ---
 // This listens for manual changes in the database (e.g., via Supabase Dashboard)

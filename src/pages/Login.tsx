@@ -139,7 +139,7 @@ export default function Login() {
       if (error) throw error;
       
       // 3. Open bot
-      const botName = 'izinet_bot';
+      const botName = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot';
       const link = `https://t.me/${botName}?start=auth_${loginToken}`;
       
       toast.success('Переходим в Telegram для подтверждения...', { id: toastId });
