@@ -8,7 +8,8 @@ import {
   ChevronDown,
   ExternalLink,
   Loader2,
-  Clock
+  Clock,
+  ArrowLeft
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,8 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { useAppConfig } from '@/hooks/useAppConfig';
+import { TicketChatView } from '@/components/TicketChatView';
 
 const faqs = [
   {
@@ -45,11 +48,14 @@ const faqs = [
 
 export default function Support() {
   const { user } = useAuth();
+  const { telegramBotName } = useAppConfig();
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [tickets, setTickets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [activeTab, setActiveTab] = useState<'list' | 'new' | 'chat'>('list');
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
 
   const fetchTickets = async () => {
     if (!user) return;
@@ -95,6 +101,7 @@ export default function Support() {
       setSubject('');
       setMessage('');
       fetchTickets();
+      setActiveTab('list');
     } catch (error) {
       console.error('Error sending ticket:', error);
       toast.error('Ошибка при отправке обращения');
@@ -117,100 +124,134 @@ export default function Support() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
-          <p className="text-muted-foreground mt-1">Мы всегда готовы помочь вам с любыми вопросами</p>
+          <p className="text-muted-foreground mt-1">Остались вопросы? Мы всегда на связи</p>
         </div>
-        <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open(`https://t.me/${import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot'}`, '_blank')}>
-          <Send className="w-4 h-4" /> Telegram Поддержка
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-3">
+            {activeTab !== 'new' && (
+              <Button className="rounded-xl px-6" onClick={() => setActiveTab('new')}>
+                 <Plus className="w-4 h-4 mr-2" /> Новое обращение
+              </Button>
+            )}
+            <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open(`https://t.me/${telegramBotName}`, '_blank')}>
+            <Send className="w-4 h-4" /> Перейти в Telegram
+            </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
-          <Card className="glass-card">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Ваши обращения</CardTitle>
-                <CardDescription>История ваших тикетов</CardDescription>
-              </div>
-              <Badge variant="outline" className="border-primary text-primary">
-                {tickets.filter(t => t.status !== 'closed').length} активных
-              </Badge>
-            </CardHeader>
-            <CardContent className="min-h-[200px]">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                </div>
-              ) : tickets.length > 0 ? (
-                <div className="space-y-4">
-                  {tickets.map((ticket) => (
-                    <div key={ticket.id} className="p-4 rounded-xl border border-border bg-muted/20 space-y-2">
-                      <div className="flex justify-between items-start">
-                        <div className="font-bold">{ticket.subject}</div>
-                        {getStatusBadge(ticket.status)}
-                      </div>
-                      <p className="text-sm text-muted-foreground line-clamp-2">{ticket.message}</p>
-                      <div className="flex items-center gap-4 pt-2 text-[10px] text-muted-foreground">
-                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}</span>
-                        <span>ID: {ticket.id.substring(0, 8)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center p-8">
-                  <div className="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center mb-4">
-                    <MessageSquare className="w-8 h-8 text-muted-foreground" />
+          {activeTab === 'list' && (
+              <Card className="glass-card">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Ваши обращения</CardTitle>
+                    <CardDescription>История ваших тикетов</CardDescription>
                   </div>
-                  <h3 className="font-bold">У вас пока нет обращений</h3>
-                  <p className="text-sm text-muted-foreground max-w-xs mt-2">
-                    Если у вас возникла проблема, создайте новый тикет...
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  <Badge variant="outline" className="border-primary text-primary">
+                    {tickets.filter(t => t.status !== 'closed').length} активных
+                  </Badge>
+                </CardHeader>
+                <CardContent className="min-h-[200px]">
+                  {isLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                    </div>
+                  ) : tickets.length > 0 ? (
+                    <div className="space-y-4">
+                      {tickets.map((ticket) => (
+                        <div 
+                          key={ticket.id} 
+                          className="p-4 rounded-xl border border-border bg-muted/20 space-y-2 cursor-pointer hover:bg-muted/40 transition-colors"
+                          onClick={() => {
+                              setSelectedTicket(ticket);
+                              setActiveTab('chat');
+                          }}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="font-bold">{ticket.subject}</div>
+                            {getStatusBadge(ticket.status)}
+                          </div>
+                          <p className="text-sm text-muted-foreground line-clamp-2">{ticket.message}</p>
+                          <div className="flex items-center gap-4 pt-2 text-[10px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}</span>
+                            <span>ID: {ticket.id.substring(0, 8)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-center p-8">
+                      <div className="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center mb-4">
+                        <MessageSquare className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                      <h3 className="font-bold">У вас пока нет обращений</h3>
+                      <p className="text-sm text-muted-foreground max-w-xs mt-2 mb-6">
+                        Если у вас возникла проблема, создайте новый тикет, и мы вам поможем.
+                      </p>
+                      <Button onClick={() => setActiveTab('new')} className="rounded-xl px-8">Создать тикет</Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+          )}
 
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle>Создать обращение</CardTitle>
-              <CardDescription>Опишите вашу проблему максимально подробно</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Тема обращения</label>
-                <Input 
-                  placeholder="Например: Проблема с оплатой" 
-                  className="bg-muted/30 border-border rounded-xl"
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  disabled={isSending}
-                />
+          {activeTab === 'new' && (
+              <Card className="glass-card animate-in fade-in slide-in-from-bottom-4">
+                <CardHeader>
+                  <div className="flex items-center gap-4">
+                      <Button variant="ghost" size="icon" className="rounded-full shrink-0" onClick={() => setActiveTab('list')}>
+                          <ArrowLeft className="w-5 h-5" />
+                      </Button>
+                      <div>
+                          <CardTitle>Создать обращение</CardTitle>
+                          <CardDescription>Опишите вашу проблему максимально подробно</CardDescription>
+                      </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Тема обращения</label>
+                    <Input 
+                      placeholder="Например: Проблема с оплатой" 
+                      className="bg-muted/30 border-border rounded-xl"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      disabled={isSending}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Сообщение</label>
+                    <textarea 
+                      className="w-full min-h-[150px] bg-muted/30 border border-border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                      placeholder="Опишите детали..."
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      disabled={isSending}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end pt-2">
+                    <Button 
+                      onClick={handleSubmit}
+                      className="bg-primary text-black hover:bg-primary/90 rounded-xl px-8"
+                      disabled={isSending || !subject || !message}
+                    >
+                      {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Отправить'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+          )}
+
+          {activeTab === 'chat' && selectedTicket && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 h-full">
+                  <div className="mb-4">
+                    <Button variant="ghost" size="sm" className="rounded-full gap-2" onClick={() => setActiveTab('list')}>
+                        <ArrowLeft className="w-4 h-4" /> Назад к списку
+                    </Button>
+                  </div>
+                  <TicketChatView ticket={selectedTicket} onClose={() => setActiveTab('list')} />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Сообщение</label>
-                <textarea 
-                  className="w-full min-h-[150px] bg-muted/30 border border-border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-                  placeholder="Опишите детали..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  disabled={isSending}
-                />
-              </div>
-              <div className="flex items-center justify-between pt-2">
-                <Button variant="outline" className="rounded-xl gap-2 border-border" disabled={isSending}>
-                  <Paperclip className="w-4 h-4" /> Прикрепить файл
-                </Button>
-                <Button 
-                  onClick={handleSubmit}
-                  className="bg-primary text-black hover:bg-primary/90 rounded-xl px-8"
-                  disabled={isSending || !subject || !message}
-                >
-                  {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Отправить'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -234,9 +275,6 @@ export default function Support() {
                   </AccordionItem>
                 ))}
               </Accordion>
-              <Button variant="link" className="w-full mt-4 text-primary text-xs gap-1" onClick={() => window.location.href='/faq'}>
-                Смотреть все вопросы <ExternalLink className="w-3 h-3" />
-              </Button>
             </CardContent>
           </Card>
 

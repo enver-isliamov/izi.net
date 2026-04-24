@@ -9,8 +9,10 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAppConfig } from '@/hooks/useAppConfig';
 
 export default function Login() {
+  const { telegramBotName } = useAppConfig();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -139,7 +141,7 @@ export default function Login() {
       if (error) throw error;
       
       // 3. Open bot
-      const botName = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot';
+      const botName = telegramBotName;
       const link = `https://t.me/${botName}?start=auth_${loginToken}`;
       
       toast.success('Переходим в Telegram для подтверждения...', { id: toastId });

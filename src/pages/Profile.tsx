@@ -17,9 +17,11 @@ import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { useAppConfig } from '@/hooks/useAppConfig';
 
 export default function Profile() {
   const { user, signOut } = useAuth();
+  const { telegramBotName } = useAppConfig();
   const [userData, setUserData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -117,7 +119,7 @@ export default function Profile() {
       }
       
       // 3. Open Telegram
-      const botName = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot';
+      const botName = telegramBotName;
       const link = `https://t.me/${botName}?start=link_${token}`;
       
       toast.success('Ссылка готова! Переходим в Telegram...', { id: toastId });

@@ -579,6 +579,12 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
 }
 
 // Health check and configuration status
+app.get('/api/config', (req, res) => {
+  res.json({
+    telegramBotName: process.env.VITE_TELEGRAM_BOT_NAME || process.env.TELEGRAM_BOT_NAME || 'izinet_bot'
+  });
+});
+
 app.get('/api/health', (req, res) => {
   const configStatus = {
     supabase: !!process.env.VITE_SUPABASE_URL,
@@ -811,6 +817,51 @@ function setupRealtimeListener() {
           if (uuidMatch) {
             const uuid = uuidMatch[1];
             await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
+          }
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'support_tickets'
+      },
+      async (payload) => {
+        const newTicket = payload.new;
+        if (bot && botAdminId) {
+          try {
+            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).single();
+            const msg = `🆕 <b>Новое обращение!</b>\n\n<b>От:</b> ${user?.email || 'Неизвестный'}\n<b>Тема:</b> ${newTicket.subject}\n<b>Обращение:</b> ${newTicket.message}\n\n<i>ID Тикета: ${newTicket.id}</i>\n----------\nОтветьте на это сообщение для связи с пользователем.`;
+            await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
+          } catch (e) {
+            console.error('Error sending ticket to admin TG', e);
+          }
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'support_messages',
+        filter: "sender=eq.user"
+      },
+      async (payload) => {
+        const newMessage = payload.new;
+        if (bot && botAdminId) {
+          try {
+             // Get ticket info for user email
+             const {data: t} = await supabase.from('support_tickets').select('user_id, subject').eq('id', newMessage.ticket_id).single();
+             if (t) {
+               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).single();
+               const msg = `💬 <b>Новое сообщение в тикете!</b>\n\n<b>От:</b> ${u?.email || 'Неизвестный'}\n<b>Тема:</b> ${t.subject}\n<b>Сообщение:</b> ${newMessage.content}\n\n<i>ID Тикета: ${newMessage.ticket_id}</i>\n----------\nОтветьте на это сообщение для ответа пользователю.`;
+               await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
+             }
+          } catch (e) {
+             console.error('Error sending message to admin TG', e);
           }
         }
       }
@@ -1192,6 +1243,7 @@ if (bot) {
     if (botAdminId && chatId.toString() === botAdminId.toString()) {
       const replyToMsg = ctx.message.reply_to_message;
       if (replyToMsg) {
+        // Fallback or explicit mapping check for live-chat TG-TG
         const originalChatId = adminReplyMap.get(replyToMsg.message_id);
         if (originalChatId) {
           try {
@@ -1200,6 +1252,31 @@ if (bot) {
           } catch(e) {
             console.error('Failed to send reply to user', e);
             return ctx.reply('❌ Ошибка отправки ответа пользователю.');
+          }
+        }
+        
+        // --- NEW: Handle replies to UI Tickets ---
+        if ('text' in replyToMsg && replyToMsg.text) {
+          const match = replyToMsg.text.match(/ID Тикета:\s*([a-f0-9\-]+)/i);
+          if (match && match[1]) {
+            const ticketId = match[1];
+            try {
+              // Check if ticket exists first? Just insert message.
+              await supabase.from('support_messages').insert({
+                ticket_id: ticketId,
+                sender: 'admin',
+                content: text
+              });
+              
+              // Also update ticket status to in_progress or somewhat
+              // await supabase.from('support_tickets').update({status: 'in_progress'}).eq('id', ticketId);
+              
+              ctx.reply('✅ Ответ доставлен пользователю в интерфейс приложения.');
+              return;
+            } catch(e) {
+              console.error('Failed to save admin reply to db', e);
+              return ctx.reply('❌ Ошибка сохранения ответа в базу данных.');
+            }
           }
         }
       }
