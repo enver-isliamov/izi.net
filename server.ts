@@ -983,7 +983,20 @@ app.post('/api/auth/telegram/verify', async (req, res) => {
 
 // --- Bot Logic ---
 
-// Handle /start and /start link_TOKEN
+const showMainMenu = (ctx: any) => {
+  const username = ctx.from.username || ctx.from.first_name;
+  return ctx.reply(`Привет, ${username}! 🌐\n\nЯ бот ${botName}. Здесь ты можешь:\n• Проверить статус подписки\n• Узнать остаток трафика\n• Изменить пароль\n• Обратиться в поддержку`, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📊 Моя подписка и баланс', callback_data: 'action_status' }],
+        [{ text: '🎧 Связаться с поддержкой', callback_data: 'action_support' }],
+        [{ text: '🔑 Сменить пароль', callback_data: 'action_password' }],
+        [{ text: 'ℹ️ Справка', callback_data: 'action_help' }]
+      ]
+    }
+  });
+};
+
 if (bot) {
   bot.start(async (ctx) => {
   const startPayload = (ctx as any).startPayload;
@@ -1006,7 +1019,7 @@ if (bot) {
       }
 
       // 2. Update user profile
-      const { data: updateData, error: updateErr, count } = await supabase
+      const { data: updateData, error: updateErr } = await supabase
         .from('users')
         .update({
           telegram_id: chatId.toString(),
@@ -1030,7 +1043,8 @@ if (bot) {
       await supabase.from('telegram_linking_tokens').delete().eq('token', token);
 
       console.log(`Successfully linked Telegram ${chatId} to user ${linkData.user_id}`);
-      return ctx.reply('✅ Аккаунт izinet успешно привязан!\n\nТеперь вы можете получать уведомления и управлять подпиской прямо здесь.');
+      await ctx.reply('✅ Аккаунт izinet успешно привязан!\n\nТеперь вы можете получать уведомления и управлять подпиской прямо здесь.');
+      return showMainMenu(ctx);
     } catch (error) {
       console.error('Bot linking error:', error);
       return ctx.reply('❌ Произошла ошибка при привязке аккаунта. Попробуйте позже.');
@@ -1076,50 +1090,181 @@ if (bot) {
   }
 
   // Generic welcome
-  return ctx.reply(`Привет, ${username}! 🌐\n\nЯ бот izinet. Здесь ты можешь:\n• Проверить статус подписки\n• Узнать остаток трафика\n• Получить помощь\n\nЕсли ты хочешь привязать свой аккаунт, нажми "Привязать Telegram" в личном кабинете на сайте.`);
+  return showMainMenu(ctx);
   });
 
-  // Stats Command
-  bot.command('status', async (ctx) => {
-  const chatId = ctx.chat.id.toString();
-  
-  try {
-    const { data: userData, error: userErr } = await supabase
-      .from('users')
-      .select('id, email, balances(amount), subscriptions(*)')
-      .eq('telegram_id', chatId)
-      .single();
-
-    if (userErr || !userData) {
-      return ctx.reply('⚠️ Ваш аккаунт не привязан. Сделайте это в личном кабинете на сайте.');
-    }
-
-    const balance = userData.balances?.[0]?.amount || 0;
-    const sub = userData.subscriptions?.[0];
+  bot.action('action_status', async (ctx) => {
+    ctx.answerCbQuery();
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return;
     
-    let statusText = `👤 Аккаунт: ${userData.email}\n💰 Баланс: ${balance} ₽\n\n`;
-    
-    if (sub) {
-      const expiryDate = new Date(sub.expires_at).toLocaleDateString();
-      const trafficUsed = (sub.traffic_used_mb / 1024).toFixed(2);
-      const trafficLimit = (sub.traffic_limit_mb / 1024).toFixed(2);
+    try {
+      const { data: userData, error: userErr } = await supabase
+        .from('users')
+        .select('id, email, balances(amount), subscriptions(*)')
+        .eq('telegram_id', chatId)
+        .single();
+
+      if (userErr || !userData) {
+        return ctx.reply('⚠️ Ваш аккаунт не привязан. Сделайте это в личном кабинете на сайте.');
+      }
+
+      const balance = userData.balances?.[0]?.amount || 0;
+      const sub = userData.subscriptions?.[0];
       
-      statusText += `💎 Подписка: ${sub.plan_type.toUpperCase()}\n`;
-      statusText += `📅 Истекает: ${expiryDate}\n`;
-      statusText += `📊 Трафик: ${trafficUsed} / ${trafficLimit} ГБ`;
-    } else {
-      statusText += `❌ Активной подписки нет.`;
-    }
+      let statusText = `👤 Аккаунт: ${userData.email}\n💰 Баланс: ${balance} ₽\n\n`;
+      
+      if (sub) {
+        const expiryDate = new Date(sub.expires_at).toLocaleDateString();
+        const trafficUsed = (sub.traffic_used_mb / 1024).toFixed(2);
+        const trafficLimit = (sub.traffic_limit_mb / 1024).toFixed(2);
+        
+        statusText += `💎 Подписка: ${sub.plan_type.toUpperCase()}\n`;
+        statusText += `📅 Истекает: ${expiryDate}\n`;
+        statusText += `📊 Трафик: ${trafficUsed} / ${trafficLimit} ГБ`;
+      } else {
+        statusText += `❌ Активной подписки нет.`;
+      }
 
-    ctx.reply(statusText);
-  } catch (error) {
-    console.error('Bot status error:', error);
-    ctx.reply('❌ Ошибка при получении данных.');
-  }
+      ctx.reply(statusText);
+    } catch (error) {
+      console.error('Bot status error:', error);
+      ctx.reply('❌ Ошибка при получении данных.');
+    }
   });
 
-  // Help Command
-  bot.help((ctx) => ctx.reply('Доступные команды:\n/status - Моя подписка и баланс\n/help - Справка\n/support - Связаться с поддержкой'));
+  bot.action('action_support', (ctx) => {
+    ctx.answerCbQuery();
+    if (!ctx.chat) return;
+    botSessions.set(ctx.chat.id, { state: 'support' });
+    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш специалист ответит вам.\n\nДля выхода из режима поддержки нажмите кнопку ниже.', {
+      reply_markup: {
+        inline_keyboard: [[{ text: '❌ Выйти из режима поддержки', callback_data: 'action_exit_mode' }]]
+      }
+    });
+  });
+
+  bot.action('action_password', (ctx) => {
+    ctx.answerCbQuery();
+    if (!ctx.chat) return;
+    botSessions.set(ctx.chat.id, { state: 'password' });
+    ctx.reply('🔑 Введите новый пароль для вашего аккаунта (минимум 8 символов):\n\nДля отмены нажмите кнопку ниже.', {
+      reply_markup: {
+        inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'action_exit_mode' }]]
+      }
+    });
+  });
+
+  bot.action('action_help', (ctx) => {
+    ctx.answerCbQuery();
+    ctx.reply(`Доступные команды:\n• Моя подписка и баланс\n• Связаться с поддержкой\n• Сменить пароль\n\nВсё это доступно в главном меню командой /start`);
+  });
+
+  bot.action('action_exit_mode', (ctx) => {
+    ctx.answerCbQuery();
+    if (!ctx.chat) return;
+    botSessions.delete(ctx.chat.id);
+    ctx.reply('✅ Вы вернулись в обычный режим.', {
+      reply_markup: {
+        inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
+      }
+    });
+  });
+
+  bot.action('action_menu', (ctx) => {
+    ctx.answerCbQuery();
+    return showMainMenu(ctx);
+  });
+
+  // Handle all other text messages
+  bot.on('text', async (ctx) => {
+    const chatId = ctx.chat.id;
+    const text = ctx.message.text;
+
+    // Check if admin is replying to a forwarded user message
+    if (botAdminId && chatId.toString() === botAdminId.toString()) {
+      const replyToMsg = ctx.message.reply_to_message;
+      if (replyToMsg) {
+        const originalChatId = adminReplyMap.get(replyToMsg.message_id);
+        if (originalChatId) {
+          try {
+            await ctx.telegram.sendMessage(originalChatId, `💬 Сообщение от поддержки:\n\n${text}`);
+            return;
+          } catch(e) {
+            console.error('Failed to send reply to user', e);
+            return ctx.reply('❌ Ошибка отправки ответа пользователю.');
+          }
+        }
+      }
+    }
+
+    // Check user sessions
+    const session = botSessions.get(chatId);
+    
+    if (session?.state === 'support') {
+      if (!botAdminId) {
+         return ctx.reply('К сожалению, поддержка сейчас недоступна.');
+      }
+      try {
+        const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
+        // Send to admin
+        const sentMsg = await ctx.telegram.sendMessage(botAdminId, `🆘 Вопрос от пользователя ${username} (ID: ${chatId}):\n\n${text}`);
+        // Save mapping so admin can reply
+        adminReplyMap.set(sentMsg.message_id, chatId);
+        ctx.reply('✅ Ваше сообщение отправлено в поддержку. Ожидайте ответа (можно писать ещё сообщения, мы их получим).');
+      } catch (error) {
+         console.error('Failed to forward to admin', error);
+         ctx.reply('❌ Ошибка связи с сервером поддержки.');
+      }
+      return;
+    }
+
+    if (session?.state === 'password') {
+      if (text.length < 8) {
+        return ctx.reply('⚠️ Пароль должен содержать минимум 8 символов. Попробуйте еще раз:');
+      }
+
+      // Reset password logic
+      try {
+        // Find user
+        const { data: userData, error: userErr } = await supabase
+          .from('users')
+          .select('id')
+          .eq('telegram_id', chatId.toString())
+          .single();
+
+        if (userErr || !userData) {
+          botSessions.delete(chatId);
+          return ctx.reply('⚠️ Ваш Telegram не привязан к аккаунту izinet. Невозможно сменить пароль.');
+        }
+
+        const { error: updateErr } = await supabase.auth.admin.updateUserById(userData.id, {
+          password: text
+        });
+
+        if (updateErr) throw updateErr;
+
+        botSessions.delete(chatId);
+        ctx.reply('✅ Пароль успешно изменен! Вы можете использовать его для входа.', {
+          reply_markup: {
+            inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
+          }
+        });
+      } catch (error) {
+        console.error('Password change error', error);
+        ctx.reply('❌ Ошибка при смене пароля. Попробуйте позже.');
+      }
+      return;
+    }
+
+    // Default reply if no session and not a command
+    ctx.reply('Я не понимаю эту команду. Воспользуйтесь меню.', {
+      reply_markup: {
+        inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
+      }
+    });
+  });
+
 }
 
 // Start Polling (Development)
