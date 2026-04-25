@@ -84,11 +84,12 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
     
     setSending(true);
     try {
-      const { error } = await supabase.from('support_messages').insert({
+      const { data, error } = await supabase.from('support_messages').insert({
         ticket_id: ticket.id,
         sender: 'user',
-        content: inputText.trim() // <-- Using exactly the inputText.trim()
-      });
+        content: inputText.trim()
+      }).select().single();
+
       if (error) {
         if (error.code === 'PGRST205') {
             toast.error('Администратор еще не обновил базу данных для чата. Сообщение не отправлено.');
@@ -96,6 +97,14 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
             throw error;
         }
       } else {
+        // Notify admin via server API
+        if (data) {
+          fetch('/api/support/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticketId: data.id, type: 'new_message' })
+          }).catch(e => console.error('Notify error:', e));
+        }
         setInputText('');
       }
     } catch(e) {

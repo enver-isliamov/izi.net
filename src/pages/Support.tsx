@@ -87,15 +87,24 @@ export default function Support() {
 
     setIsSending(true);
     try {
-      const { error } = await supabase.from('support_tickets').insert({
+      const { data, error } = await supabase.from('support_tickets').insert({
         user_id: user.id,
         subject,
         message,
         status: 'open',
         priority: 'medium'
-      });
+      }).select().single();
 
       if (error) throw error;
+      
+      // Notify admin via server API
+      if (data) {
+        fetch('/api/support/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticketId: data.id, type: 'new_ticket' })
+        }).catch(e => console.error('Notify error:', e));
+      }
       
       toast.success('Обращение отправлено! Мы ответим вам в ближайшее время.');
       setSubject('');
