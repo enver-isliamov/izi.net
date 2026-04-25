@@ -122,6 +122,19 @@ export default function RefundPolicy() {
           </CardContent>
         </Card>
 
+        <Card className="glass-card border-primary/20">
+          <CardHeader>
+            <CardTitle>4. Законодательные оговорки</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+            <p>
+              4.1. Настоящая Политика не ограничивает ваши законные права на возврат или расторжение договора, предусмотренные императивными нормами законодательства вашей страны, которые не могут быть изменены договором.
+            </p>
+            <p>
+              4.2. В случае, если обязательные законы вашей юрисдикции требуют предоставления возврата за цифровой контент, даже при наличии вашего явного согласия на начало исполнения услуги, мы будем следовать таким нормам.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
