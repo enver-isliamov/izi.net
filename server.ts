@@ -407,6 +407,35 @@ const xui = new XUIService();
 
 // --- API Routes ---
 
+app.post('/api/support/notify', async (req, res) => {
+  const { ticketId, type, content } = req.body;
+  
+  if (!bot || !botAdminId) {
+    return res.status(503).json({ error: 'Telegram bot not configured' });
+  }
+
+  try {
+    if (type === 'new_ticket') {
+      const { data: ticket } = await supabase.from('support_tickets').select('*, users(email)').eq('id', ticketId).single();
+      if (ticket) {
+        const msg = `🆕 <b>Новое обращение!</b>\n\n<b>От:</b> ${ticket.users?.email || 'Неизвестный'}\n<b>Тема:</b> ${ticket.subject}\n<b>Текст:</b> ${ticket.message}\n\n<i>ID: ${ticket.id}</i>\n----------\nОтветьте на это сообщение для связи.`;
+        await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
+      }
+    } else if (type === 'new_message') {
+      const { data: msgData } = await supabase.from('support_messages').select('*, support_tickets(subject, user_id)').eq('id', ticketId).single();
+      if (msgData) {
+        const { data: user } = await supabase.from('users').select('email').eq('id', msgData.support_tickets.user_id).single();
+        const msg = `💬 <b>Новое сообщение в тикете!</b>\n\n<b>От:</b> ${user?.email || 'Неизвестный'}\n<b>Тема:</b> ${msgData.support_tickets.subject}\n<b>Текст:</b> ${msgData.content}\n\n<i>ID Тикета: ${msgData.ticket_id}</i>\n----------\nОтветьте для ответа.`;
+        await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
+      }
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Manual notify error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 💰 Create Payment Link
 app.post('/api/pay/create', async (req, res) => {
   const { userId, amount, method } = req.body;

@@ -36,7 +36,8 @@ create policy "Users can send messages to their tickets"
     and sender = 'user'
   );
 
--- Настройка Realtime (чтобы сообщения обновлялись без перезагрузки страницы)
+-- Настройка Realtime (убедитесь, что таблица support_tickets уже добавлена)
+-- Если таблица support_messages уже в публикации, эта команда может выдать ошибку, которую можно игнорировать.
 alter publication supabase_realtime add table public.support_messages;
 ```
 

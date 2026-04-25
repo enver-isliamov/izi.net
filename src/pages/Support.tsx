@@ -87,15 +87,24 @@ export default function Support() {
 
     setIsSending(true);
     try {
-      const { error } = await supabase.from('support_tickets').insert({
+      const { data, error } = await supabase.from('support_tickets').insert({
         user_id: user.id,
         subject,
         message,
         status: 'open',
         priority: 'medium'
-      });
+      }).select().single();
 
       if (error) throw error;
+      
+      // Notify admin via server API
+      if (data) {
+        fetch('/api/support/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticketId: data.id, type: 'new_ticket' })
+        }).catch(e => console.error('Notify error:', e));
+      }
       
       toast.success('Обращение отправлено! Мы ответим вам в ближайшее время.');
       setSubject('');
@@ -121,22 +130,24 @@ export default function Support() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
-          <p className="text-muted-foreground mt-1">Остались вопросы? Мы всегда на связи</p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-3">
-            {activeTab !== 'new' && (
-              <Button className="rounded-xl px-6" onClick={() => setActiveTab('new')}>
-                 <Plus className="w-4 h-4 mr-2" /> Новое обращение
+      {activeTab !== 'chat' && (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
+            <p className="text-muted-foreground mt-1">Остались вопросы? Мы всегда на связи</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+              {activeTab !== 'new' && (
+                <Button className="rounded-xl px-6" onClick={() => setActiveTab('new')}>
+                   <Plus className="w-4 h-4 mr-2" /> Новое обращение
+                </Button>
+              )}
+              <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open(`https://t.me/${telegramBotName}`, '_blank')}>
+              <Send className="w-4 h-4" /> Перейти в Telegram
               </Button>
-            )}
-            <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open(`https://t.me/${telegramBotName}`, '_blank')}>
-            <Send className="w-4 h-4" /> Перейти в Telegram
-            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
