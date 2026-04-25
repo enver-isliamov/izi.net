@@ -618,6 +618,7 @@ app.get('/api/health', (req, res) => {
   const configStatus = {
     supabase: !!process.env.VITE_SUPABASE_URL,
     bot: !!process.env.TELEGRAM_BOT_TOKEN,
+    botAdminId: !!process.env.TELEGRAM_ADMIN_ID,
     xui: !!process.env.XUI_HOST && !!process.env.XUI_USERNAME && !!process.env.XUI_PASSWORD,
     inboundId: process.env.XUI_INBOUND_ID || '1'
   };
@@ -1385,7 +1386,8 @@ if (bot) {
   bot.launch().then(() => {
     console.log('🤖 Telegram Bot started');
   }).catch((err) => {
-    console.error('Bot launch failed. Check your TELEGRAM_BOT_TOKEN');
+    console.error('❌ Bot launch failed:', err.message || err);
+    console.error('💡 Please check if your TELEGRAM_BOT_TOKEN is correct and not empty.');
   });
 } else {
   console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
