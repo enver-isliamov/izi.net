@@ -9,11 +9,14 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAppConfig } from '@/hooks/useAppConfig';
 
 export default function Login() {
+  const { telegramBotName } = useAppConfig();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [refCode, setRefCode] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -39,6 +42,27 @@ export default function Login() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isForgotPassword) {
+      if (!email) {
+        toast.error('Пожалуйста, введите ваш Email');
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + '/update-password',
+        });
+        if (error) throw error;
+        toast.success('Ссылка для восстановления отправлена на почту!');
+        setIsForgotPassword(false);
+      } catch (error: any) {
+        toast.error(error.message || 'Ошибка отправки ссылки');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (!email || !password) {
       toast.error('Пожалуйста, заполните все поля');
       return;
@@ -117,7 +141,7 @@ export default function Login() {
       if (error) throw error;
       
       // 3. Open bot
-      const botName = 'izinet_bot';
+      const botName = telegramBotName;
       const link = `https://t.me/${botName}?start=auth_${loginToken}`;
       
       toast.success('Переходим в Telegram для подтверждения...', { id: toastId });
@@ -175,8 +199,12 @@ export default function Login() {
           <TabsContent value="login">
             <Card className="glass-card border-border/50">
               <CardHeader>
-                <CardTitle>С возвращением</CardTitle>
-                <CardDescription>Войдите в свой аккаунт для управления VPN</CardDescription>
+                <CardTitle>{isForgotPassword ? 'Восстановление пароля' : 'С возвращением'}</CardTitle>
+                <CardDescription>
+                  {isForgotPassword 
+                    ? 'Введите email, и мы отправим ссылку для сброса пароля' 
+                    : 'Войдите в свой аккаунт для управления VPN'}
+                </CardDescription>
               </CardHeader>
               <form onSubmit={handleLogin}>
                 <CardContent className="space-y-4">
@@ -192,45 +220,57 @@ export default function Login() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        type="password" 
-                        placeholder="Пароль" 
-                        className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                      />
+                  {!isForgotPassword && (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input 
+                          type="password" 
+                          placeholder="Пароль" 
+                          className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <Button type="button" variant="link" className="text-xs text-primary hover:text-primary/80 p-0 h-auto">Забыли пароль?</Button>
-                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-right">
+                    {isForgotPassword ? (
+                      <Button type="button" variant="link" className="text-xs text-muted-foreground hover:text-primary p-0 h-auto" onClick={() => setIsForgotPassword(false)}>
+                        Вернуться ко входу
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="link" className="text-xs text-primary hover:text-primary/80 p-0 h-auto" onClick={() => setIsForgotPassword(true)}>
+                        Забыли пароль?
+                      </Button>
+                    )}
                   </div>
                   <Button type="submit" disabled={isLoading} className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl h-11 neon-glow">
                     {isLoading ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : null}
-                    Войти <ArrowRight className="ml-2 w-4 h-4" />
+                    {isForgotPassword ? 'Сбросить пароль' : 'Войти'} <ArrowRight className="ml-2 w-4 h-4" />
                   </Button>
                 </CardContent>
               </form>
-              <CardFooter className="flex flex-col space-y-4">
-                <div className="relative w-full">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-border" />
+              {!isForgotPassword && (
+                <CardFooter className="flex flex-col space-y-4">
+                  <div className="relative w-full">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t border-border" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">Или через мессенджер</span>
+                    </div>
                   </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">Или через мессенджер</span>
-                  </div>
-                </div>
-                <Button 
-                  onClick={handleTelegramLogin}
-                  type="button" 
-                  variant="outline" 
-                  className="w-full border-border hover:bg-muted rounded-xl h-11 gap-2"
-                >
-                  <Send className="w-4 h-4 text-[#0088cc]" /> Войти через Telegram
-                </Button>
-              </CardFooter>
+                  <Button 
+                    onClick={handleTelegramLogin}
+                    type="button" 
+                    variant="outline" 
+                    className="w-full border-border hover:bg-muted rounded-xl h-11 gap-2"
+                  >
+                    <Send className="w-4 h-4 text-[#0088cc]" /> Войти через Telegram
+                  </Button>
+                </CardFooter>
+              )}
             </Card>
           </TabsContent>
 

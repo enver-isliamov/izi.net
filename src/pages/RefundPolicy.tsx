@@ -3,9 +3,11 @@ import { RefreshCcw, ShieldCheck, Mail } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
+import { useAppConfig } from '@/hooks/useAppConfig';
 
 export default function RefundPolicy() {
   const navigate = useNavigate();
+  const { telegramBotName } = useAppConfig();
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6 flex flex-col items-center">
@@ -81,7 +83,7 @@ export default function RefundPolicy() {
               4.1. <strong>Сроки подачи:</strong> Заявление на возврат (в случаях, описанных в п.2) должно быть подано в течение <strong>24 часов</strong> с момента обнаружения технического сбоя (двойного списания) или неоказания услуги.
             </p>
             <p>
-              4.2. <strong>Куда обращаться:</strong> Для оформления возврата необходимо связаться со службой поддержки путем отправки запроса в Telegram-бот <a href="https://t.me/izinet_bot" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">@izinet_bot</a>, либо на электронную почту (если она доступна в личном кабинете). К обращению обязательно прикрепите подтверждение (чек) об оплате, информацию о вашем Email-аккаунте и описание проблемы (например, выписку о двойном списании).
+              4.2. <strong>Куда обращаться:</strong> Для оформления возврата необходимо связаться со службой поддержки путем отправки запроса в Telegram-бот <a href={`https://t.me/${telegramBotName}`} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">@{telegramBotName}</a>, либо на электронную почту (если она доступна в личном кабинете). К обращению обязательно прикрепите подтверждение (чек) об оплате, информацию о вашем Email-аккаунте и описание проблемы (например, выписку о двойном списании).
             </p>
             <p>
               4.3. <strong>Сроки рассмотрения:</strong> Каждое обращение рассматривается службой поддержки в срок до <strong>14 рабочих дней</strong>. Мы проверим логи системы и информацию от платежного шлюза.
