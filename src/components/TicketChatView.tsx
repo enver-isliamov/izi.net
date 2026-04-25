@@ -107,24 +107,29 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
   };
 
   return (
-    <div className="flex flex-col h-full h-[600px] border border-border rounded-xl overflow-hidden bg-card/30">
+    <div className="flex flex-col h-[70vh] md:h-[600px] border border-border rounded-2xl overflow-hidden bg-card/30 backdrop-blur-sm">
       <div className="bg-muted/30 p-4 border-b border-border flex justify-between items-center">
-        <div>
-          <h3 className="font-bold">{ticket.subject}</h3>
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}
-          </span>
+        <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <MessageCircle className="w-5 h-5" />
+            </div>
+            <div>
+                <h3 className="font-bold text-sm leading-tight line-clamp-1">{ticket.subject}</h3>
+                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}
+                </span>
+            </div>
         </div>
-        <Badge variant="outline" className={ticket.status === 'open' ? 'text-primary border-primary/30' : ''}>
+        <Badge variant="outline" className={`text-[10px] h-5 ${ticket.status === 'open' ? 'text-primary border-primary/30' : ''}`}>
           {ticket.status === 'open' ? 'Открыт' : ticket.status === 'in_progress' ? 'В работе' : 'Закрыт'}
         </Badge>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-primary/10">
         {initialMessage && (
           <div className="flex justify-end">
-            <div className="bg-primary/20 text-primary-foreground max-w-[80%] rounded-2xl rounded-tr-sm p-3 text-sm">
-                <p className="whitespace-pre-wrap text-foreground">{initialMessage.content}</p>
+            <div className="bg-primary text-primary-foreground max-w-[85%] rounded-2xl rounded-tr-sm p-3 text-sm shadow-sm">
+                <p className="whitespace-pre-wrap">{initialMessage.content}</p>
                 <div className="text-[10px] text-right mt-1 opacity-70">
                     {new Date(initialMessage.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                 </div>
@@ -133,21 +138,21 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
         )}
         
         {loading ? (
-             <div className="flex justify-center p-4">
-                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+             <div className="flex justify-center p-8">
+                 <Loader2 className="w-6 h-6 animate-spin text-primary" />
              </div>
         ) : (
             messages.map((m) => {
                 const isUser = m.sender === 'user';
                 return (
-                    <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
                         {!isUser && (
-                            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center mr-2 flex-shrink-0">
-                                <MessageCircle className="w-4 h-4 text-primary" />
+                            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center mr-2 flex-shrink-0 mt-auto mb-1">
+                                <User className="w-4 h-4 text-primary" />
                             </div>
                         )}
-                        <div className={`max-w-[80%] rounded-2xl p-3 text-sm ${isUser ? 'bg-primary/20 text-primary-foreground rounded-tr-sm' : 'bg-muted/50 rounded-tl-sm'}`}>
-                            <p className="whitespace-pre-wrap text-foreground">{m.content}</p>
+                        <div className={`max-w-[85%] shadow-sm rounded-2xl p-3 text-sm ${isUser ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-muted rounded-tl-sm text-foreground'}`}>
+                            <p className="whitespace-pre-wrap">{m.content}</p>
                             <div className={`text-[10px] mt-1 opacity-70 ${isUser ? 'text-right' : 'text-left'}`}>
                                 {new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                             </div>
@@ -159,15 +164,15 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 bg-muted/20 border-t border-border">
+      <div className="p-3 bg-muted/40 border-t border-border backdrop-blur-md">
         {ticket.status === 'closed' ? (
-          <div className="text-center text-sm text-muted-foreground p-2">
-             Тикет закрыт. Вы не можете отправлять сообщения.
+          <div className="text-center text-xs text-muted-foreground p-2">
+             Это обращение закрыто. Новые сообщения не принимаются.
           </div>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <Input 
-              placeholder="Напишите сообщение..." 
+              placeholder="Введите сообщение..." 
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
@@ -177,10 +182,15 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
                   }
               }}
               disabled={sending}
-              className="bg-background rounded-full"
+              className="bg-background border-border/50 rounded-2xl h-10 px-4 focus-visible:ring-primary/30"
             />
-            <Button onClick={handleSend} disabled={sending || !inputText.trim()} size="icon" className="rounded-full bg-primary flex-shrink-0">
-              {sending ? <Loader2 className="w-4 h-4 animate-spin text-primary-foreground" /> : <Send className="w-4 h-4 text-primary-foreground" />}
+            <Button 
+                onClick={handleSend} 
+                disabled={sending || !inputText.trim()} 
+                size="icon" 
+                className="rounded-xl h-10 w-10 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 shrink-0"
+            >
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 shrink-0" />}
             </Button>
           </div>
         )}
