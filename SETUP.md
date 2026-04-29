@@ -160,12 +160,14 @@ VITE_SUPABASE_SERVICE_KEY=ваш-service-role-ключ
 
 ## Шаг 5: Подключитесь к платёжной системе
 
-### Platega (Рекомендуется)
-1. Зарегистрируйтесь на [platega.io](https://platega.io)
-2. Получите API ключ
+### Enot.io (Рекомендуется)
+1. Зарегистрируйтесь на [enot.io](https://enot.io)
+2. Получите API ключи (Merchant ID и Секретные ключи)
 3. Добавьте в `.env`:
 ```env
-VITE_PLATEGA_API_KEY=ваш-platega-api-key
+ENOT_MERCHANT_ID=ваш-merchant-id
+ENOT_SECRET_KEY=секрет-1
+ENOT_SECRET_KEY2=секрет-2
 ```
 
 ## Шаг 6: Подключите VPN сервер
