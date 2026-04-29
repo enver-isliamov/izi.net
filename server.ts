@@ -1123,7 +1123,34 @@ const showMainMenu = (ctx: any) => {
   });
 };
 
+async function launchBot(retries = 5) {
+  if (!bot) return;
+
+  try {
+    console.log('🤖 Attempting to launch Telegram Bot...');
+    
+    // Always clear webhook before polling to avoid conflicts
+    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    
+    await bot.launch();
+    console.log('✅ Telegram Bot started successfully');
+  } catch (err: any) {
+    if (err.response?.error_code === 409) {
+      if (retries > 0) {
+        console.warn(`⚠️ Bot conflict (409). Another instance is running. Retrying in 5s... (${retries} attempts left)`);
+        setTimeout(() => launchBot(retries - 1), 5000);
+      } else {
+        console.error('❌ Bot launch failed after multiple retries due to 409 Conflict.');
+        console.error('💡 TIP: Make sure you don\'t have another instance of this bot running elsewhere.');
+      }
+    } else {
+      console.error('❌ Bot launch failed with unexpected error:', err.message || err);
+    }
+  }
+}
+
 if (bot) {
+  // Use session-based state management
   bot.start(async (ctx) => {
   const startPayload = (ctx as any).startPayload;
   const chatId = ctx.chat.id;
@@ -1419,18 +1446,6 @@ if (bot) {
 
 }
 
-// Start Polling (Development)
-if (bot) {
-  bot.launch().then(() => {
-    console.log('🤖 Telegram Bot started');
-  }).catch((err) => {
-    console.error('❌ Bot launch failed:', err.message || err);
-    console.error('💡 Please check if your TELEGRAM_BOT_TOKEN is correct and not empty.');
-  });
-} else {
-  console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
-}
-
 // --- Vite Middleware ---
 
 async function startServer() {
@@ -1443,6 +1458,13 @@ async function startServer() {
   // Initial traffic sync and schedule every 15 minutes
   syncTrafficStats();
   setInterval(syncTrafficStats, 15 * 60 * 1000);
+
+  // Launch Telegram Bot with retry logic
+  if (bot) {
+    launchBot();
+  } else {
+    console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
+  }
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
