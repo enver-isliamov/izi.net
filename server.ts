@@ -340,12 +340,14 @@ class PaymentService {
   private cryptoApiKey: string;
   private enotMerchantId: string;
   private enotSecretKey: string;
+  private enotSecretKey2: string;
 
   constructor() {
     this.cryptoMerchantId = process.env.CRYPTOMUS_MERCHANT_ID || '';
     this.cryptoApiKey = process.env.CRYPTOMUS_API_KEY || '';
     this.enotMerchantId = process.env.ENOT_MERCHANT_ID || '';
     this.enotSecretKey = process.env.ENOT_SECRET_KEY || '';
+    this.enotSecretKey2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || '';
   }
 
   async createCryptomusInvoice(amount: number, userId: string, orderId: string) {
@@ -541,23 +543,35 @@ app.post('/api/pay/webhook/cryptomus', async (req, res) => {
 
 // ⚓ Enot Webhook
 app.post('/api/pay/webhook/enot', async (req, res) => {
+  console.log('🔗 Enot Webhook Received:', JSON.stringify(req.body));
+  
   const { merchant_id, amount, intid, custom_field, sign } = req.body;
   const orderId = req.body.merchant_order_id;
 
+  if (!merchant_id || !amount || !sign || !orderId) {
+    console.warn('⚠️ Malformed Enot Webhook payload');
+    return res.status(400).send('Malformed payload');
+  }
+
   // Enot webhook sign: merchant_id:amount:secret_word2:merchant_order_id
-  // Usually Enot has a second secret key for webhooks
-  const secret2 = process.env.ENOT_SECRET_KEY || ''; 
+  const secret2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || ''; 
   const calculatedSign = crypto
     .createHash('md5')
     .update(`${merchant_id}:${amount}:${secret2}:${orderId}`)
     .digest('hex');
 
-  if (sign !== calculatedSign) {
+  if (sign.toLowerCase() !== calculatedSign.toLowerCase()) {
+    console.warn(`❌ Invalid Enot signature. Got ${sign}, expected ${calculatedSign}`);
     return res.status(400).send('Invalid signature');
   }
 
-  await processSuccessfulPayment(custom_field, parseFloat(amount), orderId, 'enot');
-  res.send('YES');
+  try {
+    await processSuccessfulPayment(custom_field, parseFloat(amount), orderId, 'enot');
+    res.send('YES');
+  } catch (err: any) {
+    console.error('❌ Error processing Enot payment:', err.message);
+    res.status(500).send('Internal Error');
+  }
 });
 
 async function processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
