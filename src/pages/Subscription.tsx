@@ -38,12 +38,19 @@ export default function Subscription() {
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [vpnKeys, setVpnKeys] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const isFetching = React.useRef(false);
   const [wizardMode, setWizardMode] = useState<'extend' | 'new'>('extend');
   const [targetDevice, setTargetDevice] = useState<string | undefined>(undefined);
   const [targetDeviceName, setTargetDeviceName] = useState<string | undefined>(undefined);
 
-  const fetchSubscriptionData = async () => {
-    if (!user) return;
+  const fetchSubscriptionData = async (forceLoading = false) => {
+    if (!user || isFetching.current) return;
+    
+    if (forceLoading || subscriptions.length === 0) {
+      setIsLoading(true);
+    }
+    
+    isFetching.current = true;
     
     try {
       // 1. Fetch active main subscription
@@ -93,12 +100,15 @@ export default function Subscription() {
       toast.error('Проблема с подключением к бэкенду');
     } finally {
       setIsLoading(false);
+      isFetching.current = false;
     }
   };
 
   useEffect(() => {
-    fetchSubscriptionData();
-  }, [user]);
+    if (user?.id) {
+      fetchSubscriptionData(true);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     // Check URL params for auto-open wizard
@@ -107,18 +117,18 @@ export default function Subscription() {
     
     if (action === 'new-device') {
       openWizard('new');
-      setSearchParams({}); // Clear params after open
+      setSearchParams({}, { replace: true }); // Clear params after open
     } else if (target) {
-      // Ищем устройство в vpnKeys (массив уже загрузился)
+      // Ищем устройство в vpnKeys (массив может быть еще не загружен на 100%, но targetDeviceId нам важнее)
       const dev = vpnKeys.find((d: any) => d.id === target);
       if (dev) {
         setTargetDeviceName(dev.label);
       }
       setTargetDevice(target);
       openWizard('extend');
-      setSearchParams({}); // Clear params after open
+      setSearchParams({}, { replace: true }); // Clear params after open
     }
-  }, [searchParams, setSearchParams, vpnKeys]);
+  }, [searchParams, setSearchParams, vpnKeys.length > 0]); // Dependency on length change to avoid deep object comparison loop
 
   const openWizard = (mode: 'extend' | 'new') => {
     setWizardMode(mode);

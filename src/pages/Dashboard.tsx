@@ -29,26 +29,18 @@ export default function Dashboard() {
   const [subscription, setSubscription] = useState<any>(null);
   const [referrals, setReferrals] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const isFetching = React.useRef(false);
 
-  const fetchDashboardData = async () => {
-    if (!user) return;
-    setIsLoading(true);
+  const fetchDashboardData = async (forceLoading = false) => {
+    if (!user || isFetching.current) return;
+    
+    if (forceLoading || !userData) {
+      setIsLoading(true);
+    }
+    
+    isFetching.current = true;
     
     try {
-      // Trigger traffic sync on load to get real-time data
-      // Using a small delay to not compete with initial layout
-      setTimeout(async () => {
-        const { data: { session } } = await supabase.auth.getSession();
-        fetch('/api/subscription/sync-traffic', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`
-          },
-          body: JSON.stringify({ userId: user.id })
-        }).catch(err => console.debug('Traffic sync silent error:', err));
-      }, 500);
-
       const [
         { data: userRes },
         balanceResult,
@@ -86,12 +78,42 @@ export default function Dashboard() {
       console.error('Dashboard data fetch error:', error);
     } finally {
       setIsLoading(false);
+      isFetching.current = false;
     }
   };
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [user]);
+    if (user?.id) {
+      fetchDashboardData(true);
+    }
+  }, [user?.id]);
+
+  // Traffic sync on mount
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const syncTraffic = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        fetch('/api/subscription/sync-traffic', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`
+          },
+          body: JSON.stringify({ userId: user.id })
+        }).then(() => {
+          // After sync, silently refresh data to show updated traffic
+          fetchDashboardData(false);
+        }).catch(err => console.debug('Traffic sync silent error:', err));
+      } catch (err) {
+        console.debug('Session retrieval error:', err);
+      }
+    };
+
+    const timer = setTimeout(syncTraffic, 1000);
+    return () => clearTimeout(timer);
+  }, [user?.id]);
 
   if (isLoading) {
     return (

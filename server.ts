@@ -350,17 +350,19 @@ class PaymentService {
     this.enotSecretKey2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || '';
   }
 
-  async createCryptomusInvoice(amount: number, userId: string, orderId: string) {
+  async createCryptomusInvoice(amount: number, userId: string, orderId: string, origin: string) {
     if (!this.cryptoMerchantId || !this.cryptoApiKey) {
-      throw new Error('Cryptomus credentials missing');
+      throw new Error('Cryptomus credentials missing (Merchant ID or API Key)');
     }
+
+    const host = origin.replace(/^https?:\/\//, '') || process.env.VITE_APP_URL || 'izinet.app';
 
     const payload = {
       amount: amount.toString(),
       currency: 'USD',
       order_id: orderId,
-      url_callback: `https://${process.env.VITE_APP_URL || 'izinet.app'}/api/pay/webhook/cryptomus`,
-      url_return: `https://${process.env.VITE_APP_URL || 'izinet.app'}/dashboard`,
+      url_callback: `https://${host}/api/pay/webhook/cryptomus`,
+      url_return: `${origin}/dashboard`,
       additional_data: userId
     };
 
@@ -379,9 +381,9 @@ class PaymentService {
     return response.data.result.url;
   }
 
-  createEnotInvoice(amount: number, userId: string, orderId: string) {
+  createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
     if (!this.enotMerchantId || !this.enotSecretKey) {
-      throw new Error('Enot.io credentials missing');
+      throw new Error('Enot.io credentials missing. Check ENOT_MERCHANT_ID and ENOT_SECRET_KEY in server environment.');
     }
 
     // Enot signature: merchant_id:amount:secret_word:order_id
@@ -396,7 +398,9 @@ class PaymentService {
       o: orderId,
       s: sign,
       cf: userId, // Custom field to pass userId
-      curr: 'RUB'
+      curr: 'RUB',
+      success_url: `${origin}/dashboard`,
+      fail_url: `${origin}/wallet`
     });
 
     return `https://enot.io/checkout?${params.toString()}`;
@@ -472,13 +476,15 @@ app.post('/api/pay/create', async (req, res) => {
 
     if (txErr) console.warn('Could not log pending transaction:', txErr.message);
 
+    const origin = req.headers.origin || `https://${req.headers.host}`;
+
     let url = '';
     if (method === 'cryptomus') {
-      url = await payment.createCryptomusInvoice(amount, userId, orderId);
+      url = await payment.createCryptomusInvoice(amount, userId, orderId, origin);
     } else if (method === 'enot') {
       // Assuming amount is in USD on frontend, converting to RUB for Enot if needed
       // For now, assume amount is already correct from UI
-      url = payment.createEnotInvoice(amount, userId, orderId);
+      url = payment.createEnotInvoice(amount, userId, orderId, origin);
     } else {
       throw new Error('Unsupported payment method');
     }
