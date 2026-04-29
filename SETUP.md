@@ -200,6 +200,17 @@ pnpm dev
 3. Добавьте переменные окружения в Vercel Dashboard → Settings → Environment Variables
 4. Deploy!
 
+## Шаг 7: Настройка Realtime (Критично для TG-уведомлений)
+
+Для того чтобы сервер мог мгновенно получать уведомления о новых тикетах и сихронизировать данные, необходимо включить Realtime для ключевых таблиц. Выполните этот SQL в Supabase:
+
+```sql
+-- Включение Realtime для основных таблиц
+ALTER PUBLICATION supabase_realtime ADD TABLE public.subscriptions;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.support_tickets;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.support_messages;
+```
+
 ---
 
 ## Быстрая проверка
