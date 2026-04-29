@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [userData, setUserData] = useState<any>(null);
   const [balance, setBalance] = useState<any>(null);
   const [subscription, setSubscription] = useState<any>(null);
+  const [activeServer, setActiveServer] = useState<any>(null);
   const [referrals, setReferrals] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const isFetching = React.useRef(false);
@@ -74,6 +75,15 @@ export default function Dashboard() {
 
       setSubscription(subRes);
       setReferrals(refRes || []);
+
+       if (subRes?.server_id) {
+         const { data: serverData } = await supabase
+           .from('vpn_servers')
+           .select('*')
+           .eq('id', subRes.server_id)
+           .single();
+         setActiveServer(serverData);
+       }
     } catch (error) {
       console.error('Dashboard data fetch error:', error);
     } finally {
@@ -298,15 +308,15 @@ export default function Dashboard() {
 
                 <div className="grid grid-cols-2 gap-4 pt-2">
                    <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
-                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Протокол</div>
+                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Локация</div>
                       <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
-                        <ShieldCheck className="w-3.5 h-3.5 text-primary" /> VLESS
+                        <Globe className="w-3.5 h-3.5 text-primary" /> {activeServer?.name || 'Загрузка...'}
                       </div>
                    </div>
                    <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
-                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Лимит девайсов</div>
+                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Протокол</div>
                       <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
-                        <Smartphone className="w-3.5 h-3.5 text-primary" /> {activeDeviceCount}/{deviceLimit}
+                        <ShieldCheck className="w-3.5 h-3.5 text-primary" /> VLESS
                       </div>
                    </div>
                 </div>

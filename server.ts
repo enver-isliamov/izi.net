@@ -55,6 +55,14 @@ import https from 'https';
 
 dotenv.config();
 
+// Supabase Setup (Initialize early to avoid reference errors)
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; 
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.warn('⚠️ SUPABASE credentials missing in environment variables!');
+}
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
 // Create a global HTTPS agent that ignores self-signed certificate errors (common in VPN panels)
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false
@@ -76,20 +84,18 @@ class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
 
-  constructor() {
-    let host = (process.env.XUI_HOST || '').trim();
-    // Remove trailing slashes and /panel if it exists (we will add it back where needed)
+  constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
+    let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
+    // Remove trailing slashes and /panel
     host = host.replace(/\/+$/, "").replace(/\/panel$/, "");
     
-    // Add protocol if missing. If the user provided IP:PORT, assume HTTP if not specified, 
-    // but usually user should provide https:// for panel
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
     }
     
     this.host = host;
-    this.username = process.env.XUI_USERNAME || '';
-    this.password = process.env.XUI_PASSWORD || '';
+    this.username = serverConfigs?.username || process.env.XUI_USERNAME || '';
+    this.password = serverConfigs?.password || process.env.XUI_PASSWORD || '';
   }
 
   async checkConfig() {
@@ -327,11 +333,48 @@ class XUIService {
     }
   }
 
-  generateVlessLink(uuid: string, email: string) {
-    const host = new URL(this.host).hostname;
+  generateVlessLink(uuid: string, email: string, customDomain?: string) {
+    const host = customDomain || new URL(this.host).hostname;
     // Fallback if inbound fetch fails (Standard TLS, no Reality parameters to avoid strict base64 errors in clients like Hiddify)
     return `vless://${uuid}@${host}:443?type=tcp&security=tls&sni=${host}#izinet_${email}`;
   }
+}
+
+// Multi-server registry
+const xuiInstances = new Map<string, XUIService>();
+
+async function getXuiForServer(serverId?: string | null) {
+  if (!serverId) {
+    // Default fallback to environment variables
+    const defaultId = 'env_default';
+    if (!xuiInstances.has(defaultId)) {
+      xuiInstances.set(defaultId, new XUIService());
+    }
+    const instance = xuiInstances.get(defaultId)!;
+    return { instance, server: null };
+  }
+
+  if (xuiInstances.has(serverId)) {
+    // We still need the server object for domain etc, so fetch from DB
+    const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+    return { instance: xuiInstances.get(serverId)!, server };
+  }
+
+  const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+  if (!server) {
+    const defaultId = 'env_default';
+    if (!xuiInstances.has(defaultId)) xuiInstances.set(defaultId, new XUIService());
+    return { instance: xuiInstances.get(defaultId)!, server: null };
+  }
+
+  const newInstance = new XUIService({
+    host: `${server.ip}:${server.api_port}`,
+    username: server.username,
+    password: server.password
+  });
+
+  xuiInstances.set(serverId, newInstance);
+  return { instance: newInstance, server };
 }
 
 // --- Payment Service ---
@@ -412,6 +455,157 @@ const payment = new PaymentService();
 const xui = new XUIService();
 
 // --- API Routes ---
+
+// --- Admin Middleware ---
+async function adminOnly(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Authentication required' });
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+
+  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+
+  const { data: profile } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || (profile.role !== 'admin' && profile.role !== 'superadmin')) {
+    return res.status(403).json({ error: 'Access denied. Admin role required.' });
+  }
+
+  req.user = { ...user, role: profile.role };
+  next();
+}
+
+// --- Admin API Routes ---
+
+app.get('/api/admin/stats', adminOnly, async (req, res) => {
+  try {
+    const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    const { count: activeSubs } = await supabase.from('subscriptions').select('*', { count: 'exact', head: true }).gt('expires_at', new Date().toISOString());
+    const { data: recentRevenue } = await supabase.from('transactions').select('amount').eq('status', 'completed');
+    
+    // Count admins
+    const { count: adminsCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).in('role', ['admin', 'superadmin']);
+
+    const totalRevenue = recentRevenue?.reduce((sum, tx) => sum + tx.amount, 0) || 0;
+
+    res.json({
+      totalUsers: usersCount,
+      activeSubscriptions: activeSubs,
+      totalRevenue,
+      adminsCount
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/users', adminOnly, async (req, res) => {
+  const { search } = req.query;
+  // Select users joined with their active subscription and assigned server
+  let query = supabase
+    .from('users')
+    .select(`
+      *,
+      subscriptions (
+        id,
+        status,
+        expires_at,
+        traffic_limit_mb,
+        traffic_used_mb,
+        vpn_servers (
+          name,
+          location_code
+        )
+      )
+    `)
+    .order('created_at', { ascending: false });
+
+  if (search) {
+    query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  
+  if (!data || !Array.isArray(data)) {
+    return res.json([]);
+  }
+
+  // Transform data to flatten active subscription info
+  const transformed = data.map((u: any) => {
+    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : [];
+    const activeSub = subscriptions.find((s: any) => s.status === 'active');
+    
+    return {
+      ...u,
+      active_subscription: activeSub ? {
+        expires_at: activeSub.expires_at,
+        traffic_used_mb: activeSub.traffic_used_mb,
+        traffic_limit_mb: activeSub.traffic_limit_mb,
+        server_name: activeSub.vpn_servers?.name
+      } : null
+    };
+  });
+
+  res.json(transformed);
+});
+
+app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
+  
+  const { data, error } = await supabase.from('users').update({
+    role
+  }).eq('id', id).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.get('/api/admin/servers', adminOnly, async (req, res) => {
+  const { data, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/admin/servers', adminOnly, async (req, res) => {
+  const { name, ip, domain, api_port, username, password, location_code } = req.body;
+  const { data, error } = await supabase.from('vpn_servers').insert([{
+    name, ip, domain, api_port, username, password, location_code
+  }]).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.put('/api/admin/servers/:id', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { name, ip, domain, api_port, username, password, location_code, is_active } = req.body;
+  
+  const { data, error } = await supabase.from('vpn_servers').update({
+    name, ip, domain, api_port, username, password, location_code, is_active
+  }).eq('id', id).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  
+  // Clear instance cache to force re-creation with new creds/options
+  xuiInstances.delete(id);
+  
+  res.json(data);
+});
+
+app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from('vpn_servers').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  xuiInstances.delete(id);
+  res.json({ success: true });
+});
 
 // 💰 Create Payment Link
 app.post('/api/pay/create', async (req, res) => {
@@ -660,6 +854,16 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
+    // Pick server: use existing server if renewing, otherwise find an active one
+    let serverId = lastSub?.server_id;
+    if (!serverId) {
+       const { data: activeServer } = await supabase.from('vpn_servers').select('id').eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
+       serverId = activeServer?.id;
+    }
+
+    const { instance: xuiInstance, server } = await getXuiForServer(serverId);
+    const domain = server?.domain;
+
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const trafficLimitMb = 100 * 1024; // 100 GB default limit per device logic (you can tune this)
     const limitBytes = trafficLimitMb * 1024 * 1024;
@@ -678,13 +882,13 @@ app.post('/api/subscription/buy', async (req, res) => {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-      console.log(`🆕 Creating VPN client ${email}...`);
-      const rawConfig = await xui.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+      console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
+      const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
       const newDevice: VpnDevice = {
         id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
         label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
-        config: rawConfig,
+        config: rawConfig || xuiInstance.generateVlessLink(uuid, email, domain),
         email: email,
         uuid: uuid,
         expiresAt: expiresAt.toISOString(),
@@ -710,8 +914,11 @@ app.post('/api/subscription/buy', async (req, res) => {
       targetDevice.expiresAt = newExpiresAt.toISOString();
       targetDevice.serverType = serverType || targetDevice.serverType;
       
-      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email}`);
-      await xui.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email} on server ${serverId || 'default'}`);
+      await xuiInstance.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      
+      // Update config link in case domain/ip changed
+      targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
     }
 
     // Determine absolute max expiry for the subscription row
@@ -734,7 +941,9 @@ app.post('/api/subscription/buy', async (req, res) => {
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
           device_limit: existingDevices.length,
-          v2ray_config: finalConfigJson
+          v2ray_config: finalConfigJson,
+          server_id: serverId,
+          updated_at: new Date().toISOString()
         })
         .eq('id', lastSub.id)
         .select()
@@ -753,7 +962,8 @@ app.post('/api/subscription/buy', async (req, res) => {
           period_months: periodMonths || 1,
           device_limit: existingDevices.length,
           traffic_limit_mb: trafficLimitMb,
-          traffic_used_mb: 0
+          traffic_used_mb: 0,
+          server_id: serverId
         })
         .select()
         .single();
@@ -785,9 +995,7 @@ app.post('/api/subscription/buy', async (req, res) => {
 });
 
 // Supabase Setup
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; // Needs to be set in Settings
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Already initialized at the top
 
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -884,6 +1092,8 @@ function setupRealtimeListener() {
           newData.traffic_limit_mb !== oldData.traffic_limit_mb
         ) {
           console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
+          const { instance: xuiInstance } = await getXuiForServer(newData.server_id);
+          
           const vpnEmail = `user_${newData.user_id.slice(0, 8)}`;
           const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
           const expiryTimestamp = new Date(newData.expires_at).getTime();
@@ -892,7 +1102,7 @@ function setupRealtimeListener() {
           const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
           if (uuidMatch) {
             const uuid = uuidMatch[1];
-            await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
+            await xuiInstance.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
           }
         }
       }
@@ -921,6 +1131,9 @@ async function syncUserTraffic(userId: string) {
 
   if (!sub) return null;
 
+  // Get correct XUI instance
+  const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+
   // 2. Identify all devices by parsing VpnDevice JSON
   const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
 
@@ -930,7 +1143,7 @@ async function syncUserTraffic(userId: string) {
   // 3. Fetch stats for all devices
   for (const device of devices) {
     try {
-      const stats = await xui.getClientTraffic(device.email);
+      const stats = await xuiInstance.getClientTraffic(device.email);
       if (stats) {
         device.trafficUsedBytes = stats.used;
         totalUsedBytes += stats.used;
@@ -1438,11 +1651,16 @@ if (bot) {
 // --- Vite Middleware ---
 
 async function startServer() {
+  console.log('🚀 Starting izinet server...');
   // Check 3x-ui configuration on startup
   xui.checkConfig();
   
   // Setup Realtime DB Listener for manual syncing
-  setupRealtimeListener();
+  try {
+    setupRealtimeListener();
+  } catch (e) {
+    console.error('❌ Failed to setup realtime listener:', e);
+  }
 
   // Initial traffic sync and schedule every 15 minutes
   syncTrafficStats();
@@ -1455,6 +1673,7 @@ async function startServer() {
     console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
   }
 
+  console.log('🛠️ Configuring Vite middleware...');
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -21,15 +21,46 @@ import Terms from '@/pages/Terms';
 import RefundPolicy from '@/pages/RefundPolicy';
 import PrivacyPolicy from '@/pages/PrivacyPolicy';
 
+// Admin Pages
+import AdminDashboard from '@/pages/Admin/Dashboard';
+import AdminServers from '@/pages/Admin/Servers';
+import AdminUsers from '@/pages/Admin/Users';
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Загрузка...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+          <span className="text-blue-400 font-mono tracking-widest animate-pulse uppercase text-xs">
+            Initializing Session...
+          </span>
+        </div>
+      </div>
+    );
   }
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+const AdminRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, role, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center text-blue-400 font-mono tracking-widest animate-pulse">
+      [ AUTHENTICATING_ACCESS_LEVEL ]
+    </div>;
+  }
+
+  if (!user || (role !== 'admin' && role !== 'superadmin')) {
+    console.warn('Unauthorized admin access attempt', { user, role });
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;
@@ -46,6 +77,24 @@ export default function App() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/refund" element={<RefundPolicy />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
+            
+            {/* Admin Routes */}
+            <Route 
+              path="/admin/*" 
+              element={
+                <AdminRoute>
+                  <PageContainer>
+                    <Routes>
+                      <Route path="/" element={<AdminDashboard />} />
+                      <Route path="/servers" element={<AdminServers />} />
+                      <Route path="/users" element={<AdminUsers />} />
+                      <Route path="*" element={<Navigate to="/admin" replace />} />
+                    </Routes>
+                  </PageContainer>
+                </AdminRoute>
+              } 
+            />
+
             <Route 
               path="/*" 
               element={
