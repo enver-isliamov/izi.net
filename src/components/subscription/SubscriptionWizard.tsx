@@ -288,14 +288,14 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
                       variant="outline" 
                       size="icon" 
                       className="rounded-full w-12 h-12 border-primary/50 text-primary"
-                      onClick={() => setDeviceCount(Math.min(10, deviceCount + 1))}
+                      onClick={() => setDeviceCount(Math.min(2, deviceCount + 1))}
                     >
                       +
                     </Button>
                   </div>
                   <div className="space-y-2 text-muted-foreground text-sm">
-                    <p>Вы заказываете {deviceCount} {deviceCount === 1 ? 'ключ' : deviceCount < 5 ? 'ключа' : 'ключей'}</p>
-                    <p className="text-xs italic">Каждое устройство получит индивидуальный доступ</p>
+                    <p>Вы заказываете {deviceCount} {deviceCount === 1 ? 'ключ' : 'ключа'}</p>
+                    <p className="text-xs italic text-primary/70">Согласно правилам izinet, доступно не более 2-х устройств на один аккаунт</p>
                   </div>
                 </>
               )}

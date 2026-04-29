@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -9,18 +9,26 @@ import { AdminNav } from '@/components/admin/AdminNav';
 export default function AdminUsers() {
   const { session, user: currentUser } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
+  const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  const fetchUsers = async () => {
+  const fetchData = async () => {
     try {
-      const { data } = await axios.get('/api/admin/users', {
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-        params: { search }
-      });
-      setUsers(data);
+      setLoading(true);
+      const [usersRes, serversRes] = await Promise.all([
+        axios.get('/api/admin/users', {
+          headers: { Authorization: `Bearer ${session?.access_token}` },
+          params: { search }
+        }),
+        axios.get('/api/admin/servers', {
+          headers: { Authorization: `Bearer ${session?.access_token}` }
+        })
+      ]);
+      setUsers(usersRes.data);
+      setServers(serversRes.data);
     } catch (e) {
-      toast.error('Ошибка загрузки пользователей');
+      toast.error('Ошибка загрузки данных');
     } finally {
       setLoading(false);
     }
@@ -28,7 +36,7 @@ export default function AdminUsers() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      fetchUsers();
+      fetchData();
     }, 300);
     return () => clearTimeout(timer);
   }, [search, session]);
@@ -43,21 +51,36 @@ export default function AdminUsers() {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       toast.success('Роль обновлена');
-      fetchUsers();
+      fetchData();
     } catch (e) {
       toast.error('Ошибка обновления роли');
+    }
+  };
+
+  const moveUserServer = async (userId: string, newServerId: string) => {
+    const loadingToast = toast.loading('Перенос пользователя на новый сервер...');
+    try {
+      await axios.post('/api/admin/users/move-server', { userId, newServerId }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.dismiss(loadingToast);
+      toast.success('Пользователь успешно перенесен');
+      fetchData();
+    } catch (e: any) {
+      toast.dismiss(loadingToast);
+      toast.error(e.response?.data?.error || 'Ошибка переноса сервера');
     }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
+        <h1 className="text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Пользователи</h1>
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
           <input
             placeholder="Email, Имя или Telegram ID..."
-            className="w-full bg-secondary/30 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm"
+            className="w-full bg-secondary/30 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm focus:border-blue-500/50 outline-none transition-all"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -66,14 +89,15 @@ export default function AdminUsers() {
 
       <AdminNav />
 
-      <div className="bg-secondary/30 rounded-2xl border border-white/5 overflow-hidden">
+      <div className="bg-secondary/30 rounded-2xl border border-white/5 overflow-hidden backdrop-blur-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/5">
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Пользователь</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Роль</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Подписка / Сервер</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Подписка</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">VPN Сервер</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Трафик</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Действия</th>
               </tr>
@@ -89,8 +113,8 @@ export default function AdminUsers() {
                   <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
-                        <span className="font-medium">{user.name || 'Без имени'}</span>
-                        <span className="text-xs text-muted-foreground">{user.email}</span>
+                        <span className="font-medium text-white/90">{user.name || 'Без имени'}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{user.email}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -104,43 +128,65 @@ export default function AdminUsers() {
                     <td className="px-6 py-4">
                       {sub ? (
                         <div className="flex flex-col">
-                          <span className="text-xs font-bold text-blue-400">{sub.server_name || 'Не назначен'}</span>
+                          <span className="text-[10px] font-bold text-green-400 uppercase tracking-tight">Активна</span>
                           <span className="text-[10px] text-muted-foreground">До: {expiryDate}</span>
                         </div>
                       ) : (
-                        <span className="text-xs text-muted-foreground italic">Нет подписки</span>
+                        <span className="text-[10px] text-muted-foreground italic uppercase">Нет подписки</span>
                       )}
                     </td>
                     <td className="px-6 py-4">
                       {sub ? (
-                        <div className="flex flex-col">
-                          <span className="text-xs font-mono">{trafficUsedGB} / {trafficLimitGB} GB</span>
-                          <div className="w-16 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
+                        <div className="flex items-center gap-2">
+                          <select 
+                            className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] outline-none text-blue-400 focus:border-blue-500/50"
+                            value={sub.server_id || ''}
+                            onChange={(e) => moveUserServer(user.id, e.target.value)}
+                          >
+                            {servers.map(s => (
+                              <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground opacity-50">Не назначен</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {sub ? (
+                        <div className="flex flex-col min-w-[100px]">
+                          <div className="flex justify-between items-center text-[10px] font-mono mb-1">
+                            <span>{trafficUsedGB} GB</span>
+                            <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
+                          </div>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
                              <div 
-                               className="h-full bg-blue-500" 
+                               className={`h-full transition-all duration-500 ${
+                                 (Number(trafficUsedGB) / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-blue-500'
+                               }`}
                                style={{ width: `${Math.min(100, (Number(trafficUsedGB) / Number(trafficLimitGB)) * 100)}%` }}
                              />
                           </div>
                         </div>
-                      ) : <span className="opacity-30">—</span>}
+                      ) : <span className="opacity-30 text-xs">—</span>}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                          {user.role !== 'admin' && user.role !== 'superadmin' ? (
                            <button 
                              onClick={() => updateUserRole(user.id, 'admin')}
-                             className="p-2 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 rounded-lg transition-colors"
+                             className="p-2 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 rounded-lg transition-all"
                              title="Сделать админом"
                            >
-                             <Shield size={16} />
+                             <Shield size={14} />
                            </button>
                          ) : user.role === 'admin' ? (
                            <button 
                              onClick={() => updateUserRole(user.id, 'user')}
-                             className="p-2 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 rounded-lg transition-colors"
+                             className="p-2 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 rounded-lg transition-all"
                              title="Снять права админа"
                            >
-                             <ShieldAlert size={16} />
+                             <ShieldAlert size={14} />
                            </button>
                          ) : null}
                       </div>

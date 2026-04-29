@@ -11,6 +11,13 @@ async function checkSchema() {
   } else {
     console.log('User columns:', Object.keys(data[0] || {}));
   }
+
+  const { data: subs, error: subError } = await supabase.from('subscriptions').select('*').limit(1);
+  if (subError) {
+    console.error('Error fetching subscriptions:', subError);
+  } else {
+    console.log('subscriptions columns:', Object.keys(subs[0] || {}));
+  }
 }
 
 checkSchema();

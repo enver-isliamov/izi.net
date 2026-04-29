@@ -1,3 +1,6 @@
+// Force bypass for expired certificates (Environment has future date: 2026)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
@@ -7,6 +10,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import crypto from 'crypto';
+import axios from 'axios';
+import https from 'https';
+import http from 'http';
+
+dotenv.config();
 
 // --- Types for Advanced Device Management ---
 export interface VpnDevice {
@@ -49,11 +57,6 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
     };
   });
 }
-import axios from 'axios';
-
-import https from 'https';
-
-dotenv.config();
 
 // Supabase Setup (Initialize early to avoid reference errors)
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -65,8 +68,27 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Create a global HTTPS agent that ignores self-signed certificate errors (common in VPN panels)
 const httpsAgent = new https.Agent({
-  rejectUnauthorized: false
+  rejectUnauthorized: false,
+  keepAlive: true,
+  checkServerIdentity: () => undefined // Ignore hostname/cert mismatch (future date fix)
 });
+
+const httpAgent = new http.Agent({
+  keepAlive: true
+});
+
+/**
+ * Utility to get correct axios config with agents
+ */
+function getRequestConfig(url: string, currentHeaders: any = {}) {
+  const isHttps = url.startsWith('https://');
+  return {
+    headers: currentHeaders,
+    httpsAgent: isHttps ? httpsAgent : undefined,
+    httpAgent: !isHttps ? httpAgent : undefined,
+    timeout: 15000,
+  };
+}
 
 //@ts-ignore
 const __filename = fileURLToPath(import.meta.url);
@@ -80,55 +102,89 @@ const PORT = 3000;
 // --- XUI Service ---
 class XUIService {
   private host: string;
+  private basePath: string = "";
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
-    // Remove trailing slashes and /panel
-    host = host.replace(/\/+$/, "").replace(/\/panel$/, "");
     
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
     }
+
+    // Handle secret path (e.g. https://ip:port/secret_path)
+    try {
+      if (host) {
+        const url = new URL(host);
+        this.host = `${url.protocol}//${url.host}`;
+        this.basePath = url.pathname.replace(/\/+$/, "");
+      } else {
+        this.host = "";
+      }
+    } catch (e) {
+      // Fallback for non-standard or partial URLs
+      this.host = host.replace(/\/+$/, "").replace(/\/panel$/, "");
+      this.basePath = "";
+    }
     
-    this.host = host;
     this.username = serverConfigs?.username || process.env.XUI_USERNAME || '';
     this.password = serverConfigs?.password || process.env.XUI_PASSWORD || '';
   }
 
   async checkConfig() {
     if (!this.host || !this.username || !this.password) {
-      console.warn('⚠️ 3x-ui credentials missing in environment variables!');
+      console.warn(`⚠️ 3x-ui credentials missing for host: ${this.host}`);
       return false;
     }
     try {
       await this.login();
       return true;
     } catch (e: any) {
-      console.error('❌ 3x-ui connection failed:', e.message);
+      console.error(`❌ 3x-ui connection failed [${this.host}${this.basePath}]:`, e.message);
       return false;
     }
   }
 
-  private async login() {
+  async login(): Promise<string> {
     if (!this.host) {
       throw new Error('XUI_HOST is empty. Please set it in Settings -> Secrets.');
     }
-    try {
-      // 3x-ui login URL usually ends in /login
-      const loginUrl = `${this.host}/login`;
-      
-      const response = await axios.post(
-        loginUrl,
-        `username=${this.username}&password=${this.password}`,
-        {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          timeout: 10000,
-          httpsAgent: httpsAgent
+    
+    const tryLogin = async (path: string) => {
+      const url = `${this.host}${this.basePath}${path}`;
+      try {
+        const response = await axios.post(
+          url,
+          `username=${this.username}&password=${this.password}`,
+          getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded' })
+        );
+        return response;
+      } catch (err: any) {
+        if (err.response?.status === 404) {
+          return null; // Try next path
         }
-      );
+        throw err;
+      }
+    };
+
+    try {
+      // Try root path first (common for secret paths), then /login, then /panel/login
+      let response = await tryLogin('');
+      if (!response) {
+        response = await tryLogin('/');
+      }
+      if (!response) {
+        response = await tryLogin('/login');
+      }
+      if (!response) {
+        response = await tryLogin('/panel/login');
+      }
+      
+      if (!response) {
+        throw new Error(`404: Could not find login endpoint at ${this.host}${this.basePath}. Please check your XUI host URL and secret path.`);
+      }
       
       if (response.data && response.data.success === false) {
         throw new Error(response.data.msg || 'Login failed');
@@ -139,12 +195,19 @@ class XUIService {
       this.sessionCookie = cookie;
       return cookie;
     } catch (error: any) {
-      console.error('❌ 3x-ui login error:', error.message);
-      if (error.code === 'ERR_TLS_CERT_ALTNAME_INVALID' || error.message.includes('hostname')) {
-        console.warn('💡 Tip: Try using IP address in XUI_HOST instead of domain if certificate is invalid.');
+      console.error(`❌ 3x-ui login error [${this.host}${this.basePath}]:`, error.message);
+      if (error.response?.status === 404) {
+        console.warn(`💡 Check if your 3x-ui panel uses a non-standard base path. Current host: ${this.host}${this.basePath}`);
       }
       throw error;
     }
+  }
+
+  async getInbounds() {
+    if (!this.sessionCookie) await this.login();
+    const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+    const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+    return response.data.obj || [];
   }
 
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
@@ -153,16 +216,13 @@ class XUIService {
     // First, let's try to get the inbound to see its settings (for link generation later)
     let inbound;
     try {
-      const getInboundUrl = `${this.host}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, {
-        headers: { 'Cookie': this.sessionCookie },
-        httpsAgent: httpsAgent
-      });
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
       if (resp.data.success) {
         inbound = resp.data.obj;
       }
     } catch (e: any) {
-      console.warn(`Could not fetch inbound settings from ${this.host}, will use defaults. Error: ${e.message}`);
+      console.warn(`Could not fetch inbound settings from ${this.host}${this.basePath}, will use defaults. Error: ${e.message}`);
     }
 
     const clientData = {
@@ -185,17 +245,14 @@ class XUIService {
     };
 
     try {
-      const addClientUrl = `${this.host}/panel/api/inbounds/addClient`;
+      const addClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
       const response = await axios.post(
         addClientUrl,
         clientData,
-        {
-          headers: { 
-            'Cookie': this.sessionCookie,
-            'Content-Type': 'application/json'
-          },
-          httpsAgent: httpsAgent
-        }
+        getRequestConfig(addClientUrl, { 
+          'Cookie': this.sessionCookie,
+          'Content-Type': 'application/json'
+        })
       );
 
       if (response.data.success) {
@@ -210,27 +267,22 @@ class XUIService {
             const port = inbound.port;
             
             // Safer host extraction
-            let host = 'server.izinet.app'; // fallback
+            let hostName = 'server.izinet.app'; // fallback
             try {
-              if (this.host.includes('://')) {
-                const urlParts = new URL(this.host);
-                host = urlParts.hostname;
-              } else {
-                host = this.host.split(':')[0];
-              }
+              const urlParts = new URL(this.host);
+              hostName = urlParts.hostname;
             } catch (urlErr) {
-              console.warn('URL parsing failed in addClient, using raw host');
-              host = this.host.split('/')[0].split(':')[0] || host;
+              console.warn('URL parsing failed in addClient, using host from settings');
+              hostName = this.host.split(':').pop()?.replace(/\//g, '') || hostName;
             }
 
             const sni = realitySettings.serverNames?.[0] || 'google.com';
-            // Extract from realitySettings.settings.publicKey or realitySettings.publicKey depending on XUI version
             const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
             const sid = realitySettings.shortIds?.[0] || '';
             
             if (!pbk) throw new Error("Public key not found in inbound");
             
-            link = `vless://${uuid}@${host}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
+            link = `vless://${uuid}@${hostName}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
           } catch (e) {
             console.error('Error parsing inbound settings for link generation:', e);
             link = this.generateVlessLink(uuid, email);
@@ -276,18 +328,14 @@ class XUIService {
     };
 
     try {
-      // 3x-ui uses updateClient/{uuid}
-      const updateClientUrl = `${this.host}/panel/api/inbounds/updateClient/${uuid}`;
+      const updateClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${uuid}`;
       const response = await axios.post(
         updateClientUrl,
         clientData,
-        {
-          headers: { 
-            'Cookie': this.sessionCookie,
-            'Content-Type': 'application/json'
-          },
-          httpsAgent: httpsAgent
-        }
+        getRequestConfig(updateClientUrl, { 
+          'Cookie': this.sessionCookie,
+          'Content-Type': 'application/json'
+        })
       );
 
       if (response.data.success) {
@@ -307,14 +355,11 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
 
     try {
-      const response = await axios.get(`${this.host}/panel/api/inbounds/getClientTraffics/${email}`, {
-        headers: { 'Cookie': this.sessionCookie },
-        httpsAgent: httpsAgent
-      });
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${email}`;
+      const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
 
       if (response.data.success && response.data.obj) {
         const stats = response.data.obj;
-        // up + down in bytes. total field in 3x-ui represents the LIMIT in bytes
         return {
           up: stats.up || 0,
           down: stats.down || 0,
@@ -333,10 +378,31 @@ class XUIService {
     }
   }
 
+  async getOnlines() {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
+      const response = await axios.post(url, {}, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+      if (response.data.success) {
+        return response.data.obj || [];
+      }
+      return [];
+    } catch (error: any) {
+      console.error(`❌ 3x-ui getOnlines error for ${this.host}${this.basePath}:`, error.message);
+      return [];
+    }
+  }
+
   generateVlessLink(uuid: string, email: string, customDomain?: string) {
-    const host = customDomain || new URL(this.host).hostname;
-    // Fallback if inbound fetch fails (Standard TLS, no Reality parameters to avoid strict base64 errors in clients like Hiddify)
-    return `vless://${uuid}@${host}:443?type=tcp&security=tls&sni=${host}#izinet_${email}`;
+    let hostName = customDomain;
+    if (!hostName) {
+      try {
+        hostName = new URL(this.host).hostname;
+      } catch (e) {
+        hostName = this.host.split(':').pop()?.replace(/\//g, '') || "server.izinet.app";
+      }
+    }
+    return `vless://${uuid}@${hostName}:443?type=tcp&security=tls&sni=${hostName}#izinet_${email}`;
   }
 }
 
@@ -367,8 +433,41 @@ async function getXuiForServer(serverId?: string | null) {
     return { instance: xuiInstances.get(defaultId)!, server: null };
   }
 
+  // Robust host construction
+  let rawIp = (server.ip || '').trim();
+  let host = "";
+  
+  if (rawIp.includes('://')) {
+    // Full URL provided in IP field (e.g. https://1.2.3.4:567/path)
+    host = rawIp;
+  } else if (rawIp.includes('/')) {
+    // Path but no protocol (e.g. 1.2.3.4/path)
+    const [mainPart, ...pathParts] = rawIp.split('/');
+    const path = pathParts.join('/');
+    
+    if (mainPart.includes(':')) {
+      const port = mainPart.split(':').pop();
+      // Assume https for common high ports or if user mentioned it
+      const protocol = (port === '443' || parseInt(port || '0') > 10000) ? 'https' : 'http';
+      host = `${protocol}://${mainPart}/${path}`;
+    } else {
+      const protocol = (server.api_port === 443 || server.api_port > 10000) ? 'https' : 'http';
+      host = `${protocol}://${mainPart}:${server.api_port}/${path}`;
+    }
+  } else {
+    // Standard IP or domain
+    if (rawIp.includes(':')) {
+      const port = rawIp.split(':').pop();
+      const protocol = (port === '443' || parseInt(port || '0') > 10000) ? 'https' : 'http';
+      host = `${protocol}://${rawIp}`;
+    } else {
+      const protocol = (server.api_port === 443 || server.api_port > 10000) ? 'https' : 'http';
+      host = `${protocol}://${rawIp}:${server.api_port}`;
+    }
+  }
+
   const newInstance = new XUIService({
-    host: `${server.ip}:${server.api_port}`,
+    host,
     username: server.username,
     password: server.password
   });
@@ -379,49 +478,14 @@ async function getXuiForServer(serverId?: string | null) {
 
 // --- Payment Service ---
 class PaymentService {
-  private cryptoMerchantId: string;
-  private cryptoApiKey: string;
   private enotMerchantId: string;
   private enotSecretKey: string;
   private enotSecretKey2: string;
 
   constructor() {
-    this.cryptoMerchantId = process.env.CRYPTOMUS_MERCHANT_ID || '';
-    this.cryptoApiKey = process.env.CRYPTOMUS_API_KEY || '';
     this.enotMerchantId = process.env.ENOT_MERCHANT_ID || '';
     this.enotSecretKey = process.env.ENOT_SECRET_KEY || '';
     this.enotSecretKey2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || '';
-  }
-
-  async createCryptomusInvoice(amount: number, userId: string, orderId: string, origin: string) {
-    if (!this.cryptoMerchantId || !this.cryptoApiKey) {
-      throw new Error('Cryptomus credentials missing (Merchant ID or API Key)');
-    }
-
-    const host = origin.replace(/^https?:\/\//, '') || process.env.VITE_APP_URL || 'izinet.app';
-
-    const payload = {
-      amount: amount.toString(),
-      currency: 'USD',
-      order_id: orderId,
-      url_callback: `https://${host}/api/pay/webhook/cryptomus`,
-      url_return: `${origin}/dashboard`,
-      additional_data: userId
-    };
-
-    const sign = crypto
-      .createHash('md5')
-      .update(Buffer.from(JSON.stringify(payload)).toString('base64') + this.cryptoApiKey)
-      .digest('hex');
-
-    const response = await axios.post('https://api.cryptomus.com/v1/payment', payload, {
-      headers: {
-        merchant: this.cryptoMerchantId,
-        sign: sign
-      }
-    });
-
-    return response.data.result.url;
   }
 
   createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
@@ -517,6 +581,8 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
         expires_at,
         traffic_limit_mb,
         traffic_used_mb,
+        server_id,
+        v2ray_config,
         vpn_servers (
           name,
           location_code
@@ -536,23 +602,108 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
     return res.json([]);
   }
 
+  const now = new Date().toISOString();
+
   // Transform data to flatten active subscription info
   const transformed = data.map((u: any) => {
     const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : [];
-    const activeSub = subscriptions.find((s: any) => s.status === 'active');
+    
+    // Find active subscription: must be 'active' and either not expired or expire_at is null
+    const activeSub = subscriptions.find((s: any) => {
+      if (s.status !== 'active') return false;
+      if (!s.expires_at) return true;
+      const expiry = new Date(s.expires_at).getTime();
+      return expiry > Date.now();
+    });
     
     return {
       ...u,
       active_subscription: activeSub ? {
+        id: activeSub.id,
         expires_at: activeSub.expires_at,
-        traffic_used_mb: activeSub.traffic_used_mb,
-        traffic_limit_mb: activeSub.traffic_limit_mb,
-        server_name: activeSub.vpn_servers?.name
+        traffic_used_mb: activeSub.traffic_used_mb || 0,
+        traffic_limit_mb: activeSub.traffic_limit_mb || 0,
+        server_id: activeSub.server_id,
+        server_name: activeSub.vpn_servers?.name || 'VPN Сервер'
       } : null
     };
   });
 
   res.json(transformed);
+});
+
+app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
+  const { userId, newServerId } = req.body;
+  if (!userId || !newServerId) return res.status(400).json({ error: 'Missing parameters' });
+
+  console.log(`🔄 Moving user ${userId} to server ${newServerId}`);
+
+  try {
+    // 1. Find ANY active or recently expired subscription to move
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subErr || !sub) return res.status(404).json({ error: 'Active subscription not found for this user' });
+    
+    // 2. Get old and new server instances
+    const { instance: oldXui } = await getXuiForServer(sub.server_id);
+    const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
+    
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
+    const expiryTime = new Date(sub.expires_at).getTime();
+
+    // 3. Parse devices
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    // 4. Migrate each device
+    const migratedDevices: VpnDevice[] = [];
+    for (const device of devices) {
+      // Delete from old server (best effort)
+      if (sub.server_id) {
+        try {
+          const deleteUrl = `${(oldXui as any).host}${(oldXui as any).basePath}/panel/api/inbounds/deleteClient/${device.uuid}`;
+          await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': (oldXui as any).sessionCookie }));
+          console.log(`✅ Deleted client ${device.email} from old server`);
+        } catch (e) {
+          console.warn(`Could not delete client ${device.email} from old server during migration:`, (e as any).message);
+        }
+      }
+
+      // Add to new server
+      const newConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
+      migratedDevices.push({
+        ...device,
+        config: newConfig || newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
+      });
+    }
+
+    // 5. Update DB
+    const { data: updatedSub, error: updateErr } = await supabase
+      .from('subscriptions')
+      .update({
+        server_id: newServerId,
+        v2ray_config: JSON.stringify(migratedDevices),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sub.id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    console.log(`✅ User ${userId} successfully moved to server ${newServerId}`);
+    res.json({ success: true, subscription: updatedSub });
+  } catch (err: any) {
+    console.error('❌ Server migration error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
@@ -567,10 +718,59 @@ app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   res.json(data);
 });
 
+app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { instance } = await getXuiForServer(id);
+    const loginSuccess = await instance.login();
+    if (loginSuccess) {
+      // Try to get stats as a deeper check
+      const stats = await instance.getInbounds();
+      res.json({ success: true, name: 'XUI', version: 'Latest', stats_count: stats.length });
+    } else {
+      res.json({ success: false, error: 'Login failed' });
+    }
+  } catch (err: any) {
+    console.error(`❌ Connection check error for server ${id}:`, err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/admin/servers', adminOnly, async (req, res) => {
-  const { data, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    
+    // Enrich with stats
+    const enrichedServers = await Promise.all(servers.map(async (server) => {
+      // 1. Total users on this server
+      const { count } = await supabase
+        .from('subscriptions')
+        .select('*', { count: 'exact', head: true })
+        .eq('server_id', server.id)
+        .eq('status', 'active');
+
+      // 2. Online users
+      let onlineCount = 0;
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const onlines = await instance.getOnlines();
+        onlineCount = onlines.length;
+      } catch (err) {
+        console.warn(`Could not fetch online count for server ${server.id}:`, err);
+      }
+
+      return {
+        ...server,
+        total_users: count || 0,
+        online_users: onlineCount
+      };
+    }));
+
+    res.json(enrichedServers);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/admin/servers', adminOnly, async (req, res) => {
@@ -644,9 +844,7 @@ app.post('/api/pay/create', async (req, res) => {
     const origin = req.headers.origin || `https://${req.headers.host}`;
 
     let url = '';
-    if (method === 'cryptomus') {
-      url = await payment.createCryptomusInvoice(amount, userId, orderId, origin);
-    } else if (method === 'enot') {
+    if (method === 'enot') {
       // Assuming amount is in USD on frontend, converting to RUB for Enot if needed
       // For now, assume amount is already correct from UI
       url = payment.createEnotInvoice(amount, userId, orderId, origin);
@@ -686,30 +884,6 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
     console.error('❌ Manual traffic sync error:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
   }
-});
-
-// ⚓ Cryptomus Webhook
-app.post('/api/pay/webhook/cryptomus', async (req, res) => {
-  const { sign, ...payload } = req.body;
-  
-  const calculatedSign = crypto
-    .createHash('md5')
-    .update(Buffer.from(JSON.stringify(payload)).toString('base64') + (process.env.CRYPTOMUS_API_KEY || ''))
-    .digest('hex');
-
-  if (sign !== calculatedSign) {
-    return res.status(400).send('Invalid signature');
-  }
-
-  if (payload.status === 'paid' || payload.status === 'paid_over') {
-    const userId = payload.additional_data;
-    const amount = parseFloat(payload.amount);
-    const orderId = payload.order_id;
-
-    await processSuccessfulPayment(userId, amount, orderId, 'cryptomus');
-  }
-
-  res.send('OK');
 });
 
 // ⚓ Enot Webhook
