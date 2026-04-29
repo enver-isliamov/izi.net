@@ -49,238 +49,192 @@ const faqs = [
 export default function Support() {
   const { user } = useAuth();
   const { telegramBotName } = useAppConfig();
-  const [subject, setSubject] = useState('');
-  const [message, setMessage] = useState('');
   const [tickets, setTickets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const [activeTab, setActiveTab] = useState<'list' | 'new' | 'chat'>('list');
-  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [message, setMessage] = useState('');
+  const [activeChatTicket, setActiveChatTicket] = useState<any>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
-  const fetchTickets = async () => {
+  const fetchSupportData = async () => {
     if (!user) return;
+    setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('support_tickets')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('updated_at', { ascending: false });
       
       if (error) throw error;
       setTickets(data || []);
+      
+      // Select the first non-closed ticket as active, or the most recent one
+      if (data && data.length > 0) {
+        const active = data.find(t => t.status !== 'closed') || data[0];
+        setActiveChatTicket(active);
+      }
     } catch (error) {
-      console.error('Error fetching tickets:', error);
+      console.error('Error fetching support data:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTickets();
+    fetchSupportData();
   }, [user]);
 
-  const handleSubmit = async () => {
-    if (!user || !subject || !message) {
-      toast.error('Заполните тему и сообщение');
-      return;
-    }
+  const handleStartNewChat = async () => {
+    if (!user || !message.trim()) return;
 
     setIsSending(true);
     try {
       const { data, error } = await supabase.from('support_tickets').insert({
         user_id: user.id,
-        subject,
-        message,
+        subject: 'Поддержка izinet',
+        message: message.trim(),
         status: 'open',
         priority: 'medium'
       }).select().single();
 
       if (error) throw error;
       
-      // Notify admin via server API
-      if (data) {
-        fetch('/api/support/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticketId: data.id, type: 'new_ticket' })
-        }).catch(e => console.error('Notify error:', e));
-      }
-      
-      toast.success('Обращение отправлено! Мы ответим вам в ближайшее время.');
-      setSubject('');
       setMessage('');
-      fetchTickets();
-      setActiveTab('list');
+      fetchSupportData();
     } catch (error) {
-      console.error('Error sending ticket:', error);
-      toast.error('Ошибка при отправке обращения');
+      console.error('Error creating chat:', error);
+      toast.error('Ошибка при начале чата');
     } finally {
       setIsSending(false);
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'open': return <Badge className="bg-primary/20 text-primary border-primary/30 uppercase text-[10px]">Открыт</Badge>;
-      case 'in_progress': return <Badge className="bg-yellow-500/20 text-yellow-500 border-yellow-500/30 uppercase text-[10px]">В работе</Badge>;
-      case 'closed': return <Badge className="bg-muted text-muted-foreground uppercase text-[10px]">Закрыт</Badge>;
-      default: return null;
-    }
-  };
-
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      {activeTab !== 'chat' && (
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
-            <p className="text-muted-foreground mt-1">Остались вопросы? Мы всегда на связи</p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-              {activeTab !== 'new' && (
-                <Button className="rounded-xl px-6" onClick={() => setActiveTab('new')}>
-                   <Plus className="w-4 h-4 mr-2" /> Новое обращение
-                </Button>
-              )}
-              <Button className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" onClick={() => window.open(`https://t.me/${telegramBotName}`, '_blank')}>
-              <Send className="w-4 h-4" /> Перейти в Telegram
-              </Button>
-          </div>
+    <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Поддержка</h1>
+          <p className="text-muted-foreground mt-1">Чат с командой izinet</p>
         </div>
-      )}
+        <div className="flex flex-col sm:flex-row gap-3">
+            <Button 
+              variant="outline" 
+              className="rounded-xl px-6 gap-2"
+              onClick={() => setShowHistory(!showHistory)}
+            >
+               <Clock className="w-4 h-4" /> {showHistory ? "Вернуться в чат" : "История обращений"}
+            </Button>
+            <Button 
+              className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-6 gap-2" 
+              onClick={() => window.open(`https://t.me/${telegramBotName}`, '_blank')}
+            >
+              <Send className="w-4 h-4" /> Чат в Telegram
+            </Button>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          {activeTab === 'list' && (
-              <Card className="glass-card">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Ваши обращения</CardTitle>
-                    <CardDescription>История ваших тикетов</CardDescription>
-                  </div>
-                  <Badge variant="outline" className="border-primary text-primary">
-                    {tickets.filter(t => t.status !== 'closed').length} активных
-                  </Badge>
-                </CardHeader>
-                <CardContent className="min-h-[200px]">
-                  {isLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                    </div>
-                  ) : tickets.length > 0 ? (
-                    <div className="space-y-4">
-                      {tickets.map((ticket) => (
-                        <div 
-                          key={ticket.id} 
-                          className="p-4 rounded-xl border border-border bg-muted/20 space-y-2 cursor-pointer hover:bg-muted/40 transition-colors"
-                          onClick={() => {
-                              setSelectedTicket(ticket);
-                              setActiveTab('chat');
-                          }}
-                        >
-                          <div className="flex justify-between items-start">
-                            <div className="font-bold">{ticket.subject}</div>
-                            {getStatusBadge(ticket.status)}
-                          </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">{ticket.message}</p>
-                          <div className="flex items-center gap-4 pt-2 text-[10px] text-muted-foreground">
-                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}</span>
-                            <span>ID: {ticket.id.substring(0, 8)}</span>
-                          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
+        <div className="lg:col-span-2">
+          {isLoading ? (
+            <Card className="glass-card h-[500px] flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </Card>
+          ) : showHistory ? (
+            <Card className="glass-card min-h-[500px]">
+              <CardHeader>
+                <CardTitle>История обращений</CardTitle>
+                <CardDescription>Все ваши предыдущие диалоги с поддержкой</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {tickets.length > 0 ? (
+                  <div className="space-y-3">
+                    {tickets.map((ticket) => (
+                      <div 
+                        key={ticket.id} 
+                        className={`p-4 rounded-xl border border-border bg-muted/20 cursor-pointer hover:bg-muted/40 transition-all ${activeChatTicket?.id === ticket.id ? 'ring-1 ring-primary border-primary/50 bg-primary/5' : ''}`}
+                        onClick={() => {
+                          setActiveChatTicket(ticket);
+                          setShowHistory(false);
+                        }}
+                      >
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="font-bold text-sm">{ticket.subject}</span>
+                          <Badge variant="outline" className={`text-[9px] uppercase ${ticket.status === 'open' ? 'text-primary border-primary/30' : ''}`}>
+                            {ticket.status === 'open' ? 'Активен' : ticket.status === 'closed' ? 'Закрыт' : 'В работе'}
+                          </Badge>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-center p-8">
-                      <div className="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center mb-4">
-                        <MessageSquare className="w-8 h-8 text-muted-foreground" />
+                        <p className="text-xs text-muted-foreground line-clamp-1">{ticket.message}</p>
+                        <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground opacity-60">
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}</span>
+                          <span>ID: {ticket.id.substring(0, 8)}</span>
+                        </div>
                       </div>
-                      <h3 className="font-bold">У вас пока нет обращений</h3>
-                      <p className="text-sm text-muted-foreground max-w-xs mt-2 mb-6">
-                        Если у вас возникла проблема, создайте новый тикет, и мы вам поможем.
-                      </p>
-                      <Button onClick={() => setActiveTab('new')} className="rounded-xl px-8">Создать тикет</Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-          )}
-
-          {activeTab === 'new' && (
-              <Card className="glass-card animate-in fade-in slide-in-from-bottom-4">
-                <CardHeader>
-                  <div className="flex items-center gap-4">
-                      <Button variant="ghost" size="icon" className="rounded-full shrink-0" onClick={() => setActiveTab('list')}>
-                          <ArrowLeft className="w-5 h-5" />
-                      </Button>
-                      <div>
-                          <CardTitle>Создать обращение</CardTitle>
-                          <CardDescription>Опишите вашу проблему максимально подробно</CardDescription>
-                      </div>
+                    ))}
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Тема обращения</label>
-                    <Input 
-                      placeholder="Например: Проблема с оплатой" 
-                      className="bg-muted/30 border-border rounded-xl"
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      disabled={isSending}
-                    />
+                ) : (
+                  <div className="text-center py-20 grayscale opacity-50">
+                    <MessageSquare className="w-12 h-12 mx-auto mb-4" />
+                    <p>История пуста</p>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Сообщение</label>
-                    <textarea 
-                      className="w-full min-h-[150px] bg-muted/30 border border-border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-                      placeholder="Опишите детали..."
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      disabled={isSending}
-                    />
-                  </div>
-                  <div className="flex items-center justify-end pt-2">
-                    <Button 
-                      onClick={handleSubmit}
-                      className="bg-primary text-black hover:bg-primary/90 rounded-xl px-8"
-                      disabled={isSending || !subject || !message}
-                    >
-                      {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Отправить'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-          )}
-
-          {activeTab === 'chat' && selectedTicket && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 h-full">
-                  <div className="mb-4">
-                    <Button variant="ghost" size="sm" className="rounded-full gap-2" onClick={() => setActiveTab('list')}>
-                        <ArrowLeft className="w-4 h-4" /> Назад к списку
-                    </Button>
-                  </div>
-                  <TicketChatView ticket={selectedTicket} onClose={() => setActiveTab('list')} />
+                )}
+              </CardContent>
+            </Card>
+          ) : activeChatTicket ? (
+            <div className="animate-in fade-in slide-in-from-bottom-4">
+               <TicketChatView 
+                ticket={activeChatTicket} 
+                onClose={() => {}} 
+               />
+               <p className="text-[10px] text-center text-muted-foreground mt-2 opacity-50 uppercase tracking-widest">
+                  Поддержка обычно отвечает в течение 15-30 минут
+               </p>
+            </div>
+          ) : (
+            <Card className="glass-card h-[500px] flex flex-col items-center justify-center p-8 text-center bg-card/40 backdrop-blur-md">
+              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-6">
+                <MessageSquare className="w-10 h-10 text-primary" />
               </div>
+              <h3 className="text-xl font-bold mb-2">Добро пожаловать в поддержку izinet</h3>
+              <p className="text-muted-foreground max-w-sm mb-8">
+                Опишите ваш вопрос, и наш специалист ответит вам в этом чате.
+              </p>
+              <div className="w-full max-w-md space-y-4">
+                <textarea 
+                  className="w-full min-h-[120px] bg-muted/30 border border-border rounded-2xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground/50"
+                  placeholder="Ваше сообщение..."
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  disabled={isSending}
+                />
+                <Button 
+                  onClick={handleStartNewChat}
+                  disabled={isSending || !message.trim()}
+                  className="w-full h-12 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl"
+                >
+                  {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Начать диалог'}
+                </Button>
+              </div>
+            </Card>
           )}
         </div>
 
-        <div className={`space-y-6 ${activeTab === 'chat' ? 'hidden lg:block' : 'block'}`}>
+        <div className="space-y-6">
           <Card className="glass-card">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
                 <HelpCircle className="w-5 h-5 text-primary" />
-                Частые вопросы
+                База знаний
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Accordion type="single" className="w-full">
+              <Accordion type="single" collapsible className="w-full">
                 {faqs.map((faq, i) => (
-                  <AccordionItem key={i} value={`item-${i}`} className="border-border">
-                    <AccordionTrigger className="text-sm font-medium hover:text-primary text-left">
+                  <AccordionItem key={i} value={`item-${i}`} className="border-border px-0">
+                    <AccordionTrigger className="text-sm font-medium hover:text-primary text-left py-3">
                       {faq.q}
                     </AccordionTrigger>
-                    <AccordionContent className="text-xs text-muted-foreground leading-relaxed">
+                    <AccordionContent className="text-xs text-muted-foreground leading-relaxed pb-4">
                       {faq.a}
                     </AccordionContent>
                   </AccordionItem>
@@ -289,14 +243,20 @@ export default function Support() {
             </CardContent>
           </Card>
 
-          <Card className="glass-card bg-primary/5 border-primary/20">
-            <CardContent className="p-6 space-y-4">
-              <h3 className="font-bold">Нужна инструкция по установке?</h3>
-              <p className="text-sm text-muted-foreground">
-                Мы подготовили подробные пошаговые инструкции со скриншотами для настройки на вашей платформе.
+          <Card className="glass-card border-primary/20 overflow-hidden relative group">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-150 duration-500" />
+            <CardContent className="p-6 space-y-4 relative">
+              <h3 className="font-bold">Нужна инструкция?</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Мы подготовили пошаговые гайды для настройки VPN на Android, iOS и Windows.
               </p>
-              <Button variant="outline" className="w-full rounded-xl border-primary/30 text-primary hover:bg-primary/10" onClick={() => window.location.href='/instructions'}>
+              <Button 
+                variant="outline" 
+                className="w-full rounded-xl border-primary/30 text-primary hover:bg-primary/5 group"
+                onClick={() => window.location.href='/instructions'}
+              >
                 Открыть Инструкции
+                <ExternalLink className="w-3 h-3 ml-2 opacity-0 group-hover:opacity-100 transition-all" />
               </Button>
             </CardContent>
           </Card>

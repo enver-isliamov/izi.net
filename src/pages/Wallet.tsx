@@ -22,7 +22,7 @@ export default function Wallet() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [amount, setAmount] = useState<string>('500');
-  const [method, setMethod] = useState<'cryptomus' | 'enot'>('cryptomus');
+  const [method, setMethod] = useState<'enot'>('enot');
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handlePayment = async () => {
@@ -135,7 +135,7 @@ export default function Wallet() {
           <CardDescription>Выберите удобную для вас платежную систему</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <button
               onClick={() => setMethod('enot')}
               className={`flex items-center gap-4 p-5 rounded-2xl border-2 transition-all text-left ${
@@ -153,26 +153,6 @@ export default function Wallet() {
                   {method === 'enot' && <CheckCircle2 className="w-4 h-4" />}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">Enot.io — Мир, Visa, MC, СБП</div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => setMethod('cryptomus')}
-              className={`flex items-center gap-4 p-5 rounded-2xl border-2 transition-all text-left ${
-                method === 'cryptomus' 
-                  ? "border-primary bg-primary/5 shadow-[0_0_20px_-10px_rgba(0,255,136,0.5)]" 
-                  : "border-border hover:border-muted-foreground/30 bg-muted/10"
-              }`}
-            >
-              <div className={`p-3 rounded-xl ${method === 'cryptomus' ? "bg-primary text-black" : "bg-muted text-muted-foreground"}`}>
-                <Bitcoin className="w-6 h-6" />
-              </div>
-              <div className="flex-1">
-                <div className="font-bold flex items-center justify-between">
-                  Криптовалюта
-                  {method === 'cryptomus' && <CheckCircle2 className="w-4 h-4" />}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">Cryptomus — USDT, BTC, TON, ETH</div>
               </div>
             </button>
           </div>

@@ -1,4 +1,4 @@
-# Настройка платежей (Cryptomus & Enot.io)
+# Настройка платежей (Enot.io)
 
 Чтобы платежи начали работать, выполните следующие шаги:
 
@@ -30,17 +30,12 @@ USING (auth.uid() = user_id);
 ## 2. Настройка Secrets
 Добавьте следующие переменные в **Settings -> Secrets** в Google AI Studio:
 
-### Для Cryptomus:
-- `CRYPTOMUS_MERCHANT_ID`: ID мерчанта из панели
-- `CRYPTOMUS_API_KEY`: API ключ (Payment Key)
-- `VITE_APP_URL`: URL вашего приложения (например, `shared-app-url.run.app`) — нужно для вебхуков.
-
 ### Для Enot.io:
 - `ENOT_MERCHANT_ID`: ID кассы
 - `ENOT_SECRET_KEY`: Секретный пароль (тот, что используется для подписи)
 - `ENOT_SECRET_KEY2`: Второй секретный пароль (для вебхуков) — *Примечание: в коде используется ENOT_SECRET_KEY, если у вас один ключ, используйте его.*
+- `VITE_APP_URL`: URL вашего приложения (например, `shared-app-url.run.app`) — нужно для вебхуков.
 
 ## 3. Webhook URL
 В панелях платежных систем укажите следующие URL для уведомлений:
-- **Cryptomus**: `https://ВАШ_URL/api/pay/webhook/cryptomus`
 - **Enot.io**: `https://ВАШ_URL/api/pay/webhook/enot`

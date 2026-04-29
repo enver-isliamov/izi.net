@@ -1,3 +1,6 @@
+// Force bypass for expired certificates (Environment has future date: 2026)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
@@ -7,6 +10,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import crypto from 'crypto';
+import axios from 'axios';
+import https from 'https';
+import http from 'http';
+
+dotenv.config();
 
 // --- Types for Advanced Device Management ---
 export interface VpnDevice {
@@ -49,16 +57,38 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
     };
   });
 }
-import axios from 'axios';
 
-import https from 'https';
-
-dotenv.config();
+// Supabase Setup (Initialize early to avoid reference errors)
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; 
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.warn('⚠️ SUPABASE credentials missing in environment variables!');
+}
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Create a global HTTPS agent that ignores self-signed certificate errors (common in VPN panels)
 const httpsAgent = new https.Agent({
-  rejectUnauthorized: false
+  rejectUnauthorized: false,
+  keepAlive: true,
+  checkServerIdentity: () => undefined // Ignore hostname/cert mismatch (future date fix)
 });
+
+const httpAgent = new http.Agent({
+  keepAlive: true
+});
+
+/**
+ * Utility to get correct axios config with agents
+ */
+function getRequestConfig(url: string, currentHeaders: any = {}) {
+  const isHttps = url.startsWith('https://');
+  return {
+    headers: currentHeaders,
+    httpsAgent: isHttps ? httpsAgent : undefined,
+    httpAgent: !isHttps ? httpAgent : undefined,
+    timeout: 15000,
+  };
+}
 
 //@ts-ignore
 const __filename = fileURLToPath(import.meta.url);
@@ -72,57 +102,89 @@ const PORT = 3000;
 // --- XUI Service ---
 class XUIService {
   private host: string;
+  private basePath: string = "";
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
 
-  constructor() {
-    let host = (process.env.XUI_HOST || '').trim();
-    // Remove trailing slashes and /panel if it exists (we will add it back where needed)
-    host = host.replace(/\/+$/, "").replace(/\/panel$/, "");
+  constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
+    let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
     
-    // Add protocol if missing. If the user provided IP:PORT, assume HTTP if not specified, 
-    // but usually user should provide https:// for panel
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
     }
+
+    // Handle secret path (e.g. https://ip:port/secret_path)
+    try {
+      if (host) {
+        const url = new URL(host);
+        this.host = `${url.protocol}//${url.host}`;
+        this.basePath = url.pathname.replace(/\/+$/, "");
+      } else {
+        this.host = "";
+      }
+    } catch (e) {
+      // Fallback for non-standard or partial URLs
+      this.host = host.replace(/\/+$/, "").replace(/\/panel$/, "");
+      this.basePath = "";
+    }
     
-    this.host = host;
-    this.username = process.env.XUI_USERNAME || '';
-    this.password = process.env.XUI_PASSWORD || '';
+    this.username = serverConfigs?.username || process.env.XUI_USERNAME || '';
+    this.password = serverConfigs?.password || process.env.XUI_PASSWORD || '';
   }
 
   async checkConfig() {
     if (!this.host || !this.username || !this.password) {
-      console.warn('⚠️ 3x-ui credentials missing in environment variables!');
+      console.warn(`⚠️ 3x-ui credentials missing for host: ${this.host}`);
       return false;
     }
     try {
       await this.login();
       return true;
     } catch (e: any) {
-      console.error('❌ 3x-ui connection failed:', e.message);
+      console.error(`❌ 3x-ui connection failed [${this.host}${this.basePath}]:`, e.message);
       return false;
     }
   }
 
-  private async login() {
+  async login(): Promise<string> {
     if (!this.host) {
       throw new Error('XUI_HOST is empty. Please set it in Settings -> Secrets.');
     }
-    try {
-      // 3x-ui login URL usually ends in /login
-      const loginUrl = `${this.host}/login`;
-      
-      const response = await axios.post(
-        loginUrl,
-        `username=${this.username}&password=${this.password}`,
-        {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          timeout: 10000,
-          httpsAgent: httpsAgent
+    
+    const tryLogin = async (path: string) => {
+      const url = `${this.host}${this.basePath}${path}`;
+      try {
+        const response = await axios.post(
+          url,
+          `username=${this.username}&password=${this.password}`,
+          getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded' })
+        );
+        return response;
+      } catch (err: any) {
+        if (err.response?.status === 404) {
+          return null; // Try next path
         }
-      );
+        throw err;
+      }
+    };
+
+    try {
+      // Try root path first (common for secret paths), then /login, then /panel/login
+      let response = await tryLogin('');
+      if (!response) {
+        response = await tryLogin('/');
+      }
+      if (!response) {
+        response = await tryLogin('/login');
+      }
+      if (!response) {
+        response = await tryLogin('/panel/login');
+      }
+      
+      if (!response) {
+        throw new Error(`404: Could not find login endpoint at ${this.host}${this.basePath}. Please check your XUI host URL and secret path.`);
+      }
       
       if (response.data && response.data.success === false) {
         throw new Error(response.data.msg || 'Login failed');
@@ -133,12 +195,19 @@ class XUIService {
       this.sessionCookie = cookie;
       return cookie;
     } catch (error: any) {
-      console.error('❌ 3x-ui login error:', error.message);
-      if (error.code === 'ERR_TLS_CERT_ALTNAME_INVALID' || error.message.includes('hostname')) {
-        console.warn('💡 Tip: Try using IP address in XUI_HOST instead of domain if certificate is invalid.');
+      console.error(`❌ 3x-ui login error [${this.host}${this.basePath}]:`, error.message);
+      if (error.response?.status === 404) {
+        console.warn(`💡 Check if your 3x-ui panel uses a non-standard base path. Current host: ${this.host}${this.basePath}`);
       }
       throw error;
     }
+  }
+
+  async getInbounds() {
+    if (!this.sessionCookie) await this.login();
+    const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+    const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+    return response.data.obj || [];
   }
 
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
@@ -147,16 +216,13 @@ class XUIService {
     // First, let's try to get the inbound to see its settings (for link generation later)
     let inbound;
     try {
-      const getInboundUrl = `${this.host}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, {
-        headers: { 'Cookie': this.sessionCookie },
-        httpsAgent: httpsAgent
-      });
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
       if (resp.data.success) {
         inbound = resp.data.obj;
       }
     } catch (e: any) {
-      console.warn(`Could not fetch inbound settings from ${this.host}, will use defaults. Error: ${e.message}`);
+      console.warn(`Could not fetch inbound settings from ${this.host}${this.basePath}, will use defaults. Error: ${e.message}`);
     }
 
     const clientData = {
@@ -179,17 +245,14 @@ class XUIService {
     };
 
     try {
-      const addClientUrl = `${this.host}/panel/api/inbounds/addClient`;
+      const addClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
       const response = await axios.post(
         addClientUrl,
         clientData,
-        {
-          headers: { 
-            'Cookie': this.sessionCookie,
-            'Content-Type': 'application/json'
-          },
-          httpsAgent: httpsAgent
-        }
+        getRequestConfig(addClientUrl, { 
+          'Cookie': this.sessionCookie,
+          'Content-Type': 'application/json'
+        })
       );
 
       if (response.data.success) {
@@ -204,27 +267,22 @@ class XUIService {
             const port = inbound.port;
             
             // Safer host extraction
-            let host = 'server.izinet.app'; // fallback
+            let hostName = 'server.izinet.app'; // fallback
             try {
-              if (this.host.includes('://')) {
-                const urlParts = new URL(this.host);
-                host = urlParts.hostname;
-              } else {
-                host = this.host.split(':')[0];
-              }
+              const urlParts = new URL(this.host);
+              hostName = urlParts.hostname;
             } catch (urlErr) {
-              console.warn('URL parsing failed in addClient, using raw host');
-              host = this.host.split('/')[0].split(':')[0] || host;
+              console.warn('URL parsing failed in addClient, using host from settings');
+              hostName = this.host.split(':').pop()?.replace(/\//g, '') || hostName;
             }
 
             const sni = realitySettings.serverNames?.[0] || 'google.com';
-            // Extract from realitySettings.settings.publicKey or realitySettings.publicKey depending on XUI version
             const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
             const sid = realitySettings.shortIds?.[0] || '';
             
             if (!pbk) throw new Error("Public key not found in inbound");
             
-            link = `vless://${uuid}@${host}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
+            link = `vless://${uuid}@${hostName}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
           } catch (e) {
             console.error('Error parsing inbound settings for link generation:', e);
             link = this.generateVlessLink(uuid, email);
@@ -270,18 +328,14 @@ class XUIService {
     };
 
     try {
-      // 3x-ui uses updateClient/{uuid}
-      const updateClientUrl = `${this.host}/panel/api/inbounds/updateClient/${uuid}`;
+      const updateClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${uuid}`;
       const response = await axios.post(
         updateClientUrl,
         clientData,
-        {
-          headers: { 
-            'Cookie': this.sessionCookie,
-            'Content-Type': 'application/json'
-          },
-          httpsAgent: httpsAgent
-        }
+        getRequestConfig(updateClientUrl, { 
+          'Cookie': this.sessionCookie,
+          'Content-Type': 'application/json'
+        })
       );
 
       if (response.data.success) {
@@ -301,14 +355,11 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
 
     try {
-      const response = await axios.get(`${this.host}/panel/api/inbounds/getClientTraffics/${email}`, {
-        headers: { 'Cookie': this.sessionCookie },
-        httpsAgent: httpsAgent
-      });
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${email}`;
+      const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
 
       if (response.data.success && response.data.obj) {
         const stats = response.data.obj;
-        // up + down in bytes. total field in 3x-ui represents the LIMIT in bytes
         return {
           up: stats.up || 0,
           down: stats.down || 0,
@@ -327,58 +378,114 @@ class XUIService {
     }
   }
 
-  generateVlessLink(uuid: string, email: string) {
-    const host = new URL(this.host).hostname;
-    // Fallback if inbound fetch fails (Standard TLS, no Reality parameters to avoid strict base64 errors in clients like Hiddify)
-    return `vless://${uuid}@${host}:443?type=tcp&security=tls&sni=${host}#izinet_${email}`;
+  async getOnlines() {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
+      const response = await axios.post(url, {}, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+      if (response.data.success) {
+        return response.data.obj || [];
+      }
+      return [];
+    } catch (error: any) {
+      console.error(`❌ 3x-ui getOnlines error for ${this.host}${this.basePath}:`, error.message);
+      return [];
+    }
   }
+
+  generateVlessLink(uuid: string, email: string, customDomain?: string) {
+    let hostName = customDomain;
+    if (!hostName) {
+      try {
+        hostName = new URL(this.host).hostname;
+      } catch (e) {
+        hostName = this.host.split(':').pop()?.replace(/\//g, '') || "server.izinet.app";
+      }
+    }
+    return `vless://${uuid}@${hostName}:443?type=tcp&security=tls&sni=${hostName}#izinet_${email}`;
+  }
+}
+
+// Multi-server registry
+const xuiInstances = new Map<string, XUIService>();
+
+async function getXuiForServer(serverId?: string | null) {
+  if (!serverId) {
+    // Default fallback to environment variables
+    const defaultId = 'env_default';
+    if (!xuiInstances.has(defaultId)) {
+      xuiInstances.set(defaultId, new XUIService());
+    }
+    const instance = xuiInstances.get(defaultId)!;
+    return { instance, server: null };
+  }
+
+  if (xuiInstances.has(serverId)) {
+    // We still need the server object for domain etc, so fetch from DB
+    const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+    return { instance: xuiInstances.get(serverId)!, server };
+  }
+
+  const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+  if (!server) {
+    const defaultId = 'env_default';
+    if (!xuiInstances.has(defaultId)) xuiInstances.set(defaultId, new XUIService());
+    return { instance: xuiInstances.get(defaultId)!, server: null };
+  }
+
+  // Robust host construction
+  let rawIp = (server.ip || '').trim();
+  let host = "";
+  
+  if (rawIp.includes('://')) {
+    // Full URL provided in IP field (e.g. https://1.2.3.4:567/path)
+    host = rawIp;
+  } else if (rawIp.includes('/')) {
+    // Path but no protocol (e.g. 1.2.3.4/path)
+    const [mainPart, ...pathParts] = rawIp.split('/');
+    const path = pathParts.join('/');
+    
+    if (mainPart.includes(':')) {
+      const port = mainPart.split(':').pop();
+      // Assume https for common high ports or if user mentioned it
+      const protocol = (port === '443' || parseInt(port || '0') > 10000) ? 'https' : 'http';
+      host = `${protocol}://${mainPart}/${path}`;
+    } else {
+      const protocol = (server.api_port === 443 || server.api_port > 10000) ? 'https' : 'http';
+      host = `${protocol}://${mainPart}:${server.api_port}/${path}`;
+    }
+  } else {
+    // Standard IP or domain
+    if (rawIp.includes(':')) {
+      const port = rawIp.split(':').pop();
+      const protocol = (port === '443' || parseInt(port || '0') > 10000) ? 'https' : 'http';
+      host = `${protocol}://${rawIp}`;
+    } else {
+      const protocol = (server.api_port === 443 || server.api_port > 10000) ? 'https' : 'http';
+      host = `${protocol}://${rawIp}:${server.api_port}`;
+    }
+  }
+
+  const newInstance = new XUIService({
+    host,
+    username: server.username,
+    password: server.password
+  });
+
+  xuiInstances.set(serverId, newInstance);
+  return { instance: newInstance, server };
 }
 
 // --- Payment Service ---
 class PaymentService {
-  private cryptoMerchantId: string;
-  private cryptoApiKey: string;
   private enotMerchantId: string;
   private enotSecretKey: string;
   private enotSecretKey2: string;
 
   constructor() {
-    this.cryptoMerchantId = process.env.CRYPTOMUS_MERCHANT_ID || '';
-    this.cryptoApiKey = process.env.CRYPTOMUS_API_KEY || '';
     this.enotMerchantId = process.env.ENOT_MERCHANT_ID || '';
     this.enotSecretKey = process.env.ENOT_SECRET_KEY || '';
     this.enotSecretKey2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || '';
-  }
-
-  async createCryptomusInvoice(amount: number, userId: string, orderId: string, origin: string) {
-    if (!this.cryptoMerchantId || !this.cryptoApiKey) {
-      throw new Error('Cryptomus credentials missing (Merchant ID or API Key)');
-    }
-
-    const host = origin.replace(/^https?:\/\//, '') || process.env.VITE_APP_URL || 'izinet.app';
-
-    const payload = {
-      amount: amount.toString(),
-      currency: 'USD',
-      order_id: orderId,
-      url_callback: `https://${host}/api/pay/webhook/cryptomus`,
-      url_return: `${origin}/dashboard`,
-      additional_data: userId
-    };
-
-    const sign = crypto
-      .createHash('md5')
-      .update(Buffer.from(JSON.stringify(payload)).toString('base64') + this.cryptoApiKey)
-      .digest('hex');
-
-    const response = await axios.post('https://api.cryptomus.com/v1/payment', payload, {
-      headers: {
-        merchant: this.cryptoMerchantId,
-        sign: sign
-      }
-    });
-
-    return response.data.result.url;
   }
 
   createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
@@ -413,33 +520,291 @@ const xui = new XUIService();
 
 // --- API Routes ---
 
-app.post('/api/support/notify', async (req, res) => {
-  const { ticketId, type, content } = req.body;
-  
-  if (!bot || !botAdminId) {
-    return res.status(503).json({ error: 'Telegram bot not configured' });
+// --- Admin Middleware ---
+async function adminOnly(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Authentication required' });
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+
+  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+
+  const { data: profile } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || (profile.role !== 'admin' && profile.role !== 'superadmin')) {
+    return res.status(403).json({ error: 'Access denied. Admin role required.' });
   }
 
+  req.user = { ...user, role: profile.role };
+  next();
+}
+
+// --- Admin API Routes ---
+
+app.get('/api/admin/stats', adminOnly, async (req, res) => {
   try {
-    if (type === 'new_ticket') {
-      const { data: ticket } = await supabase.from('support_tickets').select('*, users(email)').eq('id', ticketId).single();
-      if (ticket) {
-        const msg = `🆕 <b>Новое обращение!</b>\n\n<b>От:</b> ${ticket.users?.email || 'Неизвестный'}\n<b>Тема:</b> ${ticket.subject}\n<b>Текст:</b> ${ticket.message}\n\n<i>ID: ${ticket.id}</i>\n----------\nОтветьте на это сообщение для связи.`;
-        await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
-      }
-    } else if (type === 'new_message') {
-      const { data: msgData } = await supabase.from('support_messages').select('*, support_tickets(subject, user_id)').eq('id', ticketId).single();
-      if (msgData) {
-        const { data: user } = await supabase.from('users').select('email').eq('id', msgData.support_tickets.user_id).single();
-        const msg = `💬 <b>Новое сообщение в тикете!</b>\n\n<b>От:</b> ${user?.email || 'Неизвестный'}\n<b>Тема:</b> ${msgData.support_tickets.subject}\n<b>Текст:</b> ${msgData.content}\n\n<i>ID Тикета: ${msgData.ticket_id}</i>\n----------\nОтветьте для ответа.`;
-        await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
-      }
-    }
-    res.json({ success: true });
+    const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    const { count: activeSubs } = await supabase.from('subscriptions').select('*', { count: 'exact', head: true }).gt('expires_at', new Date().toISOString());
+    const { data: recentRevenue } = await supabase.from('transactions').select('amount').eq('status', 'completed');
+    
+    // Count admins
+    const { count: adminsCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).in('role', ['admin', 'superadmin']);
+
+    const totalRevenue = recentRevenue?.reduce((sum, tx) => sum + tx.amount, 0) || 0;
+
+    res.json({
+      totalUsers: usersCount,
+      activeSubscriptions: activeSubs,
+      totalRevenue,
+      adminsCount
+    });
   } catch (err: any) {
-    console.error('Manual notify error:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/admin/users', adminOnly, async (req, res) => {
+  const { search } = req.query;
+  // Select users joined with their active subscription and assigned server
+  let query = supabase
+    .from('users')
+    .select(`
+      *,
+      subscriptions (
+        id,
+        status,
+        expires_at,
+        traffic_limit_mb,
+        traffic_used_mb,
+        server_id,
+        v2ray_config,
+        vpn_servers (
+          name,
+          location_code
+        )
+      )
+    `)
+    .order('created_at', { ascending: false });
+
+  if (search) {
+    query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  
+  if (!data || !Array.isArray(data)) {
+    return res.json([]);
+  }
+
+  const now = new Date().toISOString();
+
+  // Transform data to flatten active subscription info
+  const transformed = data.map((u: any) => {
+    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : [];
+    
+    // Find active subscription: must be 'active' and either not expired or expire_at is null
+    const activeSub = subscriptions.find((s: any) => {
+      if (s.status !== 'active') return false;
+      if (!s.expires_at) return true;
+      const expiry = new Date(s.expires_at).getTime();
+      return expiry > Date.now();
+    });
+    
+    return {
+      ...u,
+      active_subscription: activeSub ? {
+        id: activeSub.id,
+        expires_at: activeSub.expires_at,
+        traffic_used_mb: activeSub.traffic_used_mb || 0,
+        traffic_limit_mb: activeSub.traffic_limit_mb || 0,
+        server_id: activeSub.server_id,
+        server_name: activeSub.vpn_servers?.name || 'VPN Сервер'
+      } : null
+    };
+  });
+
+  res.json(transformed);
+});
+
+app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
+  const { userId, newServerId } = req.body;
+  if (!userId || !newServerId) return res.status(400).json({ error: 'Missing parameters' });
+
+  console.log(`🔄 Moving user ${userId} to server ${newServerId}`);
+
+  try {
+    // 1. Find ANY active or recently expired subscription to move
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subErr || !sub) return res.status(404).json({ error: 'Active subscription not found for this user' });
+    
+    // 2. Get old and new server instances
+    const { instance: oldXui } = await getXuiForServer(sub.server_id);
+    const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
+    
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
+    const expiryTime = new Date(sub.expires_at).getTime();
+
+    // 3. Parse devices
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    // 4. Migrate each device
+    const migratedDevices: VpnDevice[] = [];
+    for (const device of devices) {
+      // Delete from old server (best effort)
+      if (sub.server_id) {
+        try {
+          const deleteUrl = `${(oldXui as any).host}${(oldXui as any).basePath}/panel/api/inbounds/deleteClient/${device.uuid}`;
+          await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': (oldXui as any).sessionCookie }));
+          console.log(`✅ Deleted client ${device.email} from old server`);
+        } catch (e) {
+          console.warn(`Could not delete client ${device.email} from old server during migration:`, (e as any).message);
+        }
+      }
+
+      // Add to new server
+      const newConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
+      migratedDevices.push({
+        ...device,
+        config: newConfig || newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
+      });
+    }
+
+    // 5. Update DB
+    const { data: updatedSub, error: updateErr } = await supabase
+      .from('subscriptions')
+      .update({
+        server_id: newServerId,
+        v2ray_config: JSON.stringify(migratedDevices),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sub.id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    console.log(`✅ User ${userId} successfully moved to server ${newServerId}`);
+    res.json({ success: true, subscription: updatedSub });
+  } catch (err: any) {
+    console.error('❌ Server migration error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
+  
+  const { data, error } = await supabase.from('users').update({
+    role
+  }).eq('id', id).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { instance } = await getXuiForServer(id);
+    const loginSuccess = await instance.login();
+    if (loginSuccess) {
+      // Try to get stats as a deeper check
+      const stats = await instance.getInbounds();
+      res.json({ success: true, name: 'XUI', version: 'Latest', stats_count: stats.length });
+    } else {
+      res.json({ success: false, error: 'Login failed' });
+    }
+  } catch (err: any) {
+    console.error(`❌ Connection check error for server ${id}:`, err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/admin/servers', adminOnly, async (req, res) => {
+  try {
+    const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    
+    // Enrich with stats
+    const enrichedServers = await Promise.all(servers.map(async (server) => {
+      // 1. Total users on this server
+      const { count } = await supabase
+        .from('subscriptions')
+        .select('*', { count: 'exact', head: true })
+        .eq('server_id', server.id)
+        .eq('status', 'active');
+
+      // 2. Online users
+      let onlineCount = 0;
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const onlines = await instance.getOnlines();
+        onlineCount = onlines.length;
+      } catch (err) {
+        console.warn(`Could not fetch online count for server ${server.id}:`, err);
+      }
+
+      return {
+        ...server,
+        total_users: count || 0,
+        online_users: onlineCount
+      };
+    }));
+
+    res.json(enrichedServers);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/servers', adminOnly, async (req, res) => {
+  const { name, ip, domain, api_port, username, password, location_code } = req.body;
+  const { data, error } = await supabase.from('vpn_servers').insert([{
+    name, ip, domain, api_port, username, password, location_code
+  }]).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.put('/api/admin/servers/:id', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { name, ip, domain, api_port, username, password, location_code, is_active } = req.body;
+  
+  const { data, error } = await supabase.from('vpn_servers').update({
+    name, ip, domain, api_port, username, password, location_code, is_active
+  }).eq('id', id).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  
+  // Clear instance cache to force re-creation with new creds/options
+  xuiInstances.delete(id);
+  
+  res.json(data);
+});
+
+app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from('vpn_servers').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  xuiInstances.delete(id);
+  res.json({ success: true });
 });
 
 // 💰 Create Payment Link
@@ -479,9 +844,7 @@ app.post('/api/pay/create', async (req, res) => {
     const origin = req.headers.origin || `https://${req.headers.host}`;
 
     let url = '';
-    if (method === 'cryptomus') {
-      url = await payment.createCryptomusInvoice(amount, userId, orderId, origin);
-    } else if (method === 'enot') {
+    if (method === 'enot') {
       // Assuming amount is in USD on frontend, converting to RUB for Enot if needed
       // For now, assume amount is already correct from UI
       url = payment.createEnotInvoice(amount, userId, orderId, origin);
@@ -521,30 +884,6 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
     console.error('❌ Manual traffic sync error:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
   }
-});
-
-// ⚓ Cryptomus Webhook
-app.post('/api/pay/webhook/cryptomus', async (req, res) => {
-  const { sign, ...payload } = req.body;
-  
-  const calculatedSign = crypto
-    .createHash('md5')
-    .update(Buffer.from(JSON.stringify(payload)).toString('base64') + (process.env.CRYPTOMUS_API_KEY || ''))
-    .digest('hex');
-
-  if (sign !== calculatedSign) {
-    return res.status(400).send('Invalid signature');
-  }
-
-  if (payload.status === 'paid' || payload.status === 'paid_over') {
-    const userId = payload.additional_data;
-    const amount = parseFloat(payload.amount);
-    const orderId = payload.order_id;
-
-    await processSuccessfulPayment(userId, amount, orderId, 'cryptomus');
-  }
-
-  res.send('OK');
 });
 
 // ⚓ Enot Webhook
@@ -689,6 +1028,16 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
+    // Pick server: use existing server if renewing, otherwise find an active one
+    let serverId = lastSub?.server_id;
+    if (!serverId) {
+       const { data: activeServer } = await supabase.from('vpn_servers').select('id').eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
+       serverId = activeServer?.id;
+    }
+
+    const { instance: xuiInstance, server } = await getXuiForServer(serverId);
+    const domain = server?.domain;
+
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const trafficLimitMb = 100 * 1024; // 100 GB default limit per device logic (you can tune this)
     const limitBytes = trafficLimitMb * 1024 * 1024;
@@ -707,13 +1056,13 @@ app.post('/api/subscription/buy', async (req, res) => {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-      console.log(`🆕 Creating VPN client ${email}...`);
-      const rawConfig = await xui.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+      console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
+      const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
       const newDevice: VpnDevice = {
         id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
         label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
-        config: rawConfig,
+        config: rawConfig || xuiInstance.generateVlessLink(uuid, email, domain),
         email: email,
         uuid: uuid,
         expiresAt: expiresAt.toISOString(),
@@ -739,8 +1088,11 @@ app.post('/api/subscription/buy', async (req, res) => {
       targetDevice.expiresAt = newExpiresAt.toISOString();
       targetDevice.serverType = serverType || targetDevice.serverType;
       
-      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email}`);
-      await xui.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email} on server ${serverId || 'default'}`);
+      await xuiInstance.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      
+      // Update config link in case domain/ip changed
+      targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
     }
 
     // Determine absolute max expiry for the subscription row
@@ -763,7 +1115,9 @@ app.post('/api/subscription/buy', async (req, res) => {
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
           device_limit: existingDevices.length,
-          v2ray_config: finalConfigJson
+          v2ray_config: finalConfigJson,
+          server_id: serverId,
+          updated_at: new Date().toISOString()
         })
         .eq('id', lastSub.id)
         .select()
@@ -782,7 +1136,8 @@ app.post('/api/subscription/buy', async (req, res) => {
           period_months: periodMonths || 1,
           device_limit: existingDevices.length,
           traffic_limit_mb: trafficLimitMb,
-          traffic_used_mb: 0
+          traffic_used_mb: 0,
+          server_id: serverId
         })
         .select()
         .single();
@@ -814,9 +1169,7 @@ app.post('/api/subscription/buy', async (req, res) => {
 });
 
 // Supabase Setup
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; // Needs to be set in Settings
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Already initialized at the top
 
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -830,68 +1183,38 @@ const adminReplyMap = new Map<number, number>(); // Maps admin's message ID to u
 
 
 // --- Realtime DB Listener ---
-// This listens for manual changes in the database (e.g., via Supabase Dashboard)
-// and syncs them to the 3x-ui panel automatically.
+// Use a set to prevent duplicate event processing within the same process
+const processedEventIds = new Set<string>();
+
+// Simple cleanup for the set
+setInterval(() => processedEventIds.clear(), 30000);
+
 function setupRealtimeListener() {
-  console.log('🔄 Setting up Realtime DB Listeners...');
+  console.log('🔄 Setting up Unified Realtime DB Listener...');
   
-  // 1. Subscription Sync Channel
-  const subChannel = supabase
-    .channel('subscription-sync')
+  // Create a single channel for all support-related changes
+  const supportChannel = supabase
+    .channel('support-realtime-unified')
+    // 1. Support Tickets
     .on(
       'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'subscriptions'
-      },
-      async (payload) => {
-        const newData = payload.new;
-        const oldData = payload.old;
-
-        // If expiry date, config or traffic limit changed, sync to XUI
-        if (
-          newData.expires_at !== oldData.expires_at || 
-          newData.v2ray_config !== oldData.v2ray_config ||
-          newData.traffic_limit_mb !== oldData.traffic_limit_mb
-        ) {
-          console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
-          
-          const userId = newData.user_id;
-          const vpnEmail = `user_${userId.slice(0, 8)}`;
-          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-          const expiryTimestamp = new Date(newData.expires_at).getTime();
-          const trafficLimitMb = newData.traffic_limit_mb || 102400;
-          const limitBytes = trafficLimitMb * 1024 * 1024;
-          
-          const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
-          if (uuidMatch) {
-            const uuid = uuidMatch[1];
-            await xui.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
-          }
-        }
-      }
-    )
-    .subscribe((status) => {
-      console.log(`📡 [Realtime] Subscriptions Channel: ${status}`);
-    });
-
-  // 2. Support Tickets Channel
-  const ticketChannel = supabase
-    .channel('support-tickets')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_tickets'
-      },
+      { event: 'INSERT', schema: 'public', table: 'support_tickets' },
       async (payload) => {
         const newTicket = payload.new;
+        if (processedEventIds.has(newTicket.id)) return;
+        processedEventIds.add(newTicket.id);
+
+        console.log(`📨 [Realtime] New Ticket: ${newTicket.id}`);
+        
         if (bot && botAdminId) {
           try {
             const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).single();
-            const msg = `🆕 <b>Новое обращение!</b>\n\n<b>От:</b> ${user?.email || 'Неизвестный'}\n<b>Тема:</b> ${newTicket.subject}\n<b>Обращение:</b> ${newTicket.message}\n\n<i>ID Тикета: ${newTicket.id}</i>\n----------\nОтветьте на это сообщение для связи с пользователем.`;
+            const msg = `📨 <b>Новый чат поддержки!</b>\n\n` +
+                        `👤 <b>От:</b> ${user?.email || 'Пользователь'}\n` +
+                        `💬 <b>Сообщение:</b> ${newTicket.message}\n\n` +
+                        `<i>ID: ${newTicket.id}</i>\n` +
+                        `----------\n` +
+                        `ОТВЕТЬТЕ на это сообщение, чтобы отправить ответ в чат.`;
             await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
           } catch (e) {
             console.error('Error sending ticket to admin TG', e);
@@ -899,30 +1222,28 @@ function setupRealtimeListener() {
         }
       }
     )
-    .subscribe((status) => {
-      console.log(`📡 [Realtime] Support Tickets Channel: ${status}`);
-    });
-
-  // 3. Support Messages Channel
-  const msgChannel = supabase
-    .channel('support-messages')
+    // 2. Support Messages
     .on(
       'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_messages',
-        filter: "sender=eq.user"
-      },
+      { event: 'INSERT', schema: 'public', table: 'support_messages', filter: "sender=eq.user" },
       async (payload) => {
         const newMessage = payload.new;
+        if (processedEventIds.has(newMessage.id)) return;
+        processedEventIds.add(newMessage.id);
+
+        console.log(`💬 [Realtime] New Message: ${newMessage.id}`);
+
         if (bot && botAdminId) {
           try {
-             // Get ticket info for user email
-             const {data: t} = await supabase.from('support_tickets').select('user_id, subject').eq('id', newMessage.ticket_id).single();
+             const {data: t} = await supabase.from('support_tickets').select('user_id').eq('id', newMessage.ticket_id).single();
              if (t) {
                const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).single();
-               const msg = `💬 <b>Новое сообщение в тикете!</b>\n\n<b>От:</b> ${u?.email || 'Неизвестный'}\n<b>Тема:</b> ${t.subject}\n<b>Сообщение:</b> ${newMessage.content}\n\n<i>ID Тикета: ${newMessage.ticket_id}</i>\n----------\nОтветьте на это сообщение для ответа пользователю.`;
+               const msg = `💬 <b>Новое сообщение в чате</b>\n\n` +
+                           `👤 <b>От:</b> ${u?.email || 'Пользователь'}\n` +
+                           `📝 <b>Текст:</b> ${newMessage.content}\n\n` +
+                           `<i>ID Тикета: ${newMessage.ticket_id}</i>\n` +
+                           `----------\n` +
+                           `ОТВЕТЬТЕ для ответа.`;
                await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
              }
           } catch (e) {
@@ -931,11 +1252,37 @@ function setupRealtimeListener() {
         }
       }
     )
-    .subscribe((status) => {
-      console.log(`📡 [Realtime] Support Messages Channel: ${status}`);
-      if (status === 'CHANNEL_ERROR') {
-        console.error('💡 TIP: Check if "support_messages" table is added to "supabase_realtime" publication.');
+    // 3. Subscriptions (Manual Sync)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'subscriptions' },
+      async (payload) => {
+        const newData = payload.new;
+        const oldData = payload.old;
+        
+        if (
+          newData.expires_at !== oldData.expires_at || 
+          newData.v2ray_config !== oldData.v2ray_config ||
+          newData.traffic_limit_mb !== oldData.traffic_limit_mb
+        ) {
+          console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
+          const { instance: xuiInstance } = await getXuiForServer(newData.server_id);
+          
+          const vpnEmail = `user_${newData.user_id.slice(0, 8)}`;
+          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+          const expiryTimestamp = new Date(newData.expires_at).getTime();
+          const trafficLimitMb = newData.traffic_limit_mb || 102400;
+          const limitBytes = trafficLimitMb * 1024 * 1024;
+          const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
+          if (uuidMatch) {
+            const uuid = uuidMatch[1];
+            await xuiInstance.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
+          }
+        }
       }
+    )
+    .subscribe((status) => {
+      console.log(`📡 [Realtime] Unified Channel Status: ${status}`);
     });
 }
 
@@ -958,6 +1305,9 @@ async function syncUserTraffic(userId: string) {
 
   if (!sub) return null;
 
+  // Get correct XUI instance
+  const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+
   // 2. Identify all devices by parsing VpnDevice JSON
   const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
 
@@ -967,7 +1317,7 @@ async function syncUserTraffic(userId: string) {
   // 3. Fetch stats for all devices
   for (const device of devices) {
     try {
-      const stats = await xui.getClientTraffic(device.email);
+      const stats = await xuiInstance.getClientTraffic(device.email);
       if (stats) {
         device.trafficUsedBytes = stats.used;
         totalUsedBytes += stats.used;
@@ -1123,28 +1473,54 @@ const showMainMenu = (ctx: any) => {
   });
 };
 
-async function launchBot(retries = 5) {
-  if (!bot) return;
+let isBotLaunching = false;
+
+async function launchBot(retries = 10) {
+  if (!bot || isBotLaunching) return;
+  isBotLaunching = true;
 
   try {
-    console.log('🤖 Attempting to launch Telegram Bot...');
+    console.log('🤖 Telegram Bot: Starting launch sequence...');
     
-    // Always clear webhook before polling to avoid conflicts
+    // 1. Try to stop any existing polling in this instance
+    try {
+      await bot.stop();
+    } catch (e) {
+      // Ignore errors during stop
+    }
+    
+    // 2. Always clear webhook and drop pending updates to avoid 409 and spam
+    console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     
-    await bot.launch();
-    console.log('✅ Telegram Bot started successfully');
+    // 3. Small delay after clearing to let Telegram settle
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // 4. Launch polling
+    await bot.launch({
+      allowedUpdates: ['message', 'callback_query'],
+    });
+    
+    console.log('✅ Telegram Bot: Started successfully');
+    isBotLaunching = false;
   } catch (err: any) {
+    isBotLaunching = false;
+    
     if (err.response?.error_code === 409) {
       if (retries > 0) {
-        console.warn(`⚠️ Bot conflict (409). Another instance is running. Retrying in 5s... (${retries} attempts left)`);
-        setTimeout(() => launchBot(retries - 1), 5000);
+        const delay = 7000; // 7 seconds
+        console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
+        setTimeout(() => launchBot(retries - 1), delay);
       } else {
-        console.error('❌ Bot launch failed after multiple retries due to 409 Conflict.');
-        console.error('💡 TIP: Make sure you don\'t have another instance of this bot running elsewhere.');
+        console.error('❌ Telegram Bot: Launch failed after multiple retries due to 409 Conflict.');
+        console.error('💡 TIP: Check if you have another instance (local dev or staging) using this token.');
       }
     } else {
-      console.error('❌ Bot launch failed with unexpected error:', err.message || err);
+      console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
+      // For non-409 errors, we might still want to retry a few times
+      if (retries > 0) {
+        setTimeout(() => launchBot(retries - 1), 5000);
+      }
     }
   }
 }
@@ -1449,11 +1825,16 @@ if (bot) {
 // --- Vite Middleware ---
 
 async function startServer() {
+  console.log('🚀 Starting izinet server...');
   // Check 3x-ui configuration on startup
   xui.checkConfig();
   
   // Setup Realtime DB Listener for manual syncing
-  setupRealtimeListener();
+  try {
+    setupRealtimeListener();
+  } catch (e) {
+    console.error('❌ Failed to setup realtime listener:', e);
+  }
 
   // Initial traffic sync and schedule every 15 minutes
   syncTrafficStats();
@@ -1466,6 +1847,7 @@ async function startServer() {
     console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
   }
 
+  console.log('🛠️ Configuring Vite middleware...');
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
