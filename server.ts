@@ -833,9 +833,10 @@ const adminReplyMap = new Map<number, number>(); // Maps admin's message ID to u
 // This listens for manual changes in the database (e.g., via Supabase Dashboard)
 // and syncs them to the 3x-ui panel automatically.
 function setupRealtimeListener() {
-  console.log('🔄 Setting up Realtime DB Listener...');
+  console.log('🔄 Setting up Realtime DB Listeners...');
   
-  supabase
+  // 1. Subscription Sync Channel
+  const subChannel = supabase
     .channel('subscription-sync')
     .on(
       'postgres_changes',
@@ -871,6 +872,13 @@ function setupRealtimeListener() {
         }
       }
     )
+    .subscribe((status) => {
+      console.log(`📡 [Realtime] Subscriptions Channel: ${status}`);
+    });
+
+  // 2. Support Tickets Channel
+  const ticketChannel = supabase
+    .channel('support-tickets')
     .on(
       'postgres_changes',
       {
@@ -891,6 +899,13 @@ function setupRealtimeListener() {
         }
       }
     )
+    .subscribe((status) => {
+      console.log(`📡 [Realtime] Support Tickets Channel: ${status}`);
+    });
+
+  // 3. Support Messages Channel
+  const msgChannel = supabase
+    .channel('support-messages')
     .on(
       'postgres_changes',
       {
@@ -917,7 +932,10 @@ function setupRealtimeListener() {
       }
     )
     .subscribe((status) => {
-      console.log(`📡 Realtime subscription status: ${status}`);
+      console.log(`📡 [Realtime] Support Messages Channel: ${status}`);
+      if (status === 'CHANNEL_ERROR') {
+        console.error('💡 TIP: Check if "support_messages" table is added to "supabase_realtime" publication.');
+      }
     });
 }
 

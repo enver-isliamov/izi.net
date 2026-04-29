@@ -36,9 +36,25 @@ create policy "Users can send messages to their tickets"
     and sender = 'user'
   );
 
--- Настройка Realtime (убедитесь, что таблица support_tickets уже добавлена)
--- Если таблица support_messages уже в публикации, эта команда может выдать ошибку, которую можно игнорировать.
-alter publication supabase_realtime add table public.support_messages;
+-- Настройка Realtime (убедитесь, что все таблицы добавлены в публикацию)
+-- Это необходимо для автоматической синхронизации с 3x-ui и работы уведомлений в Telegram
+DO $$
+BEGIN
+  -- Добавляем таблицу subscriptions если еще не добавлена
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'subscriptions') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.subscriptions;
+  END IF;
+
+  -- Добавляем таблицу support_tickets если еще не добавлена
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'support_tickets') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.support_tickets;
+  END IF;
+
+  -- Добавляем таблицу support_messages если еще не добавлена
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'support_messages') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.support_messages;
+  END IF;
+END $$;
 ```
 
 **После того как вы выполните этот код в Supabase, просто дайте мне команду, и я напишу код для Интерфейса и Бота!**
