@@ -97,14 +97,6 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
             throw error;
         }
       } else {
-        // Notify admin via server API
-        if (data) {
-          fetch('/api/support/notify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticketId: data.id, type: 'new_message' })
-          }).catch(e => console.error('Notify error:', e));
-        }
         setInputText('');
       }
     } catch(e) {
@@ -117,24 +109,26 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
 
   return (
     <div className="flex flex-col h-[70vh] md:h-[600px] border border-border rounded-2xl overflow-hidden bg-card/30 backdrop-blur-sm">
-      <div className="bg-muted/30 p-4 border-b border-border flex justify-between items-center">
+      <div className="bg-background/40 backdrop-blur-md p-4 border-b border-border flex justify-between items-center">
         <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner">
                 <MessageCircle className="w-5 h-5" />
             </div>
             <div>
-                <h3 className="font-bold text-sm leading-tight line-clamp-1">{ticket.subject}</h3>
-                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {new Date(ticket.created_at).toLocaleDateString()}
-                </span>
+                <h3 className="font-bold text-sm leading-tight">Поддержка izinet</h3>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Онлайн</span>
+                </div>
             </div>
         </div>
-        <Badge variant="outline" className={`text-[10px] h-5 ${ticket.status === 'open' ? 'text-primary border-primary/30' : ''}`}>
-          {ticket.status === 'open' ? 'Открыт' : ticket.status === 'in_progress' ? 'В работе' : 'Закрыт'}
+        <Badge variant="outline" className={`text-[9px] h-5 px-2 bg-background/50 ${ticket.status === 'open' ? 'text-primary border-primary/30' : ''}`}>
+          {ticket.status === 'open' ? 'Активен' : 'Архив'}
         </Badge>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-primary/10">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+
         {initialMessage && (
           <div className="flex justify-end">
             <div className="bg-primary text-primary-foreground max-w-[85%] rounded-2xl rounded-tr-sm p-3 text-sm shadow-sm">

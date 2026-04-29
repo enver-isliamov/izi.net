@@ -413,35 +413,6 @@ const xui = new XUIService();
 
 // --- API Routes ---
 
-app.post('/api/support/notify', async (req, res) => {
-  const { ticketId, type, content } = req.body;
-  
-  if (!bot || !botAdminId) {
-    return res.status(503).json({ error: 'Telegram bot not configured' });
-  }
-
-  try {
-    if (type === 'new_ticket') {
-      const { data: ticket } = await supabase.from('support_tickets').select('*, users(email)').eq('id', ticketId).single();
-      if (ticket) {
-        const msg = `🆕 <b>Новое обращение!</b>\n\n<b>От:</b> ${ticket.users?.email || 'Неизвестный'}\n<b>Тема:</b> ${ticket.subject}\n<b>Текст:</b> ${ticket.message}\n\n<i>ID: ${ticket.id}</i>\n----------\nОтветьте на это сообщение для связи.`;
-        await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
-      }
-    } else if (type === 'new_message') {
-      const { data: msgData } = await supabase.from('support_messages').select('*, support_tickets(subject, user_id)').eq('id', ticketId).single();
-      if (msgData) {
-        const { data: user } = await supabase.from('users').select('email').eq('id', msgData.support_tickets.user_id).single();
-        const msg = `💬 <b>Новое сообщение в тикете!</b>\n\n<b>От:</b> ${user?.email || 'Неизвестный'}\n<b>Тема:</b> ${msgData.support_tickets.subject}\n<b>Текст:</b> ${msgData.content}\n\n<i>ID Тикета: ${msgData.ticket_id}</i>\n----------\nОтветьте для ответа.`;
-        await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
-      }
-    }
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Manual notify error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // 💰 Create Payment Link
 app.post('/api/pay/create', async (req, res) => {
   const { userId, amount, method } = req.body;
@@ -830,40 +801,94 @@ const adminReplyMap = new Map<number, number>(); // Maps admin's message ID to u
 
 
 // --- Realtime DB Listener ---
-// This listens for manual changes in the database (e.g., via Supabase Dashboard)
-// and syncs them to the 3x-ui panel automatically.
+// Use a set to prevent duplicate event processing within the same process
+const processedEventIds = new Set<string>();
+
+// Simple cleanup for the set
+setInterval(() => processedEventIds.clear(), 30000);
+
 function setupRealtimeListener() {
-  console.log('🔄 Setting up Realtime DB Listeners...');
+  console.log('🔄 Setting up Unified Realtime DB Listener...');
   
-  // 1. Subscription Sync Channel
-  const subChannel = supabase
-    .channel('subscription-sync')
+  // Create a single channel for all support-related changes
+  const supportChannel = supabase
+    .channel('support-realtime-unified')
+    // 1. Support Tickets
     .on(
       'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'subscriptions'
-      },
+      { event: 'INSERT', schema: 'public', table: 'support_tickets' },
+      async (payload) => {
+        const newTicket = payload.new;
+        if (processedEventIds.has(newTicket.id)) return;
+        processedEventIds.add(newTicket.id);
+
+        console.log(`📨 [Realtime] New Ticket: ${newTicket.id}`);
+        
+        if (bot && botAdminId) {
+          try {
+            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).single();
+            const msg = `📨 <b>Новый чат поддержки!</b>\n\n` +
+                        `👤 <b>От:</b> ${user?.email || 'Пользователь'}\n` +
+                        `💬 <b>Сообщение:</b> ${newTicket.message}\n\n` +
+                        `<i>ID: ${newTicket.id}</i>\n` +
+                        `----------\n` +
+                        `ОТВЕТЬТЕ на это сообщение, чтобы отправить ответ в чат.`;
+            await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
+          } catch (e) {
+            console.error('Error sending ticket to admin TG', e);
+          }
+        }
+      }
+    )
+    // 2. Support Messages
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'support_messages', filter: "sender=eq.user" },
+      async (payload) => {
+        const newMessage = payload.new;
+        if (processedEventIds.has(newMessage.id)) return;
+        processedEventIds.add(newMessage.id);
+
+        console.log(`💬 [Realtime] New Message: ${newMessage.id}`);
+
+        if (bot && botAdminId) {
+          try {
+             const {data: t} = await supabase.from('support_tickets').select('user_id').eq('id', newMessage.ticket_id).single();
+             if (t) {
+               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).single();
+               const msg = `💬 <b>Новое сообщение в чате</b>\n\n` +
+                           `👤 <b>От:</b> ${u?.email || 'Пользователь'}\n` +
+                           `📝 <b>Текст:</b> ${newMessage.content}\n\n` +
+                           `<i>ID Тикета: ${newMessage.ticket_id}</i>\n` +
+                           `----------\n` +
+                           `ОТВЕТЬТЕ для ответа.`;
+               await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
+             }
+          } catch (e) {
+             console.error('Error sending message to admin TG', e);
+          }
+        }
+      }
+    )
+    // 3. Subscriptions (Manual Sync)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'subscriptions' },
       async (payload) => {
         const newData = payload.new;
         const oldData = payload.old;
-
-        // If expiry date, config or traffic limit changed, sync to XUI
+        
         if (
           newData.expires_at !== oldData.expires_at || 
           newData.v2ray_config !== oldData.v2ray_config ||
           newData.traffic_limit_mb !== oldData.traffic_limit_mb
         ) {
           console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
-          
-          const userId = newData.user_id;
-          const vpnEmail = `user_${userId.slice(0, 8)}`;
+          const vpnEmail = `user_${newData.user_id.slice(0, 8)}`;
           const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
           const expiryTimestamp = new Date(newData.expires_at).getTime();
           const trafficLimitMb = newData.traffic_limit_mb || 102400;
           const limitBytes = trafficLimitMb * 1024 * 1024;
-          
           const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
           if (uuidMatch) {
             const uuid = uuidMatch[1];
@@ -873,69 +898,7 @@ function setupRealtimeListener() {
       }
     )
     .subscribe((status) => {
-      console.log(`📡 [Realtime] Subscriptions Channel: ${status}`);
-    });
-
-  // 2. Support Tickets Channel
-  const ticketChannel = supabase
-    .channel('support-tickets')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_tickets'
-      },
-      async (payload) => {
-        const newTicket = payload.new;
-        if (bot && botAdminId) {
-          try {
-            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).single();
-            const msg = `🆕 <b>Новое обращение!</b>\n\n<b>От:</b> ${user?.email || 'Неизвестный'}\n<b>Тема:</b> ${newTicket.subject}\n<b>Обращение:</b> ${newTicket.message}\n\n<i>ID Тикета: ${newTicket.id}</i>\n----------\nОтветьте на это сообщение для связи с пользователем.`;
-            await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
-          } catch (e) {
-            console.error('Error sending ticket to admin TG', e);
-          }
-        }
-      }
-    )
-    .subscribe((status) => {
-      console.log(`📡 [Realtime] Support Tickets Channel: ${status}`);
-    });
-
-  // 3. Support Messages Channel
-  const msgChannel = supabase
-    .channel('support-messages')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_messages',
-        filter: "sender=eq.user"
-      },
-      async (payload) => {
-        const newMessage = payload.new;
-        if (bot && botAdminId) {
-          try {
-             // Get ticket info for user email
-             const {data: t} = await supabase.from('support_tickets').select('user_id, subject').eq('id', newMessage.ticket_id).single();
-             if (t) {
-               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).single();
-               const msg = `💬 <b>Новое сообщение в тикете!</b>\n\n<b>От:</b> ${u?.email || 'Неизвестный'}\n<b>Тема:</b> ${t.subject}\n<b>Сообщение:</b> ${newMessage.content}\n\n<i>ID Тикета: ${newMessage.ticket_id}</i>\n----------\nОтветьте на это сообщение для ответа пользователю.`;
-               await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
-             }
-          } catch (e) {
-             console.error('Error sending message to admin TG', e);
-          }
-        }
-      }
-    )
-    .subscribe((status) => {
-      console.log(`📡 [Realtime] Support Messages Channel: ${status}`);
-      if (status === 'CHANNEL_ERROR') {
-        console.error('💡 TIP: Check if "support_messages" table is added to "supabase_realtime" publication.');
-      }
+      console.log(`📡 [Realtime] Unified Channel Status: ${status}`);
     });
 }
 
@@ -1123,28 +1086,54 @@ const showMainMenu = (ctx: any) => {
   });
 };
 
-async function launchBot(retries = 5) {
-  if (!bot) return;
+let isBotLaunching = false;
+
+async function launchBot(retries = 10) {
+  if (!bot || isBotLaunching) return;
+  isBotLaunching = true;
 
   try {
-    console.log('🤖 Attempting to launch Telegram Bot...');
+    console.log('🤖 Telegram Bot: Starting launch sequence...');
     
-    // Always clear webhook before polling to avoid conflicts
+    // 1. Try to stop any existing polling in this instance
+    try {
+      await bot.stop();
+    } catch (e) {
+      // Ignore errors during stop
+    }
+    
+    // 2. Always clear webhook and drop pending updates to avoid 409 and spam
+    console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     
-    await bot.launch();
-    console.log('✅ Telegram Bot started successfully');
+    // 3. Small delay after clearing to let Telegram settle
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // 4. Launch polling
+    await bot.launch({
+      allowedUpdates: ['message', 'callback_query'],
+    });
+    
+    console.log('✅ Telegram Bot: Started successfully');
+    isBotLaunching = false;
   } catch (err: any) {
+    isBotLaunching = false;
+    
     if (err.response?.error_code === 409) {
       if (retries > 0) {
-        console.warn(`⚠️ Bot conflict (409). Another instance is running. Retrying in 5s... (${retries} attempts left)`);
-        setTimeout(() => launchBot(retries - 1), 5000);
+        const delay = 7000; // 7 seconds
+        console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
+        setTimeout(() => launchBot(retries - 1), delay);
       } else {
-        console.error('❌ Bot launch failed after multiple retries due to 409 Conflict.');
-        console.error('💡 TIP: Make sure you don\'t have another instance of this bot running elsewhere.');
+        console.error('❌ Telegram Bot: Launch failed after multiple retries due to 409 Conflict.');
+        console.error('💡 TIP: Check if you have another instance (local dev or staging) using this token.');
       }
     } else {
-      console.error('❌ Bot launch failed with unexpected error:', err.message || err);
+      console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
+      // For non-409 errors, we might still want to retry a few times
+      if (retries > 0) {
+        setTimeout(() => launchBot(retries - 1), 5000);
+      }
     }
   }
 }
