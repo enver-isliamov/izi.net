@@ -19,7 +19,7 @@ VPN Server IP: 185.72.11.57
 Frontend: React + TypeScript + TailwindCSS → Vercel
 Backend: Supabase (Auth + Database + Edge Functions)
 Репозиторий: GitHub
-Платёжная система: Platega (platega.io)
+Платёжная система: Enot.io
 2. ДИЗАЙН-СИСТЕМА
 2.1 Цветовая палитра
 Роль	Цвет	HEX
@@ -171,7 +171,7 @@ vpn/config
 referral/calculate
 ✅ 5.3 RLS (Row Level Security)
 6. ИНТЕГРАЦИИ
-6.1 Platega API
+✅ 6.1 Enot.io API
 ✅ 6.2 3x-ui API (Подключено: Авторизация, Добавление клиентов, Продление, Синхронизация трафика и дат)
 6.3 Telegram Bot (Подключено: Команды /status, /help, /support)
 7. ЭТАПЫ РЕАЛИЗАЦИИ

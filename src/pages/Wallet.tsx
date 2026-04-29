@@ -152,7 +152,7 @@ export default function Wallet() {
                   Карты / СБП
                   {method === 'enot' && <CheckCircle2 className="w-4 h-4" />}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">Rub (Platega) — Мир, Visa, MC</div>
+                <div className="text-xs text-muted-foreground mt-1">Enot.io — Мир, Visa, MC, СБП</div>
               </div>
             </button>
 
