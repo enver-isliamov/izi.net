@@ -13,6 +13,17 @@ export interface UserProfile {
   created_at: string;
 }
 
+export interface VpnServer {
+  id: string;
+  name: string;
+  ip: string;
+  domain?: string;
+  api_port: number;
+  location_code: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface Balance {
   user_id: string;
   amount: number;
@@ -32,6 +43,8 @@ export interface Subscription {
   period_months: number;
   expires_at: string;
   created_at: string;
+  server_id?: string;
+  vpn_servers?: VpnServer;
 }
 
 export interface Device {
