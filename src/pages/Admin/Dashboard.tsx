@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Server, DollarSign, Activity } from 'lucide-react';
+import { Users, Server, DollarSign, Activity, Zap } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -29,7 +29,7 @@ export default function AdminDashboard() {
   const cards = [
     { title: 'Всего пользователей', value: stats?.totalUsers || 0, icon: Users, color: 'text-blue-500' },
     { title: 'Активных подписок', value: stats?.activeSubscriptions || 0, icon: Activity, color: 'text-green-500' },
-    { title: 'Общая выручка', value: `$${stats?.totalRevenue || 0}`, icon: DollarSign, color: 'text-yellow-500' },
+    { title: 'Сейчас онлайн', value: stats?.totalOnline || 0, icon: Zap, color: 'text-yellow-400' },
   ];
 
   return (

@@ -12,11 +12,11 @@ async function checkSchema() {
     console.log('User columns:', Object.keys(data[0] || {}));
   }
 
-  const { data: subs, error: subError } = await supabase.from('subscriptions').select('*').limit(1);
-  if (subError) {
-    console.error('Error fetching subscriptions:', subError);
+  const { data: txs, error: txError } = await supabase.from('transactions').select('*').limit(1);
+  if (txError) {
+    console.error('Error fetching transactions:', txError);
   } else {
-    console.log('subscriptions columns:', Object.keys(subs[0] || {}));
+    console.log('transactions columns:', Object.keys(txs[0] || {}));
   }
 }
 

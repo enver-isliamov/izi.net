@@ -12,6 +12,7 @@ export default function AdminServers() {
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
   });
@@ -56,8 +57,30 @@ export default function AdminServers() {
       setEditingId(null);
       setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
       fetchServers();
-    } catch (e) {
-      toast.error('Ошибка сохранения сервера');
+    } catch (e: any) {
+      const errorMsg = e.response?.data?.error || 'Ошибка сохранения сервера';
+      toast.error(errorMsg);
+      console.error('Save server error:', e);
+    }
+  };
+
+  const checkConnection = async (id: string | number) => {
+    try {
+      setIsChecking(id.toString());
+      toast.loading('Проверка соединения...', { id: 'check-conn' });
+      const { data } = await axios.post(`/api/admin/servers/${id}/check`, {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (data.status === 'ok') {
+        toast.success('Соединение установлено!', { id: 'check-conn' });
+        fetchServers();
+      } else {
+        toast.error(`Ошибка: ${data.message}`, { id: 'check-conn' });
+      }
+    } catch (e: any) {
+      toast.error(`Ошибка соединения: ${e.response?.data?.error || e.message}`, { id: 'check-conn' });
+    } finally {
+      setIsChecking(null);
     }
   };
 
@@ -103,26 +126,6 @@ export default function AdminServers() {
       toast.success('Сервер удален');
     } catch (e) {
       toast.error('Ошибка удаления');
-    }
-  };
-
-  const [isChecking, setIsChecking] = useState<string | null>(null);
-
-  const checkConnection = async (serverId: string) => {
-    setIsChecking(serverId);
-    try {
-      const { data } = await axios.post(`/api/admin/servers/${serverId}/check`, {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      if (data.success) {
-        toast.success(`Сервер доступен!`);
-      } else {
-        toast.error(`Ошибка: ${data.error}`);
-      }
-    } catch (e: any) {
-      toast.error(e.response?.data?.error || 'Сервер недоступен');
-    } finally {
-      setIsChecking(null);
     }
   };
 
@@ -184,7 +187,7 @@ export default function AdminServers() {
                 placeholder="API Порт (2053)"
                 className="bg-black/20 border border-white/5 rounded-xl p-3 text-sm focus:border-blue-500/50 outline-none"
                 value={formData.api_port}
-                onChange={e => setFormData({...formData, api_port: parseInt(e.target.value)})}
+                onChange={e => setFormData({...formData, api_port: e.target.value === '' ? 0 : parseInt(e.target.value)})}
               />
               <input
                 placeholder="XUI Username"
@@ -247,8 +250,12 @@ export default function AdminServers() {
                 
                 <div className="flex items-center gap-4 mt-2">
                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase">Юзеров</span>
+                      <span className="text-[10px] text-muted-foreground uppercase">База</span>
                       <span className="text-sm font-bold text-blue-400">{server.total_users || 0}</span>
+                   </div>
+                   <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase">X-UI</span>
+                      <span className="text-sm font-bold text-indigo-400">{server.xui_total_clients || 0}</span>
                    </div>
                    <div className="flex flex-col">
                       <span className="text-[10px] text-muted-foreground uppercase">Онлайн</span>
