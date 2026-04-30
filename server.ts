@@ -112,6 +112,7 @@ class XUIService {
   private sessionCookie: string | null = null;
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
+    // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
     
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
@@ -123,18 +124,20 @@ class XUIService {
       if (host) {
         const url = new URL(host);
         this.host = `${url.protocol}//${url.host}`;
-        this.basePath = url.pathname.replace(/\/+$/, "");
+        // Extract base path, and ensure it starts with / if not empty
+        let path = url.pathname.replace(/\/+$/, "");
+        this.basePath = path && !path.startsWith('/') ? '/' + path : path;
       } else {
         this.host = "";
+        this.basePath = "";
       }
     } catch (e) {
-      // Fallback for non-standard or partial URLs
       this.host = host.replace(/\/+$/, "").replace(/\/panel$/, "");
       this.basePath = "";
     }
     
-    this.username = serverConfigs?.username || process.env.XUI_USERNAME || '';
-    this.password = serverConfigs?.password || process.env.XUI_PASSWORD || '';
+    this.username = (serverConfigs?.username || process.env.XUI_USERNAME || '').trim();
+    this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || '').trim();
   }
 
   async checkConfig() {
@@ -335,7 +338,11 @@ class XUIService {
         const sni = realitySettings.serverNames?.[0] || (isIP ? 'google.com' : hostName);
         const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
         const sid = realitySettings.shortIds?.[0] || '';
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
+        const fp = realitySettings.settings?.fingerprint || realitySettings.fingerprint || 'chrome';
+        const spiderX = realitySettings.settings?.spiderX || '/';
+        // Reality link format optimized for Hiddify and V2Ray
+        // Using literal '/' for spx as some clients are sensitive
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision&spx=${spiderX}#izinet_${email}`;
       } else if (security === 'tls') {
         const tlsSettings = streamSettings.tlsSettings || {};
         const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
@@ -1012,29 +1019,83 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
 });
 
 app.post('/api/admin/servers', adminOnly, async (req, res) => {
-  const { name, ip, domain, api_port, username, password, location_code } = req.body;
-  const { data, error } = await supabase.from('vpn_servers').insert([{
-    name, ip, domain, api_port, username, password, location_code
-  }]).select().single();
+  const { name, ip, domain, api_port, username, password, location_code, is_default } = req.body;
+  
+  try {
+    const isDefault = !!is_default;
+    
+    if (isDefault) {
+      // Try to update, but don't fail if column doesn't exist yet (Supabase might not have been migrated)
+      try {
+        await supabase.from('vpn_servers').update({ is_default: false });
+      } catch (e) {
+        console.warn('⚠️ Could not clear is_default, column might be missing');
+      }
+    }
 
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+    const { data, error } = await supabase.from('vpn_servers').insert([{
+      name, 
+      ip, 
+      domain, 
+      api_port: api_port ? parseInt(api_port as any) : 2053, 
+      username, 
+      password, 
+      location_code: location_code || 'DE',
+      is_default: isDefault,
+      is_active: true
+    }]).select().single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err: any) {
+    console.error('Error adding server:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/admin/servers/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { name, ip, domain, api_port, username, password, location_code, is_active } = req.body;
+  const { name, ip, domain, api_port, username, password, location_code, is_active, is_default } = req.body;
   
-  const { data, error } = await supabase.from('vpn_servers').update({
-    name, ip, domain, api_port, username, password, location_code, is_active
-  }).eq('id', id).select().single();
+  try {
+    const isDefault = !!is_default;
 
-  if (error) return res.status(500).json({ error: error.message });
-  
-  // Clear instance cache to force re-creation with new creds/options
-  xuiInstances.delete(id);
-  
-  res.json(data);
+    if (isDefault) {
+      try {
+        await supabase.from('vpn_servers').update({ is_default: false }).neq('id', id);
+      } catch (e) {
+        console.warn('⚠️ Could not clear is_default, column might be missing');
+      }
+    }
+
+    const updateData: any = {
+      name, 
+      ip, 
+      domain, 
+      api_port: api_port ? parseInt(api_port as any) : 2053, 
+      username, 
+      password, 
+      location_code: location_code || 'DE',
+      is_active: is_active ?? true,
+      is_default: isDefault
+    };
+
+    const { data, error } = await supabase.from('vpn_servers')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    // Clear instance cache to force re-creation with new creds
+    xuiInstances.delete(id);
+    
+    res.json(data);
+  } catch (err: any) {
+    console.error('Error updating server:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
@@ -1048,6 +1109,9 @@ app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
 // 💰 Subscription config endpoint for apps (V2Ray/Hiddify)
 app.get('/api/sub/:id', async (req, res) => {
   const { id } = req.params;
+  const userAgent = req.headers['user-agent'] || '';
+  
+  console.log(`📡 Subscription request for ID: ${id}, UA: ${userAgent}`);
   
   const { data: sub, error } = await supabase
     .from('subscriptions')
@@ -1056,12 +1120,14 @@ app.get('/api/sub/:id', async (req, res) => {
     .single();
 
   if (error || !sub) {
+    console.warn(`❌ Subscription not found: ${id}`);
     return res.status(404).send('Subscription not found');
   }
 
   const now = new Date();
   const expires = new Date(sub.expires_at);
   if (sub.status !== 'active' || expires < now) {
+    console.warn(`⚠️ Subscription inactive or expired: ${id}`);
     return res.status(403).send('Subscription expired or inactive');
   }
 
@@ -1080,8 +1146,24 @@ app.get('/api/sub/:id', async (req, res) => {
   }
 
   // V2Ray apps expect Base64 encoded list of links
-  const base64Config = Buffer.from(configText).toString('base64');
+  const configLines = configText.split('\n')
+    .map(l => l.trim())
+    .filter(line => line.startsWith('vless://'))
+    .join('\n');
+  
+  // Hiddify likes it when the list ends with a newline before base64
+  const base64Config = Buffer.from(configLines + (configLines ? '\n' : '')).toString('base64');
+  
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  
+  // Hiddify and clients like it use this header for stats
+  const used = Math.floor((sub.traffic_used_mb || 0) * 1024 * 1024);
+  const total = Math.floor((sub.traffic_limit_mb || 0) * 1024 * 1024);
+  const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
+  res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
+  
+  console.log(`✅ Subscription delivered: ${id}, links count: ${configLines ? configLines.split('\n').length : 0}`);
   res.send(base64Config);
 });
 
@@ -1322,23 +1404,26 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
-    // Pick server: use user-selected server, existing server if renewing, otherwise find an active one
-    let serverId = reqServerId || lastSub?.server_id;
-    if (!serverId) {
-      // 2B. Improved server selection: pick an active server with fewest active subscriptions
-      // If we have many servers, this might be slow, but for now it's the best way to load balance
-      const { data: servers, error: sErr } = await supabase
-        .from('vpn_servers')
-        .select(`
-          id,
-          subscriptions!server_id (count)
-        `)
-        .eq('is_active', true);
-      
-      if (sErr || !servers || servers.length === 0) {
-        // Fallback to env default if no servers in DB
-        console.warn('⚠️ No active servers found in DB, falling back to ENV defaults');
-        serverId = null;
+  // Pick server: use user-selected server, existing server if renewing, otherwise find a default or least loaded one
+  let serverId = reqServerId || lastSub?.server_id;
+  if (!serverId) {
+    // 2B. Improved server selection: pick default server or one with fewest active subscriptions
+    const { data: servers, error: sErr } = await supabase
+      .from('vpn_servers')
+      .select(`
+        id,
+        is_default,
+        subscriptions!server_id (count)
+      `)
+      .eq('is_active', true);
+    
+    if (sErr || !servers || servers.length === 0) {
+      serverId = null;
+    } else {
+      // Prefer default server if exists
+      const defaultServer = servers.find((s: any) => s.is_default);
+      if (defaultServer) {
+        serverId = defaultServer.id;
       } else {
         // Sort by subscription count
         const sorted = servers.sort((a: any, b: any) => {
@@ -1349,6 +1434,7 @@ app.post('/api/subscription/buy', async (req, res) => {
         serverId = sorted[0].id;
       }
     }
+  }
 
     const { instance: xuiInstance, server } = await getXuiForServer(serverId);
     const domain = server?.domain;
@@ -1812,11 +1898,15 @@ async function launchBot(retries = 10) {
       console.warn('⚠️ Telegram Bot: Failed to delete webhook:', e.message);
     }
     
-    // 3. Significantly longer delay after clearing to let Telegram settle and previous instances die
-    const settlementDelay = 5000;
+    // 3. Significantly longer delay after clearing to let Telegram settle
+    const settlementDelay = 15000; // Increased to 15s
     console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
     await new Promise(resolve => setTimeout(resolve, settlementDelay));
     
+    // 4. Force delete webhook again just before launch
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    } catch(e) {}
     // 4. Launch polling
     await bot.launch({
       allowedUpdates: ['message', 'callback_query'],
