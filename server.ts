@@ -173,15 +173,17 @@ class XUIService {
         );
         return response;
       } catch (err: any) {
-        // If 400 or other error, try JSON (some versions expect JSON)
+        if (err.response?.status === 404) return null;
+
+        // Try JSON if not 404
         try {
           const response = await axios.post(url, jsonPayload, getRequestConfig(url));
           return response;
-        } catch (innerErr) {
-          if (err.response?.status === 404) {
-            return null; // Try next path
+        } catch (innerErr: any) {
+          if (innerErr.response?.data) {
+            console.error(`❌ 3x-ui login detail [${url}]:`, typeof innerErr.response.data === 'string' ? innerErr.response.data.substring(0, 200) : JSON.stringify(innerErr.response.data));
           }
-          throw err;
+          throw innerErr;
         }
       }
     };
@@ -646,16 +648,29 @@ async function getXuiForServer(serverId?: string | null) {
   let rawIp = (server.ip || '').trim();
   let host = "";
   let panelPath = (server.domain || '').trim();
-  if (!panelPath.startsWith('/')) panelPath = ''; // Only use domain as path if it starts with /
+  if (!panelPath.startsWith('/')) panelPath = '';
 
   if (rawIp.includes('://')) {
-    // Full URL provided in IP field
     host = rawIp;
   } else {
-    // Standard IP or domain
-    const port = server.api_port || 2053;
-    const protocol = (port === 443 || port > 10000) ? 'https' : 'http';
-    host = `${protocol}://${rawIp}:${port}${panelPath}`;
+    // If rawIp contains a path (e.g. 1.2.3.4/secret), split it
+    let ipPart = rawIp;
+    if (rawIp.includes('/')) {
+      const parts = rawIp.split('/');
+      ipPart = parts[0];
+      if (!panelPath) panelPath = '/' + parts.slice(1).join('/');
+    }
+
+    // If ipPart contains a port (e.g. 1.2.3.4:443), use it
+    if (ipPart.includes(':')) {
+       const [ip, port] = ipPart.split(':');
+       const protocol = (port === '443' || parseInt(port) > 10000) ? 'https' : 'http';
+       host = `${protocol}://${ip}:${port}${panelPath}`;
+    } else {
+       const port = server.api_port || 2053;
+       const protocol = (port === 443 || port > 10000) ? 'https' : 'http';
+       host = `${protocol}://${ipPart}:${port}${panelPath}`;
+    }
   }
 
   const newInstance = new XUIService({
@@ -1069,7 +1084,6 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
     const isDefault = !!is_default;
     
     if (isDefault) {
-      // Try to update, but don't fail if column doesn't exist yet (Supabase might not have been migrated)
       try {
         await supabase.from('vpn_servers').update({ is_default: false });
       } catch (e) {
@@ -1077,7 +1091,7 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
       }
     }
 
-    const { data, error } = await supabase.from('vpn_servers').insert([{
+    const payload: any = {
       name, 
       ip, 
       domain, 
@@ -1085,12 +1099,34 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
       username, 
       password, 
       location_code: location_code || 'DE',
-      is_default: isDefault,
       is_active: true
-    }]).select().single();
+    };
 
-    if (error) throw error;
-    res.json(data);
+    // Try adding is_default if available
+    try {
+      const { data, error } = await supabase.from('vpn_servers').insert([{
+        ...payload,
+        is_default: isDefault
+      }]).select().single();
+
+      if (error) {
+        if (error.message?.includes('is_default')) {
+           // Retry without is_default
+           const { data: retryData, error: retryError } = await supabase.from('vpn_servers').insert([payload]).select().single();
+           if (retryError) throw retryError;
+           return res.json(retryData);
+        }
+        throw error;
+      }
+      return res.json(data);
+    } catch (innerErr: any) {
+      if (innerErr.message?.includes('is_default')) {
+         const { data, error } = await supabase.from('vpn_servers').insert([payload]).select().single();
+         if (error) throw error;
+         return res.json(data);
+      }
+      throw innerErr;
+    }
   } catch (err: any) {
     console.error('Error adding server:', err);
     res.status(500).json({ error: err.message });
@@ -1099,12 +1135,10 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
 
 app.put('/api/admin/servers/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { name, ip, domain, api_port, username, password, location_code, is_active, is_default } = req.body;
+  const updates = { ...req.body };
   
   try {
-    const isDefault = !!is_default;
-
-    if (isDefault) {
+    if (updates.is_default === true) {
       try {
         await supabase.from('vpn_servers').update({ is_default: false }).neq('id', id);
       } catch (e) {
@@ -1112,29 +1146,21 @@ app.put('/api/admin/servers/:id', adminOnly, async (req, res) => {
       }
     }
 
-    const updateData: any = {
-      name, 
-      ip, 
-      domain, 
-      api_port: api_port ? parseInt(api_port as any) : 2053, 
-      username, 
-      password, 
-      location_code: location_code || 'DE',
-      is_active: is_active ?? true,
-      is_default: isDefault
-    };
+    const { data, error } = await supabase.from('vpn_servers').update(updates).eq('id', id).select().single();
 
-    const { data, error } = await supabase.from('vpn_servers')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    if (error) {
+      if (error.message?.includes('is_default')) {
+        delete updates.is_default;
+        const { data: retryData, error: retryError } = await supabase.from('vpn_servers').update(updates).eq('id', id).select().single();
+        if (retryError) throw retryError;
+        xuiInstances.delete(id);
+        return res.json(retryData);
+      }
+      throw error;
+    }
     
     // Clear instance cache to force re-creation with new creds
     xuiInstances.delete(id);
-    
     res.json(data);
   } catch (err: any) {
     console.error('Error updating server:', err);
@@ -1964,8 +1990,10 @@ async function launchBot(retries = 10) {
     
     if (err.response?.error_code === 409) {
       if (retries > 0) {
-        const delay = 20000; // 20 seconds
-        console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
+        const delay = 30000; // 30 seconds
+        console.warn(`⚠️ Telegram Bot: Conflict (409). Retrying in ${delay/1000}s... (${retries} attempts left)`);
+        // Force drop webhook before retry
+        try { await bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch(e) {}
         setTimeout(() => launchBot(retries - 1), delay);
       } else {
         console.error('❌ Telegram Bot: Launch failed after multiple retries due to 409 Conflict.');
