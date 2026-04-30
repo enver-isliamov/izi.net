@@ -31,12 +31,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const fetchProfile = async (userId: string) => {
       try {
+        const cached = localStorage.getItem(`izinet_profile_${userId}`);
+        if (cached && mounted && !profile) {
+          setProfile(JSON.parse(cached));
+        }
+
         const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
         if (error) throw error;
-        if (mounted) setProfile(data || { id: userId, role: 'user' });
+        const newProfile = data || { id: userId, role: 'user' };
+        localStorage.setItem(`izinet_profile_${userId}`, JSON.stringify(newProfile));
+        if (mounted) setProfile(newProfile);
       } catch (e) {
         console.warn('Profile fetch failed:', e);
-        if (mounted) setProfile({ id: userId, role: 'user' });
+        if (mounted && !profile) setProfile({ id: userId, role: 'user' });
       }
     };
 

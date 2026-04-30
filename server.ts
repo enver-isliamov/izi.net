@@ -516,8 +516,6 @@ class PaymentService {
 
 const payment = new PaymentService();
 
-const xui = new XUIService();
-
 // --- API Routes ---
 
 // --- Admin Middleware ---
@@ -606,7 +604,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
   // Transform data to flatten active subscription info
   const transformed = data.map((u: any) => {
-    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : [];
+    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
     
     // Find active subscription: must be 'active' and either not expired or expire_at is null
     const activeSub = subscriptions.find((s: any) => {
@@ -973,6 +971,20 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+app.get('/api/locations', async (req, res) => {
+  try {
+    const { data: servers, error } = await supabase
+      .from('vpn_servers')
+      .select('id, name, location_code')
+      .eq('is_active', true);
+    
+    if (error) throw error;
+    res.json(servers);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const configStatus = {
     supabase: !!process.env.VITE_SUPABASE_URL,
@@ -986,7 +998,7 @@ app.get('/api/health', (req, res) => {
 
 // --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName } = req.body;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
   const authHeader = req.headers.authorization;
 
   if (!userId || !planId || !price) {
@@ -1028,11 +1040,32 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
-    // Pick server: use existing server if renewing, otherwise find an active one
-    let serverId = lastSub?.server_id;
+    // Pick server: use user-selected server, existing server if renewing, otherwise find an active one
+    let serverId = reqServerId || lastSub?.server_id;
     if (!serverId) {
-       const { data: activeServer } = await supabase.from('vpn_servers').select('id').eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
-       serverId = activeServer?.id;
+      // 2B. Improved server selection: pick an active server with fewest active subscriptions
+      // If we have many servers, this might be slow, but for now it's the best way to load balance
+      const { data: servers, error: sErr } = await supabase
+        .from('vpn_servers')
+        .select(`
+          id,
+          subscriptions!server_id (count)
+        `)
+        .eq('is_active', true);
+      
+      if (sErr || !servers || servers.length === 0) {
+        // Fallback to env default if no servers in DB
+        console.warn('⚠️ No active servers found in DB, falling back to ENV defaults');
+        serverId = null;
+      } else {
+        // Sort by subscription count
+        const sorted = servers.sort((a: any, b: any) => {
+          const countA = a.subscriptions?.[0]?.count || 0;
+          const countB = b.subscriptions?.[0]?.count || 0;
+          return countA - countB;
+        });
+        serverId = sorted[0].id;
+      }
     }
 
     const { instance: xuiInstance, server } = await getXuiForServer(serverId);
@@ -1826,8 +1859,21 @@ if (bot) {
 
 async function startServer() {
   console.log('🚀 Starting izinet server...');
-  // Check 3x-ui configuration on startup
-  xui.checkConfig();
+  
+  // Check all active VPN servers on startup
+  try {
+    const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
+    if (servers) {
+      console.log(`📡 Found ${servers.length} active VPN servers in DB. Checking connections...`);
+      for (const server of servers) {
+        const { instance } = await getXuiForServer(server.id);
+        const ok = await instance.checkConfig();
+        console.log(`${ok ? '✅' : '❌'} Connection to server "${server.name}" (${server.id}): ${ok ? 'OK' : 'FAILED'}`);
+      }
+    }
+  } catch (err) {
+    console.error('❌ Failed to check VPN servers on startup:', err);
+  }
   
   // Setup Realtime DB Listener for manual syncing
   try {
