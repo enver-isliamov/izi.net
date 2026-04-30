@@ -345,7 +345,15 @@ class XUIService {
         return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#izinet_${email}`;
       }
     } catch (e) {
-      return this.generateVlessLink(uuid, email);
+      // Find the port from device if possible
+      let fallbackPort = 443;
+      try {
+        const portMatch = email.includes('user_') ? null : null; // redundant but to keep email ref
+        // We don't easily have device port here in the catch without passing it, 
+        // but getClientByEmail might have part of it.
+      } catch(ee) {}
+      
+      return this.generateVlessLink(uuid, email, undefined, fallbackPort);
     }
   }
 
@@ -361,7 +369,8 @@ class XUIService {
         if (found) {
           return {
             ...found,
-            id: found.id || found.uuid
+            id: found.id || found.uuid,
+            inboundId: inboundId
           };
         }
       }
@@ -541,8 +550,10 @@ class XUIService {
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
       const response = await axios.post(url, {}, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
-      if (response.data.success) {
-        return response.data.obj || [];
+      if (response.data.success && Array.isArray(response.data.obj)) {
+        // Return unique emails to avoid overcounting multiple connections from same user
+        const uniqueOnlines = [...new Set(response.data.obj.map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
+        return uniqueOnlines;
       }
       return [];
     } catch (error: any) {
@@ -551,7 +562,7 @@ class XUIService {
     }
   }
 
-  generateVlessLink(uuid: string, email: string, customDomain?: string) {
+  generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
     let hostName = customDomain;
     let isIP = false;
     if (!hostName) {
@@ -566,7 +577,7 @@ class XUIService {
     const sni = isIP ? "" : hostName;
     const sniPart = sni ? `&sni=${sni}` : "";
     
-    return `vless://${uuid}@${hostName}:443?type=tcp&security=tls${sniPart}#izinet_${email}`;
+    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#izinet_${email}`;
   }
 }
 
@@ -834,30 +845,38 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
     const { instance: oldXui } = await getXuiForServer(sub.server_id);
     const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
     
-    // Dynamically find VLESS inbound if possible
-    let inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-    try {
-      const inbounds = await newXui.getInbounds();
-      const vlessInbound = inbounds.find((i: any) => i.protocol === 'vless');
-      if (vlessInbound) {
-        inboundId = vlessInbound.id;
-        console.log(`🎯 Found VLESS inbound ${inboundId} on new server.`);
-      }
-    } catch (e) {
-      console.warn('Could not list inbounds on new server, using fallback ID');
-    }
-
-    const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
-    const expiryTime = new Date(sub.expires_at).getTime();
-
     // 3. Parse devices
     const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    // Fetch all inbounds of new server once to match ports
+    const newServerInbounds = await newXui.getInbounds();
+    const defaultVlessInbound = newServerInbounds.find((i: any) => i.protocol === 'vless');
+
+    const expiryTime = new Date(sub.expires_at).getTime();
+    const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
     
     // 4. Migrate each device
     const migratedDevices: VpnDevice[] = [];
     console.log(`🔄 Starting migration for ${devices.length} devices to server ${newServer?.name || newServerId}`);
     
     for (const device of devices) {
+      // Determine which inbound to use based on the port of the device's current config
+      let targetInboundId = defaultVlessInbound?.id || parseInt(process.env.XUI_INBOUND_ID || '1');
+      
+      try {
+        const portMatch = device.config.match(/:(\d+)\?/);
+        if (portMatch) {
+          const currentPort = parseInt(portMatch[1]);
+          const matchingInbound = newServerInbounds.find((i: any) => i.port === currentPort && i.protocol === 'vless');
+          if (matchingInbound) {
+            targetInboundId = matchingInbound.id;
+            console.log(`🎯 Port match found: using inbound ${targetInboundId} (port ${currentPort})`);
+          }
+        }
+      } catch (e) {
+        console.warn(`Could not extract port from config for device ${device.email}`);
+      }
+
       // Delete from old server (best effort)
       if (sub.server_id) {
         console.log(`🗑️ Deleting client ${device.email} from old server...`);
@@ -870,8 +889,8 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
 
       // Add to new server
       try {
-        console.log(`➕ Adding client ${device.email} to new server [${newXui.host}]...`);
-        const finalConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
+        console.log(`➕ Adding client ${device.email} to new server [${newXui.host}] inbound ${targetInboundId}...`);
+        const finalConfig = await newXui.addClient(device.email, device.uuid, targetInboundId, expiryTime, limitBytes);
         
         console.log(`✅ Client ${device.email} migrated. New config: ${finalConfig.substring(0, 60)}...`);
         
@@ -950,30 +969,40 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
     const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     
-    // Enrich with stats
+    // Enrichment can be optimized with parallel execution
     const enrichedServers = await Promise.all(servers.map(async (server) => {
-      // 1. Total users on this server
-      const { count } = await supabase
-        .from('subscriptions')
-        .select('*', { count: 'exact', head: true })
-        .eq('server_id', server.id)
-        .eq('status', 'active');
-
-      // 2. Online users
-      let onlineCount = 0;
       try {
-        const { instance } = await getXuiForServer(server.id);
-        const onlines = await instance.getOnlines();
-        onlineCount = onlines.length;
-      } catch (err) {
-        console.warn(`Could not fetch online count for server ${server.id}:`, err);
-      }
+        // Parallel fetch for this specific server: DB count + XUI stats
+        const [subCount, xuiStats] = await Promise.all([
+          supabase
+            .from('subscriptions')
+            .select('*', { count: 'exact', head: true })
+            .eq('server_id', server.id)
+            .eq('status', 'active'),
+          (async () => {
+             const { instance } = await getXuiForServer(server.id);
+             // Use a faster way to get stats if possible, or just parallelize these
+             const onlines = await instance.getOnlines();
+             return { onlineCount: onlines.length };
+          })().catch(err => {
+            console.warn(`Could not fetch online count for server ${server.id}:`, err.message);
+            return { onlineCount: 0 };
+          })
+        ]);
 
-      return {
-        ...server,
-        total_users: count || 0,
-        online_users: onlineCount
-      };
+        return {
+          ...server,
+          total_users: subCount.count || 0,
+          online_users: xuiStats.onlineCount
+        };
+      } catch (err) {
+        return {
+          ...server,
+          total_users: 0,
+          online_users: 0,
+          error: true
+        };
+      }
     }));
 
     res.json(enrichedServers);
