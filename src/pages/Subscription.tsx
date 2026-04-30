@@ -238,6 +238,7 @@ export default function Subscription() {
               forceNew={wizardMode === 'new'}
               targetDeviceId={targetDevice}
               targetDeviceName={targetDeviceName}
+              hasActiveSub={!!mainSub}
             />
           </DialogContent>
         </Dialog>

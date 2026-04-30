@@ -43,7 +43,7 @@ const serverTypes = [
   { id: 'lte', label: 'LTE', description: 'Премиум скорость (150 ₽/мес)', price: 50 },
 ];
 
-export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string }) {
+export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName, hasActiveSub = false }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string, hasActiveSub?: boolean }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedPeriod, setSelectedPeriod] = useState(periods[0]);
@@ -90,7 +90,13 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
         return;
       }
     }
-    setStep(s => Math.min(s + 1, 5));
+    setStep(s => {
+      let next = Math.min(s + 1, 5);
+      if (next === 3 && hasActiveSub) {
+        next = 4; // Skip Location step if user already has an active subscription
+      }
+      return next;
+    });
   };
   
   const prevStep = () => {
@@ -98,7 +104,13 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
       setStep(2);
       return;
     }
-    setStep(s => Math.max(s - 1, 1));
+    setStep(s => {
+      let prev = Math.max(s - 1, 1);
+      if (prev === 3 && hasActiveSub) {
+        prev = 2;
+      }
+      return prev;
+    });
   };
 
   const handlePayment = async () => {
@@ -131,7 +143,7 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
           forceNew: forceNew,
           targetDeviceId: targetDeviceId,
           deviceName: deviceName,
-          serverId: selectedLocation?.id
+          serverId: hasActiveSub ? undefined : selectedLocation?.id
         }),
       });
 

@@ -604,7 +604,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
   // Transform data to flatten active subscription info
   const transformed = data.map((u: any) => {
-    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : [];
+    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
     
     // Find active subscription: must be 'active' and either not expired or expire_at is null
     const activeSub = subscriptions.find((s: any) => {
@@ -998,7 +998,7 @@ app.get('/api/health', (req, res) => {
 
 // --- Subscription Routes ---
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName } = req.body;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
   const authHeader = req.headers.authorization;
 
   if (!userId || !planId || !price) {
@@ -1040,8 +1040,8 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
-    // Pick server: use existing server if renewing, otherwise find an active one
-    let serverId = lastSub?.server_id;
+    // Pick server: use user-selected server, existing server if renewing, otherwise find an active one
+    let serverId = reqServerId || lastSub?.server_id;
     if (!serverId) {
       // 2B. Improved server selection: pick an active server with fewest active subscriptions
       // If we have many servers, this might be slow, but for now it's the best way to load balance
