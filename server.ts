@@ -9,12 +9,40 @@ import { createClient } from '@supabase/supabase-js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
+import { EventEmitter } from 'events';
 import crypto from 'crypto';
 import axios from 'axios';
 import https from 'https';
 import http from 'http';
 
 dotenv.config();
+
+// Fix MaxListenersExceededWarning - set EARLY
+EventEmitter.defaultMaxListeners = 200;
+process.setMaxListeners(200);
+
+// Global agents to reuse sockets and prevent listener leaks
+const sharedHttpsAgent = new https.Agent({ 
+  rejectUnauthorized: false,
+  keepAlive: true,
+  maxSockets: 50,
+  checkServerIdentity: () => undefined // Ignore hostname/cert mismatch (future date fix)
+});
+const sharedHttpAgent = new http.Agent({ 
+  keepAlive: true,
+  maxSockets: 50 
+});
+
+// Helper for axios requests to 3x-ui
+function getRequestConfig(url: string, headers: any = {}) {
+  const isHttps = url.startsWith('https');
+  return {
+    headers,
+    httpsAgent: isHttps ? sharedHttpsAgent : undefined,
+    httpAgent: !isHttps ? sharedHttpAgent : undefined,
+    timeout: 15000
+  };
+}
 
 // --- Types for Advanced Device Management ---
 export interface VpnDevice {
@@ -65,30 +93,6 @@ if (!supabaseUrl || !supabaseServiceKey) {
   console.warn('⚠️ SUPABASE credentials missing in environment variables!');
 }
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-// Create a global HTTPS agent that ignores self-signed certificate errors (common in VPN panels)
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-  keepAlive: true,
-  checkServerIdentity: () => undefined // Ignore hostname/cert mismatch (future date fix)
-});
-
-const httpAgent = new http.Agent({
-  keepAlive: true
-});
-
-/**
- * Utility to get correct axios config with agents
- */
-function getRequestConfig(url: string, currentHeaders: any = {}) {
-  const isHttps = url.startsWith('https://');
-  return {
-    headers: currentHeaders,
-    httpsAgent: isHttps ? httpsAgent : undefined,
-    httpAgent: !isHttps ? httpAgent : undefined,
-    timeout: 15000,
-  };
-}
 
 //@ts-ignore
 const __filename = fileURLToPath(import.meta.url);
@@ -293,7 +297,13 @@ class XUIService {
         
         return link;
       } else {
-        throw new Error(response.data.msg || 'Failed to add client');
+        const msg = response.data.msg || '';
+        if (msg.includes('Duplicate email')) {
+          console.log(`ℹ️ Client ${email} already exists on ${this.host}, updating...`);
+          await this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+          return this.generateVlessLink(uuid, email);
+        }
+        throw new Error(msg || 'Failed to add client');
       }
     } catch (error: any) {
       if (error.response?.status === 401) {
@@ -375,6 +385,26 @@ class XUIService {
       }
       console.error(`❌ 3x-ui getClientTraffic error for ${email}:`, error.message);
       return null;
+    }
+  }
+
+  async deleteClient(uuid: string, email?: string) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const deleteUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${uuid}`;
+      const response = await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': this.sessionCookie }));
+      if (response.data.success) {
+        console.log(`✅ Deleted client ${email || uuid} from 3x-ui [${this.host}]`);
+        return true;
+      }
+      return false;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        console.log(`ℹ️ Client ${email || uuid} not found on ${this.host}, skipping delete.`);
+        return true; // Consider as success since it's already gone
+      }
+      console.error(`❌ 3x-ui deleteClient error for ${email || uuid}:`, error.message);
+      return false;
     }
   }
 
@@ -602,32 +632,49 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
   const now = new Date().toISOString();
 
-  // Transform data to flatten active subscription info
-  const transformed = data.map((u: any) => {
-    const subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
-    
-    // Find active subscription: must be 'active' and either not expired or expire_at is null
-    const activeSub = subscriptions.find((s: any) => {
-      if (s.status !== 'active') return false;
-      if (!s.expires_at) return true;
-      const expiry = new Date(s.expires_at).getTime();
-      return expiry > Date.now();
-    });
-    
-    return {
-      ...u,
-      active_subscription: activeSub ? {
-        id: activeSub.id,
-        expires_at: activeSub.expires_at,
-        traffic_used_mb: activeSub.traffic_used_mb || 0,
-        traffic_limit_mb: activeSub.traffic_limit_mb || 0,
-        server_id: activeSub.server_id,
-        server_name: activeSub.vpn_servers?.name || 'VPN Сервер'
-      } : null
-    };
-  });
+    // Transform data to flatten active subscription info
+    const transformed = data.map((u: any) => {
+      let rawSubs = u.subscriptions || [];
+      let subscriptions: any[] = [];
+      if (Array.isArray(rawSubs)) {
+        subscriptions = rawSubs;
+      } else if (rawSubs && typeof rawSubs === 'object') {
+        subscriptions = [rawSubs];
+      }
+      
+      // Find active subscription: must be 'active'. 
+      // We take the latest one even if expired to show server assignment in admin
+      const sortedSubs = [...subscriptions].filter(Boolean).sort((a, b) => {
+        const da = a.expires_at ? new Date(a.expires_at).getTime() : 0;
+        const db = b.expires_at ? new Date(b.expires_at).getTime() : 0;
+        return db - da;
+      });
 
-  res.json(transformed);
+      const activeSub = sortedSubs.find((s: any) => s.status === 'active');
+
+      let serverName = 'VPN Сервер';
+      if (activeSub) {
+        let vpnServer = activeSub.vpn_servers;
+        // Supabase join can return array or object
+        if (Array.isArray(vpnServer)) vpnServer = vpnServer[0];
+        if (vpnServer?.name) serverName = vpnServer.name;
+      }
+      
+      return {
+        ...u,
+        active_subscription: activeSub ? {
+          id: activeSub.id,
+          expires_at: activeSub.expires_at,
+          traffic_used_mb: activeSub.traffic_used_mb || 0,
+          traffic_limit_mb: activeSub.traffic_limit_mb || 0,
+          server_id: activeSub.server_id,
+          server_name: serverName
+        } : null
+      };
+    });
+
+    console.log(`[ADMIN] Fetched ${data.length} users. ${transformed.filter(u => u.active_subscription).length} have active subscriptions.`);
+    res.json(transformed);
 });
 
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
@@ -665,21 +712,24 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
     for (const device of devices) {
       // Delete from old server (best effort)
       if (sub.server_id) {
-        try {
-          const deleteUrl = `${(oldXui as any).host}${(oldXui as any).basePath}/panel/api/inbounds/deleteClient/${device.uuid}`;
-          await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': (oldXui as any).sessionCookie }));
-          console.log(`✅ Deleted client ${device.email} from old server`);
-        } catch (e) {
-          console.warn(`Could not delete client ${device.email} from old server during migration:`, (e as any).message);
-        }
+        await oldXui.deleteClient(device.uuid, device.email);
       }
 
       // Add to new server
-      const newConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
-      migratedDevices.push({
-        ...device,
-        config: newConfig || newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
-      });
+      try {
+        const newConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
+        migratedDevices.push({
+          ...device,
+          config: newConfig || newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
+        });
+      } catch (addErr: any) {
+        console.error(`❌ Failed to add client ${device.email} to new server:`, addErr.message);
+        // We still keep the device but use a generated link as fallback
+        migratedDevices.push({
+          ...device,
+          config: newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
+        });
+      }
     }
 
     // 5. Update DB
@@ -1000,6 +1050,8 @@ app.get('/api/health', (req, res) => {
 app.post('/api/subscription/buy', async (req, res) => {
   const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
   const authHeader = req.headers.authorization;
+
+  console.log(`[BUY] Request received: user=${userId}, plan=${planName}, reqServer=${reqServerId}, targetDevice=${targetDeviceId}`);
 
   if (!userId || !planId || !price) {
     return res.status(400).json({ error: 'Missing required parameters' });
@@ -1385,11 +1437,11 @@ async function syncUserTraffic(userId: string) {
 
 async function syncTrafficStats() {
   try {
-    // 1. Get all active subscriptions
+    // 1. Get all potentially active subscriptions (status matches)
     const { data: subs, error } = await supabase
       .from('subscriptions')
       .select('user_id')
-      .gt('expires_at', new Date().toISOString()); // Only active ones
+      .eq('status', 'active'); 
 
     if (error) throw error;
     if (!subs || subs.length === 0) return;
@@ -1524,14 +1576,21 @@ async function launchBot(retries = 10) {
     
     // 2. Always clear webhook and drop pending updates to avoid 409 and spam
     console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    } catch (e: any) {
+      console.warn('⚠️ Telegram Bot: Failed to delete webhook:', e.message);
+    }
     
-    // 3. Small delay after clearing to let Telegram settle
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // 3. Significantly longer delay after clearing to let Telegram settle and previous instances die
+    const settlementDelay = 5000;
+    console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
+    await new Promise(resolve => setTimeout(resolve, settlementDelay));
     
     // 4. Launch polling
     await bot.launch({
       allowedUpdates: ['message', 'callback_query'],
+      dropPendingUpdates: true
     });
     
     console.log('✅ Telegram Bot: Started successfully');
@@ -1541,16 +1600,14 @@ async function launchBot(retries = 10) {
     
     if (err.response?.error_code === 409) {
       if (retries > 0) {
-        const delay = 7000; // 7 seconds
+        const delay = 10000; // 10 seconds
         console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
         setTimeout(() => launchBot(retries - 1), delay);
       } else {
         console.error('❌ Telegram Bot: Launch failed after multiple retries due to 409 Conflict.');
-        console.error('💡 TIP: Check if you have another instance (local dev or staging) using this token.');
       }
     } else {
       console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
-      // For non-409 errors, we might still want to retry a few times
       if (retries > 0) {
         setTimeout(() => launchBot(retries - 1), 5000);
       }

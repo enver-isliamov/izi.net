@@ -55,12 +55,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(session);
         setUser(session?.user ?? null);
         
+        // Finalize loading as soon as we have the session/user
+        // Profile can load in the background (or from cache synchronously inside fetchProfile)
+        setIsLoading(false);
+
         if (session?.user) {
-          await fetchProfile(session.user.id);
+          fetchProfile(session.user.id);
         }
       } catch (e) {
         console.error('Auth initialization error:', e);
-      } finally {
         if (mounted) setIsLoading(false);
       }
     };

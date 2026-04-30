@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -286,8 +287,11 @@ export default function Dashboard() {
                   {subscription && (
                     <div className="text-right">
                       <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Осталось</div>
-                      <div className="text-2xl font-black text-primary flex items-center justify-end gap-1">
-                        <Clock className="w-5 h-5" /> {daysLeft}д.
+                      <div className={cn(
+                        "text-2xl font-black flex items-center justify-end gap-1",
+                        daysLeft <= 0 ? "text-red-400" : "text-primary"
+                      )}>
+                        <Clock className="w-5 h-5" /> {daysLeft <= 0 ? 'Истекла' : `${daysLeft}д.`}
                       </div>
                     </div>
                   )}
