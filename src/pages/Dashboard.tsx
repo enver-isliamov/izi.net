@@ -10,7 +10,8 @@ import {
   Smartphone,
   LifeBuoy,
   Loader2,
-  Plus
+  Plus,
+  Copy
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -346,6 +347,38 @@ export default function Dashboard() {
               </div>
 
               <div className="space-y-3 overflow-y-auto max-h-[400px] pr-1 custom-scrollbar">
+                {subscription && (
+                  <div className="mb-4 p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold text-primary tracking-wider">Универсальная подписка (Рекомендуется)</span>
+                      <Badge variant="outline" className="text-[9px] h-4 border-primary/30 text-primary">Auto-Sync</Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input 
+                          readOnly 
+                          value={`${window.location.origin}/api/sub/${subscription.id}`}
+                          className="w-full bg-background/50 border border-border/50 rounded-xl px-3 py-2 text-[10px] font-mono focus:outline-none"
+                        />
+                      </div>
+                      <Button 
+                        size="sm" 
+                        variant="secondary"
+                        className="rounded-xl px-3 bg-primary/10 hover:bg-primary/20 text-primary" 
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}/api/sub/${subscription.id}`);
+                          toast.success("Ссылка для подписки скопирована");
+                        }}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                    <p className="text-[9px] text-muted-foreground leading-tight px-1">
+                      Используйте эту ссылку в Hiddify или V2Box для автоматического переключения серверов
+                    </p>
+                  </div>
+                )}
+
                 {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
                   const devExpiry = new Date(device.expiresAt);
                   const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));

@@ -105,8 +105,8 @@ const PORT = 3000;
 
 // --- XUI Service ---
 class XUIService {
-  private host: string;
-  private basePath: string = "";
+  public host: string;
+  public basePath: string = "";
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
@@ -209,24 +209,34 @@ class XUIService {
 
   async getInbounds() {
     if (!this.sessionCookie) await this.login();
-    const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-    const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
-    return response.data.obj || [];
+    try {
+      const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+      const resp = await axios.get(listUrl, getRequestConfig(listUrl, { 'Cookie': this.sessionCookie }));
+      return resp.data.obj || [];
+    } catch (e: any) {
+      console.error('❌ 3x-ui getInbounds error:', e.message);
+      return [];
+    }
   }
 
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
 
-    // First, let's try to get the inbound to see its settings (for link generation later)
+    // First, let's try to get the inbound to see its settings
     let inbound;
+    let flow = "";
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
       const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
       if (resp.data.success) {
         inbound = resp.data.obj;
+        const streamSettings = JSON.parse(inbound.streamSettings);
+        if (streamSettings.security === 'reality') {
+          flow = "xtls-rprx-vision";
+        }
       }
     } catch (e: any) {
-      console.warn(`Could not fetch inbound settings from ${this.host}${this.basePath}, will use defaults. Error: ${e.message}`);
+      console.warn(`Could not fetch inbound settings from ${this.host}${this.basePath}.`);
     }
 
     const clientData = {
@@ -235,7 +245,7 @@ class XUIService {
         clients: [
           {
             id: uuid,
-            flow: "xtls-rprx-vision",
+            flow: flow,
             email: email,
             limitIp: 1,
             totalGB: limitBytes,
@@ -261,70 +271,163 @@ class XUIService {
 
       if (response.data.success) {
         console.log(`✅ Client ${email} added to 3x-ui with expiry ${expiryTime}`);
-        
-        // Generate link
-        let link = "";
-        if (inbound) {
-          try {
-            const streamSettings = JSON.parse(inbound.streamSettings);
-            const realitySettings = streamSettings.realitySettings;
-            const port = inbound.port;
-            
-            // Safer host extraction
-            let hostName = 'server.izinet.app'; // fallback
-            try {
-              const urlParts = new URL(this.host);
-              hostName = urlParts.hostname;
-            } catch (urlErr) {
-              console.warn('URL parsing failed in addClient, using host from settings');
-              hostName = this.host.split(':').pop()?.replace(/\//g, '') || hostName;
-            }
-
-            const sni = realitySettings.serverNames?.[0] || 'google.com';
-            const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
-            const sid = realitySettings.shortIds?.[0] || '';
-            
-            if (!pbk) throw new Error("Public key not found in inbound");
-            
-            link = `vless://${uuid}@${hostName}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
-          } catch (e) {
-            console.error('Error parsing inbound settings for link generation:', e);
-            link = this.generateVlessLink(uuid, email);
-          }
-        } else {
-          link = this.generateVlessLink(uuid, email);
-        }
-        
-        return link;
+        return this.getInboundLink(inboundId, uuid, email);
       } else {
         const msg = response.data.msg || '';
         if (msg.includes('Duplicate email')) {
-          console.log(`ℹ️ Client ${email} already exists on ${this.host}, updating...`);
-          await this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
-          return this.generateVlessLink(uuid, email);
+          console.log(`ℹ️ Client ${email} already exists on ${this.host}, reaching out to find its server-side ID...`);
+          // Try to find the real server-side UUID for this email to update it correctly
+          const serverClient = await this.getClientByEmail(inboundId, email);
+          const effectiveUuid = serverClient?.id || uuid;
+          
+          await this.updateClient(email, effectiveUuid, inboundId, expiryTime, limitBytes);
+          return this.getInboundLink(inboundId, effectiveUuid, email);
         }
         throw new Error(msg || 'Failed to add client');
       }
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
-        return this.addClient(email, uuid, inboundId, expiryTime);
+        return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
       console.error('❌ 3x-ui addClient error:', error.message);
       throw error;
     }
   }
 
+  async getInboundLink(inboundId: number, uuid: string, email: string) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      // First, check if we should use a different UUID that exists on the server for this email
+      let effectiveUuid = uuid;
+      let effectiveInboundId = inboundId;
+      const serverClient = await this.getClientByEmail(inboundId, email);
+      if (serverClient) {
+        if (serverClient.id) effectiveUuid = serverClient.id;
+        if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+      }
+
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      if (!resp.data.success || !resp.data.obj) {
+        return this.generateVlessLink(effectiveUuid, email);
+      }
+      
+      const inbound = resp.data.obj;
+      const streamSettings = JSON.parse(inbound.streamSettings);
+      const security = streamSettings.security || 'none';
+      const port = inbound.port;
+      
+      let hostName = 'server.izinet.app';
+      let isIP = false;
+      try {
+        const u = new URL(this.host);
+        hostName = u.hostname;
+        // Check if hostname is an IP
+        isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
+      } catch (e) {
+        hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
+        isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
+      }
+
+      if (security === 'reality') {
+        const realitySettings = streamSettings.realitySettings || {};
+        const sni = realitySettings.serverNames?.[0] || (isIP ? 'google.com' : hostName);
+        const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
+        const sid = realitySettings.shortIds?.[0] || '';
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
+      } else if (security === 'tls') {
+        const tlsSettings = streamSettings.tlsSettings || {};
+        const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
+        let sniPart = sni ? `&sni=${sni}` : "";
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#izinet_${email}`;
+      } else {
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#izinet_${email}`;
+      }
+    } catch (e) {
+      return this.generateVlessLink(uuid, email);
+    }
+  }
+
+  async getClientByEmail(inboundId: number, email: string) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      if (resp.data.success && resp.data.obj) {
+        const settings = JSON.parse(resp.data.obj.settings || '{}');
+        const clients = settings.clients || [];
+        const found = clients.find((c: any) => c.email === email);
+        if (found) {
+          return {
+            ...found,
+            id: found.id || found.uuid
+          };
+        }
+      }
+      
+      // Fallback: Search all inbounds if not found in the specific one
+      // This helps if the client was somehow added to a different inbound
+      const inbounds = await this.getInbounds();
+      for (const inbound of inbounds) {
+        if (inbound.id === inboundId) continue;
+        const settings = JSON.parse(inbound.settings || '{}');
+        const clients = settings.clients || [];
+        const found = clients.find((c: any) => c.email === email);
+        if (found) {
+          return { 
+            ...found, 
+            id: found.id || found.uuid, // Handle both id and uuid field names
+            inboundId: inbound.id 
+          };
+        }
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ Error getting client by email ${email} on ${this.host}: ${e.message}`);
+    }
+    return null;
+  }
+
+
   async updateClient(email: string, uuid: string, inboundId: number, expiryTime: number, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
 
+    let effectiveUuid = uuid;
+    let effectiveInboundId = inboundId;
+    
+    // Crucial: check if client exists and what is its REAL server-side UUID and Inbound
+    const serverClient = await this.getClientByEmail(inboundId, email);
+    if (serverClient) {
+      if (serverClient.id) effectiveUuid = serverClient.id;
+      if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+      console.log(`ℹ️ Found existing client ${email} with UUID ${effectiveUuid} in inbound ${effectiveInboundId}`);
+    }
+
+    if (!effectiveUuid) {
+      console.error(`❌ Cannot update client ${email}: No UUID available.`);
+      return false;
+    }
+
+    let flow = "";
+    try {
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      if (resp.data.success && resp.data.obj) {
+        const streamSettings = JSON.parse(resp.data.obj.streamSettings || '{}');
+        if (streamSettings.security === 'reality') {
+          flow = "xtls-rprx-vision";
+        }
+      }
+    } catch (e) {}
+
+    // 3x-ui API for updateClient requires the client data inside a JSON string 'settings'
     const clientData = {
-      id: inboundId,
+      id: effectiveInboundId,
       settings: JSON.stringify({
         clients: [
           {
-            id: uuid,
-            flow: "xtls-rprx-vision",
+            id: effectiveUuid,
+            flow: flow,
             email: email,
             limitIp: 1,
             totalGB: limitBytes,
@@ -338,7 +441,8 @@ class XUIService {
     };
 
     try {
-      const updateClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${uuid}`;
+      console.log(`📤 Sending updateClient request for ${email} (${effectiveUuid}) to ${this.host}...`);
+      const updateClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${effectiveUuid}`;
       const response = await axios.post(
         updateClientUrl,
         clientData,
@@ -349,14 +453,17 @@ class XUIService {
       );
 
       if (response.data.success) {
-        console.log(`✅ Client ${email} updated in 3x-ui with expiry ${expiryTime}`);
+        console.log(`✅ Client ${email} updated in 3x-ui [${this.host}] with expiry ${expiryTime}`);
         return true;
       } else {
-        console.warn(`⚠️ Failed to update client in 3x-ui: ${response.data.msg}`);
+        const errorMsg = response.data.msg || 'Unknown error';
+        console.warn(`⚠️ Failed to update client ${email} in 3x-ui: ${errorMsg}`);
+        // If it failed with "empty client ID" it might be because the ID should be in a different field or structure
+        // but given our investigation, usually it means the UUID didn't match anything.
         return false;
       }
     } catch (error: any) {
-      console.error('❌ 3x-ui updateClient error:', error.message);
+      console.error(`❌ 3x-ui updateClient total failure for ${email}:`, error.message);
       return false;
     }
   }
@@ -390,20 +497,41 @@ class XUIService {
 
   async deleteClient(uuid: string, email?: string) {
     if (!this.sessionCookie) await this.login();
+    
+    let effectiveUuid = uuid;
+
+    // If we have an email, try to find the actual client UUID on the server to be sure
+    if (email) {
+      try {
+        const inbounds = await this.getInbounds();
+        for (const inbound of inbounds) {
+          const serverClient = await this.getClientByEmail(inbound.id, email);
+          if (serverClient && serverClient.id) {
+            effectiveUuid = serverClient.id;
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn(`⚠️ Error during deep search for client ${email} to delete:`, e.message);
+      }
+    }
+
     try {
-      const deleteUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${uuid}`;
+      const deleteUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${effectiveUuid}`;
       const response = await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': this.sessionCookie }));
       if (response.data.success) {
-        console.log(`✅ Deleted client ${email || uuid} from 3x-ui [${this.host}]`);
+        console.log(`✅ Deleted client ${email || effectiveUuid} from 3x-ui [${this.host}]`);
         return true;
       }
+      
+      console.warn(`⚠️ 3x-ui deleteClient response was success: false for ${email || effectiveUuid} on ${this.host}`);
       return false;
     } catch (error: any) {
       if (error.response?.status === 404) {
-        console.log(`ℹ️ Client ${email || uuid} not found on ${this.host}, skipping delete.`);
-        return true; // Consider as success since it's already gone
+        console.log(`ℹ️ Client ${email || effectiveUuid} not found on ${this.host}, skipping delete.`);
+        return true;
       }
-      console.error(`❌ 3x-ui deleteClient error for ${email || uuid}:`, error.message);
+      console.error(`❌ 3x-ui deleteClient error for ${email || effectiveUuid}:`, error.message);
       return false;
     }
   }
@@ -425,14 +553,20 @@ class XUIService {
 
   generateVlessLink(uuid: string, email: string, customDomain?: string) {
     let hostName = customDomain;
+    let isIP = false;
     if (!hostName) {
       try {
-        hostName = new URL(this.host).hostname;
+        const u = new URL(this.host);
+        hostName = u.hostname;
       } catch (e) {
-        hostName = this.host.split(':').pop()?.replace(/\//g, '') || "server.izinet.app";
+        hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || "server.izinet.app";
       }
     }
-    return `vless://${uuid}@${hostName}:443?type=tcp&security=tls&sni=${hostName}#izinet_${email}`;
+    isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
+    const sni = isIP ? "" : hostName;
+    const sniPart = sni ? `&sni=${sni}` : "";
+    
+    return `vless://${uuid}@${hostName}:443?type=tcp&security=tls${sniPart}#izinet_${email}`;
   }
 }
 
@@ -700,7 +834,19 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
     const { instance: oldXui } = await getXuiForServer(sub.server_id);
     const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
     
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    // Dynamically find VLESS inbound if possible
+    let inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    try {
+      const inbounds = await newXui.getInbounds();
+      const vlessInbound = inbounds.find((i: any) => i.protocol === 'vless');
+      if (vlessInbound) {
+        inboundId = vlessInbound.id;
+        console.log(`🎯 Found VLESS inbound ${inboundId} on new server.`);
+      }
+    } catch (e) {
+      console.warn('Could not list inbounds on new server, using fallback ID');
+    }
+
     const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
     const expiryTime = new Date(sub.expires_at).getTime();
 
@@ -709,35 +855,50 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
     
     // 4. Migrate each device
     const migratedDevices: VpnDevice[] = [];
+    console.log(`🔄 Starting migration for ${devices.length} devices to server ${newServer?.name || newServerId}`);
+    
     for (const device of devices) {
       // Delete from old server (best effort)
       if (sub.server_id) {
-        await oldXui.deleteClient(device.uuid, device.email);
+        console.log(`🗑️ Deleting client ${device.email} from old server...`);
+        try {
+          await oldXui.deleteClient(device.uuid, device.email);
+        } catch (e) {
+          console.warn(`⚠️ Error deleting ${device.email} from old server, proceeding anyway.`);
+        }
       }
 
       // Add to new server
       try {
-        const newConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
+        console.log(`➕ Adding client ${device.email} to new server [${newXui.host}]...`);
+        const finalConfig = await newXui.addClient(device.email, device.uuid, inboundId, expiryTime, limitBytes);
+        
+        console.log(`✅ Client ${device.email} migrated. New config: ${finalConfig.substring(0, 60)}...`);
+        
         migratedDevices.push({
           ...device,
-          config: newConfig || newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
+          config: finalConfig
         });
       } catch (addErr: any) {
         console.error(`❌ Failed to add client ${device.email} to new server:`, addErr.message);
-        // We still keep the device but use a generated link as fallback
+        const fallbackConfig = newXui.generateVlessLink(device.uuid, device.email, newServer?.domain);
         migratedDevices.push({
           ...device,
-          config: newXui.generateVlessLink(device.uuid, device.email, newServer?.domain)
+          config: fallbackConfig
         });
       }
     }
 
     // 5. Update DB
+    console.log(`💾 Saving new config for user ${userId} to Supabase...`);
+    const configToSave = JSON.stringify(migratedDevices);
+    console.log(`📊 Final v2ray_config size: ${configToSave.length} bytes. Sample: ${configToSave.substring(0, 100)}...`);
+
     const { data: updatedSub, error: updateErr } = await supabase
       .from('subscriptions')
       .update({
         server_id: newServerId,
-        v2ray_config: JSON.stringify(migratedDevices),
+        v2ray_config: configToSave,
         updated_at: new Date().toISOString()
       })
       .eq('id', sub.id)
@@ -853,6 +1014,46 @@ app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   xuiInstances.delete(id);
   res.json({ success: true });
+});
+
+// 💰 Subscription config endpoint for apps (V2Ray/Hiddify)
+app.get('/api/sub/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  const { data: sub, error } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !sub) {
+    return res.status(404).send('Subscription not found');
+  }
+
+  const now = new Date();
+  const expires = new Date(sub.expires_at);
+  if (sub.status !== 'active' || expires < now) {
+    return res.status(403).send('Subscription expired or inactive');
+  }
+
+  let configText = "";
+  try {
+    if (sub.v2ray_config) {
+      if (sub.v2ray_config.trim().startsWith('[')) {
+        const devices = JSON.parse(sub.v2ray_config);
+        configText = devices.map((d: any) => d.config).join('\n');
+      } else {
+        configText = sub.v2ray_config;
+      }
+    }
+  } catch (e) {
+    configText = sub.v2ray_config || "";
+  }
+
+  // V2Ray apps expect Base64 encoded list of links
+  const base64Config = Buffer.from(configText).toString('base64');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(base64Config);
 });
 
 // 💰 Create Payment Link
