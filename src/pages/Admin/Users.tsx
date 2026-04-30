@@ -107,7 +107,8 @@ export default function AdminUsers() {
                 const sub = user.active_subscription;
                 const trafficUsedGB = sub ? (sub.traffic_used_mb / 1024).toFixed(1) : 0;
                 const trafficLimitGB = sub ? (sub.traffic_limit_mb / 1024).toFixed(1) : 0;
-                const expiryDate = sub ? new Date(sub.expires_at).toLocaleDateString() : null;
+                const expiryDate = sub ? new Date(sub.expires_at) : null;
+                const isExpired = expiryDate ? expiryDate.getTime() < Date.now() : false;
 
                 return (
                   <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
@@ -128,8 +129,10 @@ export default function AdminUsers() {
                     <td className="px-6 py-4">
                       {sub ? (
                         <div className="flex flex-col">
-                          <span className="text-[10px] font-bold text-green-400 uppercase tracking-tight">Активна</span>
-                          <span className="text-[10px] text-muted-foreground">До: {expiryDate}</span>
+                          <span className={`text-[10px] font-bold uppercase tracking-tight ${isExpired ? 'text-red-400' : 'text-green-400'}`}>
+                            {isExpired ? 'Истекла' : 'Активна'}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">До: {expiryDate?.toLocaleDateString()}</span>
                         </div>
                       ) : (
                         <span className="text-[10px] text-muted-foreground italic uppercase">Нет подписки</span>

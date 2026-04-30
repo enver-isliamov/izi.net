@@ -47,11 +47,9 @@ export default function Instructions() {
     fetchSub();
   }, [user]);
 
-  const vpnKey = subscription?.v2ray_config 
-    ? subscription.v2ray_config
-    : subscription 
-      ? `v2ray://subscription?link=https://api.izinet.app/sub/${subscription.id}` 
-      : 'Сначала активируйте подписку';
+  const vpnKey = subscription 
+    ? `${window.location.origin}/api/sub/${subscription.id}`
+    : 'Сначала активируйте подписку';
 
   const handleCopy = async () => {
     if (!subscription) {

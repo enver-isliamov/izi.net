@@ -92,8 +92,9 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
     }
     setStep(s => {
       let next = Math.min(s + 1, 5);
-      if (next === 3 && hasActiveSub) {
-        next = 4; // Skip Location step if user already has an active subscription
+      // Skip Location step ONLY if we are renewing a specific device
+      if (next === 3 && targetDeviceId) {
+        next = 4;
       }
       return next;
     });
@@ -106,7 +107,8 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
     }
     setStep(s => {
       let prev = Math.max(s - 1, 1);
-      if (prev === 3 && hasActiveSub) {
+      // Skip Location step back ONLY if we are renewing a specific device
+      if (prev === 3 && targetDeviceId) {
         prev = 2;
       }
       return prev;
@@ -143,7 +145,7 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
           forceNew: forceNew,
           targetDeviceId: targetDeviceId,
           deviceName: deviceName,
-          serverId: hasActiveSub ? undefined : selectedLocation?.id
+          serverId: targetDeviceId ? undefined : selectedLocation?.id
         }),
       });
 
@@ -289,12 +291,17 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
                     <Card 
                       key={loc.id}
                       className={cn(
-                        "cursor-pointer transition-all border-2",
-                        selectedLocation?.id === loc.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"
+                        "cursor-pointer transition-all border-2 relative overflow-hidden",
+                        selectedLocation?.id === loc.id 
+                          ? "border-primary bg-primary/5 shadow-lg shadow-primary/20 ring-1 ring-primary/50" 
+                          : "border-white/5 bg-white/5 hover:border-primary/40 hover:bg-white/10"
                       )}
-                      onClick={() => setSelectedLocation(loc)}
+                      onClick={() => {
+                        console.log('📍 Selected Location:', loc.name, loc.id);
+                        setSelectedLocation(loc);
+                      }}
                     >
-                      <CardContent className="p-4 flex items-center justify-between">
+                      <CardContent className="p-4 flex items-center justify-between relative z-10">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center font-bold text-xs uppercase">
                             {loc.location_code}

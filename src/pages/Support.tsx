@@ -228,7 +228,7 @@ export default function Support() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Accordion type="single" collapsible className="w-full">
+              <Accordion type="single" className="w-full">
                 {faqs.map((faq, i) => (
                   <AccordionItem key={i} value={`item-${i}`} className="border-border px-0">
                     <AccordionTrigger className="text-sm font-medium hover:text-primary text-left py-3">

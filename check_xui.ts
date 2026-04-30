@@ -1,25 +1,14 @@
-import axios from 'axios';
-import https from 'https';
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 dotenv.config();
 
-async function check() {
-  const host = process.env.XUI_HOST;
-  const user = process.env.XUI_USERNAME;
-  const pass = process.env.XUI_PASSWORD;
-  const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-  try {
-    const loginResp = await axios.post(`${host}/login`, { username: user, password: pass }, { httpsAgent });
-    const cookie = loginResp.headers['set-cookie'][0];
-    
-    const inboundResp = await axios.get(`${host}/panel/api/inbounds/get/1`, {
-      headers: { Cookie: cookie },
-      httpsAgent
-    });
-    console.log(inboundResp.data.obj.streamSettings);
-  } catch (err) {
-    console.error(err.message);
-  }
+async function check() {
+  const { data, error } = await supabase.from('vpn_servers').select('*');
+  console.log("SERVERS:", data);
+  if (error) console.error(error);
 }
 check();
