@@ -335,7 +335,11 @@ class XUIService {
         const sni = realitySettings.serverNames?.[0] || (isIP ? 'google.com' : hostName);
         const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
         const sid = realitySettings.shortIds?.[0] || '';
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#izinet_${email}`;
+        const fp = realitySettings.settings?.fingerprint || realitySettings.fingerprint || 'chrome';
+        const spiderX = realitySettings.settings?.spiderX || '/';
+        // Reality link format optimized for Hiddify and V2Ray
+        // Using literal '/' for spx as some clients are sensitive
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision&spx=${spiderX}#izinet_${email}`;
       } else if (security === 'tls') {
         const tlsSettings = streamSettings.tlsSettings || {};
         const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
@@ -1012,9 +1016,14 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
 });
 
 app.post('/api/admin/servers', adminOnly, async (req, res) => {
-  const { name, ip, domain, api_port, username, password, location_code } = req.body;
+  const { name, ip, domain, api_port, username, password, location_code, is_default } = req.body;
+  
+  if (is_default) {
+    await supabase.from('vpn_servers').update({ is_default: false });
+  }
+
   const { data, error } = await supabase.from('vpn_servers').insert([{
-    name, ip, domain, api_port, username, password, location_code
+    name, ip, domain, api_port, username, password, location_code, is_default: !!is_default
   }]).select().single();
 
   if (error) return res.status(500).json({ error: error.message });
@@ -1023,10 +1032,15 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
 
 app.put('/api/admin/servers/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { name, ip, domain, api_port, username, password, location_code, is_active } = req.body;
+  const { name, ip, domain, api_port, username, password, location_code, is_active, is_default } = req.body;
   
+  // If is_default is true, clear it from all other servers first
+  if (is_default) {
+    await supabase.from('vpn_servers').update({ is_default: false }).neq('id', id);
+  }
+
   const { data, error } = await supabase.from('vpn_servers').update({
-    name, ip, domain, api_port, username, password, location_code, is_active
+    name, ip, domain, api_port, username, password, location_code, is_active, is_default
   }).eq('id', id).select().single();
 
   if (error) return res.status(500).json({ error: error.message });
@@ -1048,6 +1062,9 @@ app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
 // 💰 Subscription config endpoint for apps (V2Ray/Hiddify)
 app.get('/api/sub/:id', async (req, res) => {
   const { id } = req.params;
+  const userAgent = req.headers['user-agent'] || '';
+  
+  console.log(`📡 Subscription request for ID: ${id}, UA: ${userAgent}`);
   
   const { data: sub, error } = await supabase
     .from('subscriptions')
@@ -1056,12 +1073,14 @@ app.get('/api/sub/:id', async (req, res) => {
     .single();
 
   if (error || !sub) {
+    console.warn(`❌ Subscription not found: ${id}`);
     return res.status(404).send('Subscription not found');
   }
 
   const now = new Date();
   const expires = new Date(sub.expires_at);
   if (sub.status !== 'active' || expires < now) {
+    console.warn(`⚠️ Subscription inactive or expired: ${id}`);
     return res.status(403).send('Subscription expired or inactive');
   }
 
@@ -1080,8 +1099,18 @@ app.get('/api/sub/:id', async (req, res) => {
   }
 
   // V2Ray apps expect Base64 encoded list of links
-  const base64Config = Buffer.from(configText).toString('base64');
+  const configLines = configText.split('\n').map(l => l.trim()).filter(line => line.startsWith('vless://')).join('\n');
+  const base64Config = Buffer.from(configLines).toString('base64');
+  
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  // Hiddify and clients like it use this header for stats
+  const used = Math.floor((sub.traffic_used_mb || 0) * 1024 * 1024);
+  const total = Math.floor((sub.traffic_limit_mb || 0) * 1024 * 1024);
+  const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
+  res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
+  
+  console.log(`✅ Subscription delivered: ${id}, links count: ${configLines.split('\n').length}`);
   res.send(base64Config);
 });
 
@@ -1322,23 +1351,26 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
-    // Pick server: use user-selected server, existing server if renewing, otherwise find an active one
-    let serverId = reqServerId || lastSub?.server_id;
-    if (!serverId) {
-      // 2B. Improved server selection: pick an active server with fewest active subscriptions
-      // If we have many servers, this might be slow, but for now it's the best way to load balance
-      const { data: servers, error: sErr } = await supabase
-        .from('vpn_servers')
-        .select(`
-          id,
-          subscriptions!server_id (count)
-        `)
-        .eq('is_active', true);
-      
-      if (sErr || !servers || servers.length === 0) {
-        // Fallback to env default if no servers in DB
-        console.warn('⚠️ No active servers found in DB, falling back to ENV defaults');
-        serverId = null;
+  // Pick server: use user-selected server, existing server if renewing, otherwise find a default or least loaded one
+  let serverId = reqServerId || lastSub?.server_id;
+  if (!serverId) {
+    // 2B. Improved server selection: pick default server or one with fewest active subscriptions
+    const { data: servers, error: sErr } = await supabase
+      .from('vpn_servers')
+      .select(`
+        id,
+        is_default,
+        subscriptions!server_id (count)
+      `)
+      .eq('is_active', true);
+    
+    if (sErr || !servers || servers.length === 0) {
+      serverId = null;
+    } else {
+      // Prefer default server if exists
+      const defaultServer = servers.find((s: any) => s.is_default);
+      if (defaultServer) {
+        serverId = defaultServer.id;
       } else {
         // Sort by subscription count
         const sorted = servers.sort((a: any, b: any) => {
@@ -1349,6 +1381,7 @@ app.post('/api/subscription/buy', async (req, res) => {
         serverId = sorted[0].id;
       }
     }
+  }
 
     const { instance: xuiInstance, server } = await getXuiForServer(serverId);
     const domain = server?.domain;
@@ -1813,7 +1846,7 @@ async function launchBot(retries = 10) {
     }
     
     // 3. Significantly longer delay after clearing to let Telegram settle and previous instances die
-    const settlementDelay = 5000;
+    const settlementDelay = 10000; // Increased to 10s
     console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
     await new Promise(resolve => setTimeout(resolve, settlementDelay));
     

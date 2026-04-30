@@ -13,7 +13,7 @@ export default function AdminServers() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
-    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE'
+    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
   });
 
   const fetchServers = async () => {
@@ -21,7 +21,12 @@ export default function AdminServers() {
       const { data } = await axios.get('/api/admin/servers', {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
-      setServers(data);
+      if (Array.isArray(data)) {
+        setServers(data);
+      } else {
+        console.error('Invalid servers data:', data);
+        setServers([]);
+      }
     } catch (e) {
       toast.error('Ошибка загрузки серверов');
     } finally {
@@ -49,7 +54,7 @@ export default function AdminServers() {
       }
       setIsAdding(false);
       setEditingId(null);
-      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE' });
+      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
       fetchServers();
     } catch (e) {
       toast.error('Ошибка сохранения сервера');
@@ -59,13 +64,14 @@ export default function AdminServers() {
   const startEdit = (server: any) => {
     setEditingId(server.id);
     setFormData({
-      name: server.name,
-      ip: server.ip,
+      name: server.name || '',
+      ip: server.ip || '',
       domain: server.domain || '',
-      api_port: server.api_port,
-      username: server.username,
-      password: server.password,
-      location_code: server.location_code
+      api_port: server.api_port || 2053,
+      username: server.username || '',
+      password: server.password || '',
+      location_code: server.location_code || 'DE',
+      is_default: !!server.is_default
     });
     setIsAdding(true);
   };
@@ -73,7 +79,7 @@ export default function AdminServers() {
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
-    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE' });
+    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
   };
 
   const toggleServer = async (id: string, active: boolean) => {
@@ -195,6 +201,18 @@ export default function AdminServers() {
                 onChange={e => setFormData({...formData, password: e.target.value})}
                 required
               />
+              <div className="md:col-span-2 flex items-center gap-3 px-1">
+                <input
+                  type="checkbox"
+                  id="is_default"
+                  checked={formData.is_default}
+                  onChange={e => setFormData({...formData, is_default: e.target.checked})}
+                  className="w-4 h-4 accent-blue-600"
+                />
+                <label htmlFor="is_default" className="text-sm text-muted-foreground cursor-pointer">
+                  Сделать сервером по умолчанию для новых пользователей
+                </label>
+              </div>
               <div className="md:col-span-2 flex gap-2">
                 <button type="submit" className="px-6 py-2 bg-blue-600 rounded-xl text-sm font-medium">
                   {editingId ? 'Обновить' : 'Сохранить'}
@@ -207,7 +225,7 @@ export default function AdminServers() {
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
-        {servers.map((server) => (
+        {Array.isArray(servers) && servers.map((server) => (
           <motion.div
             key={server.id}
             layout
@@ -221,6 +239,9 @@ export default function AdminServers() {
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold">{server.name}</h3>
                   <span className="text-xs bg-white/5 px-2 py-0.5 rounded uppercase font-mono">{server.location_code}</span>
+                  {server.is_default && (
+                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full border border-blue-500/30 font-bold uppercase tracking-widest">Default</span>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground font-mono truncate max-w-[200px] md:max-w-xs">{server.ip}{server.domain ? ` (${server.domain})` : ''}</p>
                 
@@ -273,7 +294,7 @@ export default function AdminServers() {
           </motion.div>
         ))}
 
-        {servers.length === 0 && !loading && (
+        {(!Array.isArray(servers) || servers.length === 0) && !loading && (
           <div className="text-center py-12 bg-white/5 rounded-2xl border border-dashed border-white/10">
             <Globe className="mx-auto mb-4 text-muted-foreground opacity-20" size={48} />
             <p className="text-muted-foreground">Список серверов пуст</p>
