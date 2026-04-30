@@ -16,10 +16,11 @@ VPN Server IP: 185.72.11.57
 ├── MTProto Proxy (9443) — Docker
 └── AdGuard DNS
 1.4 Планируемый стек
-Frontend: React + TypeScript + TailwindCSS → Vercel
-Backend: Supabase (Auth + Database + Edge Functions)
+Frontend: React + TypeScript + TailwindCSS
+Backend: Supabase (Auth + Database), Node.js (Express monolith для API, webhooks, telegram bot, 3x-ui sync)
 Репозиторий: GitHub
 Платёжная система: Enot.io
+Деплой: Railway.app (обязательно использование платформы, поддерживающей full-stack Node.js)
 2. ДИЗАЙН-СИСТЕМА
 2.1 Цветовая палитра
 Роль	Цвет	HEX
