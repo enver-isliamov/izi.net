@@ -9,5 +9,7 @@ services:
       # Пробрасываем порт 3005 хоста на порт 3000 внутри контейнера,
       # так как 3000 у вас занят AdGuard'ом.
       - "3005:3000"
+    environment:
+      - NODE_ENV=production
     env_file:
       - .env
