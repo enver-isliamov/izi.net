@@ -28,7 +28,7 @@ export default function AdminUsers() {
       setUsers(usersRes.data);
       setServers(serversRes.data);
     } catch (e) {
-      toast.error('Ошибка загрузки данных');
+      toast.error('Ошибка загрузки данных. Убедитесь, что бэкенд работает и VITE_API_URL указан.');
     } finally {
       setLoading(false);
     }

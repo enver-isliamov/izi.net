@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -29,7 +30,7 @@ export default function AdminServers() {
         setServers([]);
       }
     } catch (e) {
-      toast.error('Ошибка загрузки серверов');
+      toast.error('Ошибка загрузки серверов. Убедитесь, что бэкенд доступен и VITE_API_URL настроен.');
     } finally {
       setLoading(false);
     }
@@ -46,19 +47,20 @@ export default function AdminServers() {
         await axios.put(`/api/admin/servers/${editingId}`, formData, {
           headers: { Authorization: `Bearer ${session?.access_token}` }
         });
-        toast.success('Сервер обновлен');
+        toast.success('Сервер обновлен (API)');
       } else {
         await axios.post('/api/admin/servers', formData, {
           headers: { Authorization: `Bearer ${session?.access_token}` }
         });
-        toast.success('Сервер добавлен');
+        toast.success('Сервер добавлен (API)');
       }
+      
       setIsAdding(false);
       setEditingId(null);
       setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
       fetchServers();
     } catch (e: any) {
-      const errorMsg = e.response?.data?.error || 'Ошибка сохранения сервера';
+      const errorMsg = e.response?.data?.error || e.message || 'Ошибка сохранения сервера';
       toast.error(errorMsg);
       console.error('Save server error:', e);
     }
@@ -78,7 +80,11 @@ export default function AdminServers() {
         toast.error(`Ошибка: ${data.message}`, { id: 'check-conn' });
       }
     } catch (e: any) {
-      toast.error(`Ошибка соединения: ${e.response?.data?.error || e.message}`, { id: 'check-conn' });
+      if (e.response?.status === 404 || e.message === 'Network Error') {
+        toast.error('Бэкенд API недоступен (настройте VITE_API_URL)', { id: 'check-conn' });
+      } else {
+        toast.error(`Ошибка соединения: ${e.response?.data?.error || e.message}`, { id: 'check-conn' });
+      }
     } finally {
       setIsChecking(null);
     }
@@ -112,7 +118,7 @@ export default function AdminServers() {
       });
       fetchServers();
     } catch (e) {
-      toast.error('Ошибка обновления');
+      toast.error('Ошибка обновления status');
     }
   };
 
@@ -125,7 +131,7 @@ export default function AdminServers() {
       fetchServers();
       toast.success('Сервер удален');
     } catch (e) {
-      toast.error('Ошибка удаления');
+      toast.error('Ошибка удаления сервера');
     }
   };
 
