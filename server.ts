@@ -1947,37 +1947,25 @@ const showMainMenu = (ctx: any) => {
 let isBotLaunching = false;
 
 async function launchBot(retries = 10) {
-  if (!bot || isBotLaunching) return;
+  if (isBotLaunching) return;
   isBotLaunching = true;
 
   try {
     console.log('🤖 Telegram Bot: Starting launch sequence...');
     
-    // 1. Try to stop any existing polling in this instance
-    try {
-      await bot.stop();
-    } catch (e) {
-      // Ignore errors during stop
-    }
-    
-    // 2. Always clear webhook and drop pending updates to avoid 409 and spam
+    // Always clear webhook and drop pending updates to prevent 409 and spam
     console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
     try {
       await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     } catch (e: any) {
-      console.warn('⚠️ Telegram Bot: Failed to delete webhook:', e.message);
+      console.warn('⚠️ Telegram Bot: Failed to delete webhook during launch:', e.message);
     }
     
-    // 3. Significant delay to let Telegram settle
-    const settlementDelay = 20000; // 20s for Vercel/multi-instance environments
+    // Small delay to let Telegram settle
+    const settlementDelay = 5000; 
     console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
     await new Promise(resolve => setTimeout(resolve, settlementDelay));
     
-    // 4. Force delete webhook again just before launch
-    try {
-      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    } catch(e) {}
-    // 4. Launch polling
     await bot.launch({
       allowedUpdates: ['message', 'callback_query'],
       dropPendingUpdates: true
@@ -1989,22 +1977,17 @@ async function launchBot(retries = 10) {
     isBotLaunching = false;
     
     if (err.response?.error_code === 409) {
-      isBotLaunching = false;
       if (retries > 0) {
-        const delay = 60000; // Increase to 60 seconds to satisfy Telegram
+        const delay = 30000; 
         console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
-        // Force drop webhook before retry
-        try { 
-          await bot.telegram.deleteWebhook({ drop_pending_updates: true }); 
-        } catch(e) {}
         setTimeout(() => launchBot(retries - 1), delay);
       } else {
-        console.error('❌ Telegram Bot: Launch failed. Check for other active processes or wait 5 mins.');
+        console.error('❌ Telegram Bot: Launch failed. Conflict 409 persists.');
       }
     } else {
       console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
       if (retries > 0) {
-        setTimeout(() => launchBot(retries - 1), 5000);
+        setTimeout(() => launchBot(retries - 1), 10000);
       }
     }
   }
@@ -2151,51 +2134,7 @@ if (bot) {
     ctx.answerCbQuery();
     if (!ctx.chat) return;
     botSessions.set(ctx.chat.id, { state: 'support' });
-    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш специалист ответит вам.\n\nДля выхода из режима поддержки нажмите кнопку ниже.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '❌ Выйти из режима поддержки', callback_data: 'action_exit_mode' }]]
-      }
-    });
-  });
-
-  bot.action('action_password', (ctx) => {
-    ctx.answerCbQuery();
-    if (!ctx.chat) return;
-    botSessions.set(ctx.chat.id, { state: 'password' });
-    ctx.reply('🔑 Введите новый пароль для вашего аккаунта (минимум 8 символов):\n\nДля отмены нажмите кнопку ниже.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'action_exit_mode' }]]
-      }
-    });
-  });
-
-  bot.action('action_help', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply(`Доступные команды:\n• Моя подписка и баланс\n• Связаться с поддержкой\n• Сменить пароль\n\nВсё это доступно в главном меню командой /start`);
-  });
-
-  bot.action('action_exit_mode', (ctx) => {
-    ctx.answerCbQuery();
-    if (!ctx.chat) return;
-    botSessions.delete(ctx.chat.id);
-    ctx.reply('✅ Вы вернулись в обычный режим.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
-      }
-    });
-  });
-
-  bot.action('action_menu', (ctx) => {
-    ctx.answerCbQuery();
-    return showMainMenu(ctx);
-  });
-
-  // Handle all other text messages
-  bot.on('text', async (ctx) => {
-    const chatId = ctx.chat.id;
-    const text = ctx.message.text;
-
-    // Check if admin is replying to a forwarded user message
+    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш �    // Check if admin is replying to a forwarded user message
     if (botAdminId && chatId.toString() === botAdminId.toString()) {
       const replyToMsg = ctx.message.reply_to_message;
       if (replyToMsg) {
@@ -2217,16 +2156,11 @@ if (bot) {
           if (match && match[1]) {
             const ticketId = match[1];
             try {
-              // Check if ticket exists first? Just insert message.
               await supabase.from('support_messages').insert({
                 ticket_id: ticketId,
                 sender: 'admin',
                 content: text
               });
-              
-              // Also update ticket status to in_progress or somewhat
-              // await supabase.from('support_tickets').update({status: 'in_progress'}).eq('id', ticketId);
-              
               ctx.reply('✅ Ответ доставлен пользователю в интерфейс приложения.');
               return;
             } catch(e) {
@@ -2310,10 +2244,9 @@ if (bot) {
 // --- Vite Middleware ---
 
 async function startServer() {
-  console.log(`🚀 Starting izinet server... (Mode: ${process.env.NODE_ENV || 'development'})`);
-  
-  // Create /app/dist check to force production mode if dist exists
   const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production_docker";
+  console.log(`🚀 Starting izinet server... (Mode: ${isProd ? 'PRODUCTION' : 'DEVELOPMENT'})`);
+  
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
     if (servers) {
@@ -2322,6 +2255,61 @@ async function startServer() {
         const { instance } = await getXuiForServer(server.id);
         const ok = await instance.checkConfig();
         console.log(`${ok ? '✅' : '❌'} Connection to server "${server.name}" (${server.id}): ${ok ? 'OK' : 'FAILED'}`);
+      }
+    }
+  } catch (err) {
+    console.error('❌ Failed to check VPN servers on startup:', err);
+  }
+  
+  setupRealtimeListener();
+  syncTrafficStats();
+  setInterval(syncTrafficStats, 15 * 60 * 1000);
+
+  if (bot) {
+    launchBot();
+  } else {
+    console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
+  }
+
+  console.log(`🛠️ Configuring ${isProd ? 'Static Production' : 'Vite Development'} middleware...`);
+  if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res, next) => {
+      if (req.url.startsWith('/api')) return next();
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();
+
+// Enable graceful stop
+if (bot) {
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}://localhost:${PORT}`);
+  });
+}
+
+startServer();
+
+// Enable graceful stop
+if (bot) {
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}d}): ${ok ? 'OK' : 'FAILED'}`);
       }
     }
   } catch (err) {
