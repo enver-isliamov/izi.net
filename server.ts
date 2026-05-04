@@ -34,13 +34,13 @@ const sharedHttpAgent = new http.Agent({
 });
 
 // Helper for axios requests to 3x-ui
-function getRequestConfig(url: string, headers: any = {}) {
+function getRequestConfig(url: string, headers: any = {}, customTimeout?: number) {
   const isHttps = url.startsWith('https');
   return {
     headers,
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
     httpAgent: !isHttps ? sharedHttpAgent : undefined,
-    timeout: 15000
+    timeout: customTimeout || 15000
   };
 }
 
@@ -820,6 +820,9 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
 
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const { search } = req.query;
+  console.log(`[AdminAPI] GET /api/admin/users (Search: ${search || 'none'})`);
+  const startTime = Date.now();
+
   // Select users joined with their active subscription and assigned server
   let query = supabase
     .from('users')
@@ -895,7 +898,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       };
     });
 
-    console.log(`[ADMIN] Fetched ${data.length} users. ${transformed.filter(u => u.active_subscription).length} have active subscriptions.`);
+    console.log(`[ADMIN] Fetched ${data.length} users in ${Date.now() - startTime}ms.`);
     res.json(transformed);
 });
 
@@ -918,9 +921,25 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
 
     if (subErr || !sub) return res.status(404).json({ error: 'Active subscription not found for this user' });
     
+    if (sub.server_id === newServerId) {
+      return res.status(400).json({ error: 'Пользователь уже находится на этом сервере' });
+    }
+
     // 2. Get old and new server instances
+    console.log(`[MoveServer] Step 1: Connecting to servers. Old: ${sub.server_id}, New: ${newServerId}`);
     const { instance: oldXui } = await getXuiForServer(sub.server_id);
     const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
+    
+    // Check connection to NEW server first - if it's down, don't even start
+    try {
+      await Promise.race([
+        newXui.login(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('New server unreachable')), 7000))
+      ]);
+    } catch (e: any) {
+      console.error(`❌ Target server ${newServerId} is unreachable:`, e.message);
+      return res.status(503).json({ error: `Целевой сервер недоступен: ${e.message}` });
+    }
     
     // 3. Parse devices
     const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
@@ -1053,6 +1072,7 @@ app.post('/api/admin/sync-all', adminOnly, async (req, res) => {
 
 app.get('/api/admin/servers', adminOnly, async (req, res) => {
   console.log('[AdminAPI] Fetching servers list...');
+  const startTime = Date.now();
   try {
     const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
     if (error) {
@@ -1066,17 +1086,25 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
       try {
         const statsPromise = (async () => {
              const { instance } = await getXuiForServer(server.id);
+             // Use very short timeout for "live" stats to prevent hanging admin UI
+             const shortConfig = (url: string) => getRequestConfig(url, { 'Cookie': instance['sessionCookie'] }, 3000);
+             
+             // Check if we can even login first if needed
+             if (!instance['sessionCookie']) {
+               await instance.login();
+             }
+
              const onlines = await instance.getOnlines();
              const clients = await instance.listClients();
              return { 
-               onlineCount: onlines.length,
-               clientCount: clients.length 
+               onlineCount: (onlines || []).length,
+               clientCount: (clients || []).length 
              };
         })();
 
-        // Race against a 8-second timeout per server
+        // Race against a 5-second timeout per server (reduced from 8s)
         const timeoutPromise = new Promise<{onlineCount: number, clientCount: number}>((resolve) => 
-          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 8000)
+          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 5000)
         );
 
         const [subCount, xuiStats] = await Promise.all([
@@ -1109,7 +1137,7 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
       }
     }));
 
-    console.log('[AdminAPI] Successfully enriched all servers.');
+    console.log(`[AdminAPI] Successfully enriched all servers in ${Date.now() - startTime}ms.`);
     res.json(enrichedServers);
   } catch (err: any) {
     console.error('[AdminAPI] Critical error in GET /api/admin/servers:', err);

@@ -16,26 +16,28 @@ export default function AdminUsers() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [usersRes, serversRes] = await Promise.all([
-        axios.get('/api/admin/users', {
+      // Fetch users independently
+      try {
+        const usersRes = await axios.get('/api/admin/users', {
           headers: { Authorization: `Bearer ${session?.access_token}` },
           params: { search }
-        }),
-        axios.get('/api/admin/servers', {
+        });
+        setUsers(usersRes.data);
+      } catch (userErr: any) {
+        console.error('Fetch users error:', userErr);
+        toast.error(`Ошибка загрузки пользователей: ${userErr.response?.data?.error || userErr.message}`);
+      }
+
+      // Fetch servers independently
+      try {
+        const serversRes = await axios.get('/api/admin/servers', {
           headers: { Authorization: `Bearer ${session?.access_token}` }
-        })
-      ]);
-      setUsers(usersRes.data);
-      setServers(serversRes.data);
-    } catch (e: any) {
-      const status = e.response?.status;
-      const errorMsg = e.response?.data?.error || e.message;
-      console.error('Fetch admin data error:', e);
-      
-      if (status === 401 || status === 403) {
-        toast.error(`Доступ запрещен (${status}): Недостаточно прав`);
-      } else {
-        toast.error(`Ошибка загрузки данных админки (${status || 'Network'}): ${errorMsg}`);
+        });
+        setServers(serversRes.data || []);
+      } catch (serverErr: any) {
+        console.error('Fetch servers for users error:', serverErr);
+        // Don't toast here as it might be a transient 502, just log
+        // Users can still see the table
       }
     } finally {
       setLoading(false);
