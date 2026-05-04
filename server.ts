@@ -2062,31 +2062,21 @@ if (bot) {
         return ctx.reply('⚠️ Ваш Telegram не привязан к аккаунту izinet. Сначала привяжите его в личном кабинете на сайте или войдите через Email.');
       }
 
-      // 2. Generate Magic Link
       const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
         type: 'magiclink',
         email: userData.email,
-        options: {
-          redirectTo: `${process.env.APP_URL || 'https://izinet.app'}/dashboard`
-        }
+        options: { redirectTo: `${process.env.APP_URL || 'https://izinet.app'}/dashboard` }
       });
 
       if (linkErr) throw linkErr;
 
-      return ctx.reply('🔑 Нажмите на кнопку ниже, чтобы войти в свой аккаунт izinet:', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🚀 Войти в личный кабинет', url: linkData.properties.action_link }]
-          ]
-        }
+      return ctx.reply('🔑 Нажмите для входа:', {
+        reply_markup: { inline_keyboard: [[{ text: '🚀 Войти', url: linkData.properties.action_link }]] }
       });
-    } catch (error) {
-      console.error('Bot auth error:', error);
-      return ctx.reply('❌ Ошибка при генерации ссылки для входа.');
+    } catch (e) {
+      return ctx.reply('❌ Ошибка входа.');
     }
   }
-
-  // Generic welcome
   return showMainMenu(ctx);
   });
 
@@ -2134,114 +2124,93 @@ if (bot) {
     ctx.answerCbQuery();
     if (!ctx.chat) return;
     botSessions.set(ctx.chat.id, { state: 'support' });
-    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш �    // Check if admin is replying to a forwarded user message
+    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш администратор ответит вам здесь же.');
+  });
+
+  bot.action('action_password', async (ctx) => {
+    ctx.answerCbQuery();
+    if (!ctx.chat) return;
+    botSessions.set(ctx.chat.id, { state: 'password' });
+    ctx.reply('🔑 Введите новый пароль для вашего аккаунта (минимум 8 символов):');
+  });
+
+  bot.action('action_help', (ctx) => {
+    ctx.answerCbQuery();
+    ctx.reply('❓ Инструкция:\n1. Скачайте приложение Hiddify или V2Ray.\n2. В личном кабинете на сайте скопируйте ссылку подписки.\n3. Вставьте ссылку в приложение.\n\nЕсли возникли сложности — напишите в поддержку.');
+  });
+
+  bot.action('action_menu', (ctx) => {
+    ctx.answerCbQuery();
+    return showMainMenu(ctx);
+  });
+
+  bot.on('text', async (ctx) => {
+    const chatId = ctx.chat.id;
+    const text = ctx.message.text;
+
     if (botAdminId && chatId.toString() === botAdminId.toString()) {
       const replyToMsg = ctx.message.reply_to_message;
       if (replyToMsg) {
-        // Fallback or explicit mapping check for live-chat TG-TG
         const originalChatId = adminReplyMap.get(replyToMsg.message_id);
         if (originalChatId) {
           try {
             await ctx.telegram.sendMessage(originalChatId, `💬 Сообщение от поддержки:\n\n${text}`);
-            return;
+            return ctx.reply('✅ Ответ отправлен.');
           } catch(e) {
-            console.error('Failed to send reply to user', e);
-            return ctx.reply('❌ Ошибка отправки ответа пользователю.');
+            return ctx.reply('❌ Ошибка отправки.');
           }
         }
-        
-        // --- NEW: Handle replies to UI Tickets ---
         if ('text' in replyToMsg && replyToMsg.text) {
           const match = replyToMsg.text.match(/ID Тикета:\s*([a-f0-9\-]+)/i);
           if (match && match[1]) {
-            const ticketId = match[1];
             try {
               await supabase.from('support_messages').insert({
-                ticket_id: ticketId,
+                ticket_id: match[1],
                 sender: 'admin',
                 content: text
               });
-              ctx.reply('✅ Ответ доставлен пользователю в интерфейс приложения.');
-              return;
+              return ctx.reply('✅ Ответ в тикет доставлен.');
             } catch(e) {
-              console.error('Failed to save admin reply to db', e);
-              return ctx.reply('❌ Ошибка сохранения ответа в базу данных.');
+              return ctx.reply('❌ Ошибка БД.');
             }
           }
         }
       }
     }
 
-    // Check user sessions
     const session = botSessions.get(chatId);
-    
     if (session?.state === 'support') {
-      if (!botAdminId) {
-         return ctx.reply('К сожалению, поддержка сейчас недоступна.');
-      }
+      if (!botAdminId) return ctx.reply('Поддержка недоступна.');
       try {
         const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
-        // Send to admin
-        const sentMsg = await ctx.telegram.sendMessage(botAdminId, `🆘 Вопрос от пользователя ${username} (ID: ${chatId}):\n\n${text}`);
-        // Save mapping so admin can reply
+        const sentMsg = await ctx.telegram.sendMessage(botAdminId, `🆘 Вопрос от ${username} (${chatId}):\n\n${text}`);
         adminReplyMap.set(sentMsg.message_id, chatId);
-        ctx.reply('✅ Ваше сообщение отправлено в поддержку. Ожидайте ответа (можно писать ещё сообщения, мы их получим).');
-      } catch (error) {
-         console.error('Failed to forward to admin', error);
-         ctx.reply('❌ Ошибка связи с сервером поддержки.');
+        ctx.reply('✅ Сообщение отправлено.');
+      } catch (e) {
+         ctx.reply('❌ Ошибка отправки.');
       }
       return;
     }
 
     if (session?.state === 'password') {
-      if (text.length < 8) {
-        return ctx.reply('⚠️ Пароль должен содержать минимум 8 символов. Попробуйте еще раз:');
-      }
-
-      // Reset password logic
+      if (text.length < 8) return ctx.reply('⚠️ Пароль короткий.');
       try {
-        // Find user
-        const { data: userData, error: userErr } = await supabase
-          .from('users')
-          .select('id')
-          .eq('telegram_id', chatId.toString())
-          .single();
-
-        if (userErr || !userData) {
-          botSessions.delete(chatId);
-          return ctx.reply('⚠️ Ваш Telegram не привязан к аккаунту izinet. Невозможно сменить пароль.');
-        }
-
-        const { error: updateErr } = await supabase.auth.admin.updateUserById(userData.id, {
-          password: text
-        });
-
-        if (updateErr) throw updateErr;
-
+        const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId.toString()).single();
+        if (!user) return ctx.reply('Аккаунт не найден.');
+        await supabase.auth.admin.updateUserById(user.id, { password: text });
         botSessions.delete(chatId);
-        ctx.reply('✅ Пароль успешно изменен! Вы можете использовать его для входа.', {
-          reply_markup: {
-            inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
-          }
-        });
-      } catch (error) {
-        console.error('Password change error', error);
-        ctx.reply('❌ Ошибка при смене пароля. Попробуйте позже.');
+        ctx.reply('✅ Пароль изменен!', { reply_markup: { inline_keyboard: [[{ text: '◀️ В меню', callback_data: 'action_menu' }]] } });
+      } catch (e) {
+        ctx.reply('❌ Ошибка.');
       }
       return;
     }
 
-    // Default reply if no session and not a command
-    ctx.reply('Я не понимаю эту команду. Воспользуйтесь меню.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
-      }
-    });
+    ctx.reply('Используйте меню.', { reply_markup: { inline_keyboard: [[{ text: '◀️ В меню', callback_data: 'action_menu' }]] } });
   });
-
 }
 
-// --- Vite Middleware ---
+// --- Lifecycle ---
 
 async function startServer() {
   const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production_docker";
@@ -2250,34 +2219,22 @@ async function startServer() {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
     if (servers) {
-      console.log(`📡 Found ${servers.length} active VPN servers in DB. Checking connections...`);
-      for (const server of servers) {
-        const { instance } = await getXuiForServer(server.id);
-        const ok = await instance.checkConfig();
-        console.log(`${ok ? '✅' : '❌'} Connection to server "${server.name}" (${server.id}): ${ok ? 'OK' : 'FAILED'}`);
+      console.log(`📡 Found ${servers.length} active servers.`);
+      for (const s of servers) {
+        getXuiForServer(s.id).then(({instance}) => instance.checkConfig());
       }
     }
-  } catch (err) {
-    console.error('❌ Failed to check VPN servers on startup:', err);
-  }
+  } catch (err) {}
   
   setupRealtimeListener();
   syncTrafficStats();
   setInterval(syncTrafficStats, 15 * 60 * 1000);
 
-  if (bot) {
-    launchBot();
-  } else {
-    console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
-  }
+  if (bot) launchBot();
 
-  console.log(`🛠️ Configuring ${isProd ? 'Static Production' : 'Vite Development'} middleware...`);
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
@@ -2295,88 +2252,6 @@ async function startServer() {
 
 startServer();
 
-// Enable graceful stop
-if (bot) {
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
-}://localhost:${PORT}`);
-  });
-}
-
-startServer();
-
-// Enable graceful stop
-if (bot) {
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
-}d}): ${ok ? 'OK' : 'FAILED'}`);
-      }
-    }
-  } catch (err) {
-    console.error('❌ Failed to check VPN servers on startup:', err);
-  }
-  
-  // Setup Realtime DB Listener for manual syncing
-  try {
-    setupRealtimeListener();
-  } catch (e) {
-    console.error('❌ Failed to setup realtime listener:', e);
-  }
-
-  // Initial traffic sync and schedule every 15 minutes
-  syncTrafficStats();
-  setInterval(syncTrafficStats, 15 * 60 * 1000);
-
-  // Logging middleware to debug API routes and 405 errors
-  app.use((req, res, next) => {
-    if (req.url.startsWith('/api')) {
-      console.log(`[API] ${req.method} ${req.url}`);
-    }
-    next();
-  });
-
-  // Launch Telegram Bot with retry logic
-  if (bot) {
-    launchBot();
-  } else {
-    console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
-  }
-
-  console.log(`🛠️ Configuring ${isProd ? 'Production' : 'Vite'} middleware...`);
-  // Vite middleware for development
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-    
-    // Catch-all for dev mode if Vite middleware didn't handle it
-    app.get('*', async (req, res, next) => {
-      if (req.url.startsWith('/api')) return next();
-      try {
-        const template = await vite.transformIndexHtml(req.url, '<html>...</html>'); // Minimal template
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) {
-        next(e);
-      }
-    });
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer();
-
-// Enable graceful stop
 if (bot) {
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
