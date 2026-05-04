@@ -13,7 +13,7 @@ export function AdminNav() {
   ];
 
   return (
-    <div className="flex items-center gap-2 p-1 bg-white/5 rounded-xl border border-white/5 mb-8">
+    <div className="flex items-center gap-2 p-1 bg-white/5 rounded-xl border border-white/5 mb-8 overflow-x-auto scrollbar-hide no-scrollbar">
       {navItems.map((item) => {
         const isActive = location.pathname === item.path;
         return (
@@ -21,7 +21,7 @@ export function AdminNav() {
             key={item.path}
             to={item.path}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
               isActive 
                 ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" 
                 : "text-muted-foreground hover:text-white hover:bg-white/5"
