@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
+import { cn, copyToClipboard } from '@/lib/utils';
 import { 
   Dialog, 
   DialogContent, 
@@ -363,9 +363,13 @@ export default function Subscription() {
                           size="sm" 
                           variant="secondary" 
                           className="flex-1 sm:flex-none rounded-lg text-xs" 
-                          onClick={() => {
-                            navigator.clipboard.writeText(device.config || device.v2ray_config);
-                            toast.success(`Ключ скопирован (${devLabel})`);
+                          onClick={async () => {
+                            const success = await copyToClipboard(device.config || device.v2ray_config);
+                            if (success) {
+                              toast.success(`Ключ скопирован (${devLabel})`);
+                            } else {
+                              toast.error("Ошибка копирования");
+                            }
                           }}
                         >
                           Копировать

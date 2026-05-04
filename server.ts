@@ -329,7 +329,7 @@ class XUIService {
       }
       
       const inbound = resp.data.obj;
-      const streamSettings = JSON.parse(inbound.streamSettings);
+      const streamSettings = JSON.parse(inbound.streamSettings || '{}');
       const security = streamSettings.security || 'none';
       const port = inbound.port;
       
@@ -345,23 +345,33 @@ class XUIService {
         isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
       }
 
+      const encodedEmail = encodeURIComponent(`izinet_${email}`);
+
       if (security === 'reality') {
         const realitySettings = streamSettings.realitySettings || {};
-        const sni = realitySettings.serverNames?.[0] || (isIP ? 'google.com' : hostName);
-        const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
-        const sid = realitySettings.shortIds?.[0] || '';
-        const fp = realitySettings.settings?.fingerprint || realitySettings.fingerprint || 'chrome';
-        const spiderX = realitySettings.settings?.spiderX || '/';
-        // Reality link format optimized for Hiddify and V2Ray
-        // Using literal '/' for spx as some clients are sensitive
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision&spx=${spiderX}#izinet_${email}`;
+        // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
+        const rs = realitySettings.settings || realitySettings;
+        
+        const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIP ? 'google.com' : hostName);
+        const pbk = rs.publicKey || realitySettings.publicKey || '';
+        const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
+        const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
+        const spiderX = rs.spiderX || realitySettings.spiderX || '';
+        
+        console.log(`[XUI] Generating Reality link for ${email} on ${hostName}:${port}. SNI: ${sni}, SID: ${sid}, SPX: ${spiderX}`);
+
+        let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision`;
+        if (spiderX && spiderX !== '/') {
+          link += `&spx=${encodeURIComponent(spiderX)}`;
+        }
+        return `${link}#${encodedEmail}`;
       } else if (security === 'tls') {
         const tlsSettings = streamSettings.tlsSettings || {};
         const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
         let sniPart = sni ? `&sni=${sni}` : "";
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#izinet_${email}`;
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
       } else {
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#izinet_${email}`;
+        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#${encodedEmail}`;
       }
     } catch (e) {
       // Find the port from device if possible
@@ -613,7 +623,8 @@ class XUIService {
     const sni = isIP ? "" : hostName;
     const sniPart = sni ? `&sni=${sni}` : "";
     
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#izinet_${email}`;
+    const encodedEmail = encodeURIComponent(`izinet_${email}`);
+    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
   }
 }
 

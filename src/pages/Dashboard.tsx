@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
+import { cn, copyToClipboard } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -383,9 +383,14 @@ export default function Dashboard() {
                         size="sm" 
                         variant="secondary"
                         className="rounded-xl px-3 bg-primary/10 hover:bg-primary/20 text-primary" 
-                        onClick={() => {
-                          navigator.clipboard.writeText(`${window.location.origin}/api/sub/${subscription.id}`);
-                          toast.success("Ссылка для подписки скопирована");
+                        onClick={async () => {
+                          const subUrl = `${window.location.origin}/api/sub/${subscription.id}`;
+                          const success = await copyToClipboard(subUrl);
+                          if (success) {
+                            toast.success("Ссылка для подписки скопирована");
+                          } else {
+                            toast.error("Не удалось скопировать. Попробуйте выделить текст вручную.");
+                          }
                         }}
                       >
                         <Copy className="w-3.5 h-3.5" />
@@ -429,9 +434,13 @@ export default function Dashboard() {
                           size="sm" 
                           variant="secondary" 
                           className="flex-1 text-[11px] h-9 rounded-xl font-medium"
-                          onClick={() => {
-                            navigator.clipboard.writeText(device.config);
-                            toast.success(`Ключ скопирован (${device.label})`);
+                          onClick={async () => {
+                            const success = await copyToClipboard(device.config);
+                            if (success) {
+                              toast.success(`Ключ скопирован (${device.label})`);
+                            } else {
+                              toast.error("Ошибка копирования");
+                            }
                           }}
                         >
                           Копировать
