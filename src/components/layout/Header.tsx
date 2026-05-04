@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, Globe, User, Menu, ShieldCheck, LayoutDashboard, CreditCard, Wallet as WalletIcon, Download, LifeBuoy, Users, HelpCircle } from 'lucide-react';
+import { Bell, Globe, User, Menu, ShieldCheck, LayoutDashboard, CreditCard, Wallet as WalletIcon, Download, LifeBuoy, Users, HelpCircle, Settings, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -40,8 +40,10 @@ const menuItems = [
 export function Header() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signOut } = useAuth();
+  const { signOut, role } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+
+  const isAdmin = role === 'admin' || role === 'superadmin';
 
   const handleLogout = async () => {
     try {
@@ -97,6 +99,27 @@ export function Header() {
                   </Link>
                 );
               })}
+
+              {isAdmin && (
+                <div className="pt-2 mt-2 border-t border-white/5">
+                  <p className="px-4 mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Админ</p>
+                  <Link 
+                    to="/admin"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-start gap-3 h-12 px-4 rounded-xl transition-all duration-200 text-blue-400 hover:text-blue-300 hover:bg-blue-400/10",
+                        location.pathname.startsWith('/admin') && "bg-blue-400/10"
+                      )}
+                    >
+                      <Settings className="w-5 h-5" />
+                      <span className="font-medium">Панель управления</span>
+                    </Button>
+                  </Link>
+                </div>
+              )}
             </nav>
             <div className="absolute bottom-4 left-4 right-4 space-y-4">
               <div className="flex flex-col gap-2 px-4 text-[10px] text-muted-foreground w-full">
@@ -108,7 +131,7 @@ export function Header() {
                 onClick={handleLogout}
                 className="w-full justify-start gap-3 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-xl h-12"
               >
-                <LifeBuoy className="w-5 h-5" />
+                <LogOut className="w-5 h-5" />
                 <span className="font-medium">Выйти</span>
               </Button>
             </div>
@@ -163,8 +186,18 @@ export function Header() {
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/profile')}>
                 Настройки
               </DropdownMenuItem>
+              {isAdmin && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="cursor-pointer text-blue-400 font-medium" onClick={() => navigate('/admin')}>
+                    <Settings className="w-4 h-4 mr-2" />
+                    Панель управления
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive cursor-pointer" onClick={handleLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
                 Выйти
               </DropdownMenuItem>
             </DropdownMenuGroup>

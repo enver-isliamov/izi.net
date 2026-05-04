@@ -1477,6 +1477,12 @@ app.post('/api/pay/webhook/enot', async (req, res) => {
 
   // Enot webhook sign: merchant_id:amount:secret_word2:merchant_order_id
   const secret2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || ''; 
+  
+  if (!secret2) {
+    console.error('❌ ENOT_SECRET_KEY2 is not defined in environment variables!');
+    return res.status(500).send('Configuration Error');
+  }
+
   const calculatedSign = crypto
     .createHash('md5')
     .update(`${merchant_id}:${amount}:${secret2}:${orderId}`)
@@ -1484,11 +1490,19 @@ app.post('/api/pay/webhook/enot', async (req, res) => {
 
   if (sign.toLowerCase() !== calculatedSign.toLowerCase()) {
     console.warn(`❌ Invalid Enot signature. Got ${sign}, expected ${calculatedSign}`);
+    // Log context for debugging
+    console.log(`[DEBUG] Sign data: ${merchant_id}:${amount}:[SECRET_HIDDEN]:${orderId}`);
     return res.status(400).send('Invalid signature');
   }
 
   try {
-    await processSuccessfulPayment(custom_field, parseFloat(amount), orderId, 'enot');
+    const userId = custom_field; // Enot passes userId back in custom_field (cf)
+    if (!userId) {
+      console.error('❌ No custom_field (userId) found in Enot webhook');
+      return res.status(400).send('Missing userId in custom_field');
+    }
+    
+    await processSuccessfulPayment(userId, parseFloat(amount), orderId, 'enot');
     res.send('YES');
   } catch (err: any) {
     console.error('❌ Error processing Enot payment:', err.message);
@@ -1500,18 +1514,33 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
   
   // 1. Check if already processed to avoid double-spend
+  // Using 'payments' as primary table name as per SETUP.md, but falling back to 'transactions'
+  let tableName = 'payments';
+  
+  const { data: existingPay, error: tableCheckErr } = await supabase
+    .from('payments')
+    .select('status')
+    .eq('provider_order_id', orderId)
+    .single();
+
+  if (tableCheckErr && tableCheckErr.code === 'PGRST116') {
+    // If table not found or column issue, try transactions
+    tableName = 'transactions';
+  }
+
   const { data: existingTx } = await supabase
-    .from('transactions')
+    .from(tableName)
     .select('status')
     .eq('provider_order_id', orderId)
     .single();
 
   if (existingTx?.status === 'completed') {
-    console.log(`⚠️ Payment ${orderId} already processed.`);
+    console.log(`⚠️ Payment ${orderId} already processed in table ${tableName}.`);
     return;
   }
 
   // 2. Update balance
+  // Ensure we have a row in balances
   const { data: balanceData } = await supabase
     .from('balances')
     .select('amount')
@@ -1520,6 +1549,8 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
 
   const currentAmount = balanceData?.amount || 0;
   
+  console.log(`💼 Current balance for ${userId}: ${currentAmount}. Adding ${amount}`);
+
   // Using Supabase Service Role to bypass RLS for balance update
   const { error: balErr } = await supabase
     .from('balances')
@@ -1527,20 +1558,27 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
       user_id: userId, 
       amount: currentAmount + amount,
       updated_at: new Date().toISOString()
-    });
+    }, { onConflict: 'user_id' });
 
   if (balErr) {
-    console.error('❌ Failed to update balance:', balErr.message);
-    return;
+    console.error(`❌ Failed to update balance for user ${userId}:`, balErr.message);
+    throw new Error(`Balance update failed: ${balErr.message}`);
   }
 
   // 3. Update transaction status
-  await supabase
-    .from('transactions')
-    .update({ status: 'completed' })
+  const { error: statusErr } = await supabase
+    .from(tableName)
+    .update({ 
+      status: 'completed',
+      completed_at: new Date().toISOString() 
+    })
     .eq('provider_order_id', orderId);
 
-  console.log(`✅ Balance updated for user ${userId}. +${amount}`);
+  if (statusErr) {
+    console.error(`❌ Failed to update status in ${tableName}:`, statusErr.message);
+  }
+
+  console.log(`✅ Balance successfully updated for user ${userId}. New total: ${currentAmount + amount}`);
 }
 
 // Health check and configuration status
