@@ -34,13 +34,14 @@ const sharedHttpAgent = new http.Agent({
 });
 
 // Helper for axios requests to 3x-ui
-function getRequestConfig(url: string, headers: any = {}) {
+function getRequestConfig(url: string, headers: any = {}, customTimeout?: number) {
   const isHttps = url.startsWith('https');
+  const timeout = customTimeout || 5000; // Shorter 5s default timeout to prevent 502/Gateway failures
   return {
     headers,
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
     httpAgent: !isHttps ? sharedHttpAgent : undefined,
-    timeout: 15000
+    timeout: timeout
   };
 }
 
@@ -72,12 +73,14 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
   const configs = configStr.split('\n---KEY_SEP---\n').filter(Boolean);
   return configs.map((cfg, index) => {
     const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
-    const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
+    const emailMatch = cfg.match(/#(?:izinet_)?([^&?#\s]+)/);
+    const rawEmail = emailMatch ? decodeURIComponent(emailMatch[1].replace(/^izinet_/, '')) : 'unknown';
+    
     return {
       id: index === 0 ? 'primary' : `device_${index}`,
       label: index === 0 ? 'Основное устройство' : `Доп. устройство ${index}`,
       config: cfg,
-      email: emailMatch ? emailMatch[1] : 'unknown',
+      email: rawEmail,
       uuid: uuidMatch ? uuidMatch[1] : 'unknown',
       expiresAt: rootExpiresAt || new Date().toISOString(),
       serverType: rootServerType || 'Wi-Fi',
@@ -88,7 +91,7 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
 
 // Supabase Setup (Initialize early to avoid reference errors)
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; 
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || ''; 
 if (!supabaseUrl || !supabaseServiceKey) {
   console.warn('⚠️ SUPABASE credentials missing in environment variables!');
 }
@@ -99,9 +102,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: true, // Разрешаем любым источникам (удобно для VPN панелей на IP)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
+  credentials: true
+}));
 app.use(express.json());
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000');
 
 // --- XUI Service ---
 class XUIService {
@@ -110,6 +118,8 @@ class XUIService {
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
+  private lastLoginTime: number = 0;
+  private readonly SESSION_TTL = 30 * 60 * 1000; // 30 minutes cache for session cookie
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
@@ -154,9 +164,13 @@ class XUIService {
     }
   }
 
-  async login(): Promise<string> {
+  async login(force: boolean = false): Promise<string> {
     if (!this.host) {
       throw new Error('XUI_HOST is empty. Please set it in Settings -> Secrets.');
+    }
+
+    if (!force && this.sessionCookie && (Date.now() - this.lastLoginTime < this.SESSION_TTL)) {
+      return this.sessionCookie;
     }
     
     const tryLogin = async (path: string) => {
@@ -212,6 +226,7 @@ class XUIService {
       const cookie = response.headers['set-cookie']?.[0];
       if (!cookie) throw new Error('No cookie received from 3x-ui. Check if host URL is correct and starts with http/https.');
       this.sessionCookie = cookie;
+      this.lastLoginTime = Date.now();
       return cookie;
     } catch (error: any) {
       console.error(`❌ 3x-ui login error [${this.host}${this.basePath}]:`, error.message);
@@ -229,6 +244,12 @@ class XUIService {
       const resp = await axios.get(listUrl, getRequestConfig(listUrl, { 'Cookie': this.sessionCookie }));
       return resp.data.obj || [];
     } catch (e: any) {
+      if (e.response?.status === 401) {
+        console.log(`[XUI] Session expired for ${this.host}, re-logging in...`);
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getInbounds(); // Retry
+      }
       console.error('❌ 3x-ui getInbounds error:', e.message);
       return [];
     }
@@ -294,9 +315,10 @@ class XUIService {
           // Try to find the real server-side UUID for this email to update it correctly
           const serverClient = await this.getClientByEmail(inboundId, email);
           const effectiveUuid = serverClient?.id || uuid;
+          const effectiveInboundId = serverClient?.inboundId || inboundId;
           
-          await this.updateClient(email, effectiveUuid, inboundId, expiryTime, limitBytes);
-          return this.getInboundLink(inboundId, effectiveUuid, email);
+          await this.updateClient(email, effectiveUuid, effectiveInboundId, expiryTime, limitBytes);
+          return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
         }
         throw new Error(msg || 'Failed to add client');
       }
@@ -310,69 +332,86 @@ class XUIService {
     }
   }
 
-  async getInboundLink(inboundId: number, uuid: string, email: string) {
+  async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     if (!this.sessionCookie) await this.login();
+    
+    // First, check if we should use a different UUID that exists on the server for this email
+    let effectiveUuid = uuid;
+    let effectiveInboundId = inboundId;
+    const serverClient = await this.getClientByEmail(inboundId, email);
+    if (serverClient) {
+      if (serverClient.id) effectiveUuid = serverClient.id;
+      if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+    }
+
+    const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
+    
+    if (!resp.data.success || !resp.data.obj) {
+      throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
+    }
+    
+    const inbound = resp.data.obj;
+    
+    // Safety check for streamSettings: it can be a string or an object depending on XUI version
+    let streamSettings: any = {};
     try {
-      // First, check if we should use a different UUID that exists on the server for this email
-      let effectiveUuid = uuid;
-      let effectiveInboundId = inboundId;
-      const serverClient = await this.getClientByEmail(inboundId, email);
-      if (serverClient) {
-        if (serverClient.id) effectiveUuid = serverClient.id;
-        if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+      if (typeof inbound.streamSettings === 'string') {
+        streamSettings = JSON.parse(inbound.streamSettings || '{}');
+      } else if (inbound.streamSettings && typeof inbound.streamSettings === 'object') {
+        streamSettings = inbound.streamSettings;
       }
+    } catch (parseErr) {
+      console.error(`[XUI] Error parsing streamSettings for inbound ${effectiveInboundId}:`, parseErr);
+    }
 
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
-      if (!resp.data.success || !resp.data.obj) {
-        return this.generateVlessLink(effectiveUuid, email);
-      }
-      
-      const inbound = resp.data.obj;
-      const streamSettings = JSON.parse(inbound.streamSettings);
-      const security = streamSettings.security || 'none';
-      const port = inbound.port;
-      
-      let hostName = 'server.izinet.app';
-      let isIP = false;
-      try {
-        const u = new URL(this.host);
-        hostName = u.hostname;
-        // Check if hostname is an IP
-        isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-      } catch (e) {
-        hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
-        isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-      }
-
-      if (security === 'reality') {
-        const realitySettings = streamSettings.realitySettings || {};
-        const sni = realitySettings.serverNames?.[0] || (isIP ? 'google.com' : hostName);
-        const pbk = realitySettings.settings?.publicKey || realitySettings.publicKey || '';
-        const sid = realitySettings.shortIds?.[0] || '';
-        const fp = realitySettings.settings?.fingerprint || realitySettings.fingerprint || 'chrome';
-        const spiderX = realitySettings.settings?.spiderX || '/';
-        // Reality link format optimized for Hiddify and V2Ray
-        // Using literal '/' for spx as some clients are sensitive
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision&spx=${spiderX}#izinet_${email}`;
-      } else if (security === 'tls') {
-        const tlsSettings = streamSettings.tlsSettings || {};
-        const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
-        let sniPart = sni ? `&sni=${sni}` : "";
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#izinet_${email}`;
-      } else {
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#izinet_${email}`;
-      }
+    const security = streamSettings.security || 'none';
+    const port = inbound.port;
+    
+    let hostName = 'server.izinet.app';
+    let isIP = false;
+    try {
+      const u = new URL(this.host);
+      hostName = u.hostname;
+      // Check if hostname is an IP
+      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
     } catch (e) {
-      // Find the port from device if possible
-      let fallbackPort = 443;
-      try {
-        const portMatch = email.includes('user_') ? null : null; // redundant but to keep email ref
-        // We don't easily have device port here in the catch without passing it, 
-        // but getClientByEmail might have part of it.
-      } catch(ee) {}
+      hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
+      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
+    }
+
+    const encodedEmail = encodeURIComponent(`izinet_${email}`);
+
+    if (security === 'reality') {
+      const realitySettings = streamSettings.realitySettings || {};
+      // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
+      const rs = realitySettings.settings || realitySettings;
       
-      return this.generateVlessLink(uuid, email, undefined, fallbackPort);
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIP ? 'google.com' : hostName);
+      const pbk = rs.publicKey || realitySettings.publicKey || '';
+      
+      if (!pbk || pbk.includes('m_G-oZ_9a6')) {
+        throw new Error(`[XUI] Сервер ${hostName} вернул некорректный или пустой Reality publicKey. Пожалуйста, проверьте настройки Reality в панели XUI.`);
+      }
+
+      const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
+      const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
+      const spiderX = rs.spiderX || realitySettings.spiderX || '';
+      
+      console.log(`[XUI] Generating Reality link for ${email} on ${hostName}:${port}. SNI: ${sni}, SID: ${sid}, SPX: ${spiderX}`);
+
+      let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision`;
+      if (spiderX && spiderX !== '/') {
+        link += `&spx=${encodeURIComponent(spiderX)}`;
+      }
+      return `${link}#${encodedEmail}`;
+    } else if (security === 'tls') {
+      const tlsSettings = streamSettings.tlsSettings || {};
+      const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
+      let sniPart = sni ? `&sni=${sni}` : "";
+      return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
+    } else {
+      return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#${encodedEmail}`;
     }
   }
 
@@ -600,7 +639,6 @@ class XUIService {
 
   generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
     let hostName = customDomain;
-    let isIP = false;
     if (!hostName) {
       try {
         const u = new URL(this.host);
@@ -609,11 +647,10 @@ class XUIService {
         hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || "server.izinet.app";
       }
     }
-    isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-    const sni = isIP ? "" : hostName;
-    const sniPart = sni ? `&sni=${sni}` : "";
+    const encodedEmail = encodeURIComponent(`izinet_${email}`);
     
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#izinet_${email}`;
+    // Return a basic link without security parameters as it's a fallback and we don't have reality keys
+    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=none#${encodedEmail}`;
   }
 }
 
@@ -729,23 +766,35 @@ const payment = new PaymentService();
 // --- Admin Middleware ---
 async function adminOnly(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Authentication required' });
+  if (!authHeader) {
+    console.warn('[AdminAuth] No auth header');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   const token = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabase.auth.getUser(token);
 
-  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+  if (error || !user) {
+    console.warn('[AdminAuth] Invalid token or user fetch error:', error?.message);
+    return res.status(401).json({ error: 'Invalid token' });
+  }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('users')
     .select('role')
     .eq('id', user.id)
     .single();
 
+  if (profileError) {
+    console.error('[AdminAuth] Profile fetch error:', profileError.message);
+  }
+
   if (!profile || (profile.role !== 'admin' && profile.role !== 'superadmin')) {
+    console.warn(`[AdminAuth] Access denied for ${user.email}. Role: ${profile?.role}`);
     return res.status(403).json({ error: 'Access denied. Admin role required.' });
   }
 
+  console.log(`[AdminAuth] Admin verified: ${user.email} (${profile.role})`);
   req.user = { ...user, role: profile.role };
   next();
 }
@@ -797,83 +846,69 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
 
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const { search } = req.query;
-  // Select users joined with their active subscription and assigned server
-  let query = supabase
-    .from('users')
-    .select(`
-      *,
-      subscriptions (
-        id,
-        status,
-        expires_at,
-        traffic_limit_mb,
-        traffic_used_mb,
-        server_id,
-        v2ray_config,
-        vpn_servers (
-          name,
-          location_code
+  const requestId = Math.random().toString(36).substring(7);
+  const startTime = Date.now();
+  console.log(`[AdminAPI][${requestId}] GET /api/admin/users start. Search: ${search || 'none'}`);
+
+  try {
+    let query = supabase
+      .from('users')
+      .select(`
+        *,
+        subscriptions (
+          id,
+          status,
+          expires_at,
+          traffic_limit_mb,
+          traffic_used_mb,
+          server_id,
+          v2ray_config,
+          vpn_servers (
+            name,
+            location_code
+          )
         )
-      )
-    `)
-    .order('created_at', { ascending: false });
+      `)
+      .order('created_at', { ascending: false });
 
-  if (search) {
-    query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
-  }
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
+    }
 
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-  
-  if (!data || !Array.isArray(data)) {
-    return res.json([]);
-  }
+    const { data, error } = await query;
+    if (error) {
+       console.error(`[AdminAPI][${requestId}] Supabase error:`, error.message);
+       return res.status(500).json({ error: error.message });
+    }
 
-  const now = new Date().toISOString();
+    if (!data) return res.json([]);
 
-    // Transform data to flatten active subscription info
     const transformed = data.map((u: any) => {
-      let rawSubs = u.subscriptions || [];
-      let subscriptions: any[] = [];
-      if (Array.isArray(rawSubs)) {
-        subscriptions = rawSubs;
-      } else if (rawSubs && typeof rawSubs === 'object') {
-        subscriptions = [rawSubs];
-      }
+      let subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
+      const activeSub = subscriptions.find((s: any) => s.status === 'active') || subscriptions[0];
       
-      // Find active subscription: must be 'active'. 
-      // We take the latest one even if expired to show server assignment in admin
-      const sortedSubs = [...subscriptions].filter(Boolean).sort((a, b) => {
-        const da = a.expires_at ? new Date(a.expires_at).getTime() : 0;
-        const db = b.expires_at ? new Date(b.expires_at).getTime() : 0;
-        return db - da;
-      });
-
-      const activeSub = sortedSubs.find((s: any) => s.status === 'active');
-
-      let serverName = 'VPN Сервер';
-      if (activeSub) {
+      let serverName = 'Не назначен';
+      if (activeSub?.vpn_servers) {
         let vpnServer = activeSub.vpn_servers;
-        // Supabase join can return array or object
         if (Array.isArray(vpnServer)) vpnServer = vpnServer[0];
         if (vpnServer?.name) serverName = vpnServer.name;
       }
-      
+
       return {
         ...u,
         active_subscription: activeSub ? {
-          id: activeSub.id,
-          expires_at: activeSub.expires_at,
-          traffic_used_mb: activeSub.traffic_used_mb || 0,
-          traffic_limit_mb: activeSub.traffic_limit_mb || 0,
-          server_id: activeSub.server_id,
+          ...activeSub,
           server_name: serverName
         } : null
       };
     });
 
-    console.log(`[ADMIN] Fetched ${data.length} users. ${transformed.filter(u => u.active_subscription).length} have active subscriptions.`);
+    console.log(`[AdminAPI][${requestId}] GET /api/admin/users finished in ${Date.now() - startTime}ms. Count: ${transformed.length}`);
     res.json(transformed);
+  } catch (err: any) {
+    console.error(`[AdminAPI][${requestId}] Critical error:`, err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
@@ -895,9 +930,25 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
 
     if (subErr || !sub) return res.status(404).json({ error: 'Active subscription not found for this user' });
     
+    if (sub.server_id === newServerId) {
+      return res.status(400).json({ error: 'Пользователь уже находится на этом сервере' });
+    }
+
     // 2. Get old and new server instances
+    console.log(`[MoveServer] Step 1: Connecting to servers. Old: ${sub.server_id}, New: ${newServerId}`);
     const { instance: oldXui } = await getXuiForServer(sub.server_id);
     const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
+    
+    // Check connection to NEW server first - if it's down, don't even start
+    try {
+      await Promise.race([
+        newXui.login(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('New server unreachable')), 7000))
+      ]);
+    } catch (e: any) {
+      console.error(`❌ Target server ${newServerId} is unreachable:`, e.message);
+      return res.status(503).json({ error: `Целевой сервер недоступен: ${e.message}` });
+    }
     
     // 3. Parse devices
     const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
@@ -946,6 +997,10 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
         console.log(`➕ Adding client ${device.email} to new server [${newXui.host}] inbound ${targetInboundId}...`);
         const finalConfig = await newXui.addClient(device.email, device.uuid, targetInboundId, expiryTime, limitBytes);
         
+        if (!finalConfig || finalConfig.includes('security=none')) {
+          throw new Error(`Получен невалидный или небезопасный конфиг для ${device.email}`);
+        }
+
         console.log(`✅ Client ${device.email} migrated. New config: ${finalConfig.substring(0, 60)}...`);
         
         migratedDevices.push({
@@ -954,12 +1009,13 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
         });
       } catch (addErr: any) {
         console.error(`❌ Failed to add client ${device.email} to new server:`, addErr.message);
-        const fallbackConfig = newXui.generateVlessLink(device.uuid, device.email, newServer?.domain);
-        migratedDevices.push({
-          ...device,
-          config: fallbackConfig
-        });
+        // DO NOT push fallbackConfig to migratedDevices to avoid saving broken configs to DB
+        // We skip this device, and sub will not be updated if ALL devices fail
       }
+    }
+
+    if (migratedDevices.length === 0) {
+      return res.status(500).json({ error: 'Миграция провалилась: не удалось создать валидные конфиги на новом сервере.' });
     }
 
     // 5. Update DB
@@ -1029,28 +1085,50 @@ app.post('/api/admin/sync-all', adminOnly, async (req, res) => {
 });
 
 app.get('/api/admin/servers', adminOnly, async (req, res) => {
+  console.log('[AdminAPI] Fetching servers list...');
+  const startTime = Date.now();
   try {
     const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('[AdminAPI] Supabase error fetching servers:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    
+    console.log(`[AdminAPI] Found ${servers.length} servers in DB. Enriching with stats...`);
     
     const enrichedServers = await Promise.all(servers.map(async (server) => {
       try {
+        const statsPromise = (async () => {
+             const { instance } = await getXuiForServer(server.id);
+             // Use very short timeout for "live" stats to prevent hanging admin UI
+             const shortConfig = (url: string) => getRequestConfig(url, { 'Cookie': instance['sessionCookie'] }, 3000);
+             
+             // Check if we can even login first if needed
+             if (!instance['sessionCookie']) {
+               await instance.login();
+             }
+
+             const onlines = await instance.getOnlines();
+             const clients = await instance.listClients();
+             return { 
+               onlineCount: (onlines || []).length,
+               clientCount: (clients || []).length 
+             };
+        })();
+
+        // Race against a 5-second timeout per server (reduced from 8s)
+        const timeoutPromise = new Promise<{onlineCount: number, clientCount: number}>((resolve) => 
+          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 5000)
+        );
+
         const [subCount, xuiStats] = await Promise.all([
           supabase
             .from('subscriptions')
             .select('*', { count: 'exact', head: true })
             .eq('server_id', server.id)
             .eq('status', 'active'),
-          (async () => {
-             const { instance } = await getXuiForServer(server.id);
-             const onlines = await instance.getOnlines();
-             const clients = await instance.listClients();
-             return { 
-               onlineCount: onlines.length,
-               clientCount: clients.length 
-             };
-          })().catch(err => {
-            console.warn(`Could not fetch online count for server ${server.id}:`, err.message);
+          Promise.race([statsPromise, timeoutPromise]).catch(err => {
+            console.warn(`[AdminAPI] Could not fetch stats for server ${server.id}:`, err.message);
             return { onlineCount: 0, clientCount: 0 };
           })
         ]);
@@ -1061,18 +1139,22 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
           online_users: xuiStats.onlineCount,
           xui_total_clients: xuiStats.clientCount
         };
-      } catch (err) {
+      } catch (err: any) {
+        console.error(`[AdminAPI] Error enriching server ${server.id}:`, err.message);
         return {
           ...server,
           total_users: 0,
           online_users: 0,
-          error: true
+          error: true,
+          errorMessage: err.message
         };
       }
     }));
 
+    console.log(`[AdminAPI] Successfully enriched all servers in ${Date.now() - startTime}ms.`);
     res.json(enrichedServers);
   } catch (err: any) {
+    console.error('[AdminAPI] Critical error in GET /api/admin/servers:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1177,11 +1259,25 @@ app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
 });
 
 // 💰 Subscription config endpoint for apps (V2Ray/Hiddify)
+app.get('/api/sub-url/:id', async (req, res) => {
+  // Priority: 1. PUBLIC_URL, 2. VITE_API_URL, 3. Host detection
+  const publicUrl = process.env.PUBLIC_URL || process.env.VITE_API_URL || '';
+  let base = publicUrl.replace(/\/$/, '');
+  
+  if (!base) {
+    base = `${req.protocol}://${req.get('host')}`;
+  }
+  
+  console.log(`[SubURL] Request from ${req.get('origin') || 'Unknown'}, returning: ${base}/api/sub/${req.params.id}`);
+  res.json({ url: `${base}/api/sub/${req.params.id}` });
+});
+
 app.get('/api/sub/:id', async (req, res) => {
   const { id } = req.params;
   const userAgent = req.headers['user-agent'] || '';
   
-  console.log(`📡 Subscription request for ID: ${id}, UA: ${userAgent}`);
+  const requestId = Math.random().toString(36).substring(7);
+  console.log(`[SubAPI][${requestId}] Request for ID: ${id}, UA: ${userAgent}`);
   
   const { data: sub, error } = await supabase
     .from('subscriptions')
@@ -1190,14 +1286,14 @@ app.get('/api/sub/:id', async (req, res) => {
     .single();
 
   if (error || !sub) {
-    console.warn(`❌ Subscription not found: ${id}`);
+    console.warn(`[SubAPI][${requestId}] Subscription not found: ${id}`);
     return res.status(404).send('Subscription not found');
   }
 
   const now = new Date();
   const expires = new Date(sub.expires_at);
   if (sub.status !== 'active' || expires < now) {
-    console.warn(`⚠️ Subscription inactive or expired: ${id}`);
+    console.warn(`[SubAPI][${requestId}] Inactive or expired: ${id}. Status: ${sub.status}, Expires: ${sub.expires_at}`);
     return res.status(403).send('Subscription expired or inactive');
   }
 
@@ -1218,22 +1314,30 @@ app.get('/api/sub/:id', async (req, res) => {
   // V2Ray apps expect Base64 encoded list of links
   const configLines = configText.split('\n')
     .map(l => l.trim())
-    .filter(line => line.startsWith('vless://'))
+    .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
     .join('\n');
   
-  // Hiddify likes it when the list ends with a newline before base64
-  const base64Config = Buffer.from(configLines + (configLines ? '\n' : '')).toString('base64');
+  if (!configLines) {
+    console.warn(`⚠️ No valid links found for subscription: ${id}`);
+    return res.status(200).send(''); 
+  }
+
+  const base64Config = Buffer.from(configLines).toString('base64');
   
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Cache-Control', 'public, max-age=60');
   
-  // Hiddify and clients like it use this header for stats
+  // Standard headers for V2Ray/Hiddify
+  res.setHeader('profile-title', 'izinet-vpn');
+  res.setHeader('profile-update-interval', '6'); // update every 6 hours
+  
   const used = Math.floor((sub.traffic_used_mb || 0) * 1024 * 1024);
   const total = Math.floor((sub.traffic_limit_mb || 0) * 1024 * 1024);
   const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
   res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
   
-  console.log(`✅ Subscription delivered: ${id}, links count: ${configLines ? configLines.split('\n').length : 0}`);
+  console.log(`[SubAPI][${requestId}] ✅ Delivered nodes: ${configLines.split('\n').filter(Boolean).length}`);
+  console.log(`[SubAPI][${requestId}] 📋 Config sample: ${configLines.substring(0, 100)}...`);
   res.send(base64Config);
 });
 
@@ -1289,7 +1393,17 @@ app.post('/api/pay/create', async (req, res) => {
   }
 });
 
-// 📊 Sync user traffic manually
+// 📊 Sync user traffic manually with throttling
+const lastSyncMap = new Map<string, number>();
+
+// BUG-10: Memory leak fix - clean up old sync timestamps every 10 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [userId, ts] of lastSyncMap.entries()) {
+    if (ts < cutoff) lastSyncMap.delete(userId);
+  }
+}, 10 * 60 * 1000);
+
 app.post('/api/subscription/sync-traffic', async (req, res) => {
   const { userId } = req.body;
   const authHeader = req.headers.authorization;
@@ -1297,6 +1411,13 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
   if (!userId) {
     return res.status(400).json({ error: 'Missing userId' });
   }
+
+  // Throttle: Max once per 30 seconds to keep UI snappy
+  const now = Date.now();
+  if (lastSyncMap.has(userId) && (now - lastSyncMap.get(userId)!) < 30000) {
+    return res.json({ success: true, message: 'Already synced recently' });
+  }
+  lastSyncMap.set(userId, now);
 
   // Security check: Verify token
   if (authHeader) {
@@ -1663,10 +1784,8 @@ setInterval(() => processedEventIds.clear(), 30000);
 function setupRealtimeListener() {
   console.log('🔄 Setting up Unified Realtime DB Listener...');
   
-  // Create a single channel for all support-related changes
   const supportChannel = supabase
     .channel('support-realtime-unified')
-    // 1. Support Tickets
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'support_tickets' },
@@ -1693,7 +1812,6 @@ function setupRealtimeListener() {
         }
       }
     )
-    // 2. Support Messages
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'support_messages', filter: "sender=eq.user" },
@@ -1723,7 +1841,6 @@ function setupRealtimeListener() {
         }
       }
     )
-    // 3. Subscriptions (Manual Sync)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'subscriptions' },
@@ -1754,6 +1871,13 @@ function setupRealtimeListener() {
     )
     .subscribe((status) => {
       console.log(`📡 [Realtime] Unified Channel Status: ${status}`);
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.error('📡 Realtime connection lost. Reconnecting in 5s...');
+        setTimeout(() => {
+          supabase.removeChannel(supportChannel);
+          setupRealtimeListener();
+        }, 5000);
+      }
     });
 }
 
@@ -1775,6 +1899,12 @@ async function syncUserTraffic(userId: string) {
     .maybeSingle();
 
   if (!sub) return null;
+
+  // BUG-07: Handle server_id = null (legacy subscriptions or direct DB entries)
+  if (!sub.server_id && !process.env.XUI_HOST) {
+    console.debug(`[Sync] Skipping traffic sync for ${userId}: no server_id and no default XUI_HOST`);
+    return sub;
+  }
 
   // Get correct XUI instance
   const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
@@ -1944,67 +2074,58 @@ const showMainMenu = (ctx: any) => {
   });
 };
 
-let isBotLaunching = false;
+let botLaunchPromise: Promise<void> | null = null;
 
-async function launchBot(retries = 10) {
-  if (!bot || isBotLaunching) return;
-  isBotLaunching = true;
-
-  try {
-    console.log('🤖 Telegram Bot: Starting launch sequence...');
-    
-    // 1. Try to stop any existing polling in this instance
+async function launchBot(retries = 10): Promise<void> {
+  if (botLaunchPromise) return botLaunchPromise;
+  
+  botLaunchPromise = (async () => {
     try {
-      await bot.stop();
-    } catch (e) {
-      // Ignore errors during stop
-    }
-    
-    // 2. Always clear webhook and drop pending updates to avoid 409 and spam
-    console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
-    try {
-      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    } catch (e: any) {
-      console.warn('⚠️ Telegram Bot: Failed to delete webhook:', e.message);
-    }
-    
-    // 3. Significant delay to let Telegram settle
-    const settlementDelay = 20000; // 20s for Vercel/multi-instance environments
-    console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
-    await new Promise(resolve => setTimeout(resolve, settlementDelay));
-    
-    // 4. Force delete webhook again just before launch
-    try {
-      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    } catch(e) {}
-    // 4. Launch polling
-    await bot.launch({
-      allowedUpdates: ['message', 'callback_query'],
-      dropPendingUpdates: true
-    });
-    
-    console.log('✅ Telegram Bot: Started successfully');
-    isBotLaunching = false;
-  } catch (err: any) {
-    isBotLaunching = false;
-    
-    if (err.response?.error_code === 409) {
-      if (retries > 0) {
-        const delay = 30000; // 30 seconds
-        console.warn(`⚠️ Telegram Bot: Conflict (409). Retrying in ${delay/1000}s... (${retries} attempts left)`);
-        // Force drop webhook before retry
-        try { await bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch(e) {}
-        setTimeout(() => launchBot(retries - 1), delay);
+      console.log('🤖 Telegram Bot: Starting launch sequence...');
+      
+      // Always clear webhook and drop pending updates to prevent 409 and spam
+      console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
+      try {
+        await bot!.telegram.deleteWebhook({ drop_pending_updates: true });
+      } catch (e: any) {
+        console.warn('⚠️ Telegram Bot: Failed to delete webhook during launch:', e.message);
+      }
+      
+      // Small delay to let Telegram settle
+      const settlementDelay = 5000; 
+      console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
+      await new Promise(resolve => setTimeout(resolve, settlementDelay));
+      
+      await bot!.launch({
+        allowedUpdates: ['message', 'callback_query'],
+        dropPendingUpdates: true
+      });
+      
+      console.log('✅ Telegram Bot: Started successfully');
+    } catch (err: any) {
+      if (err.response?.error_code === 409) {
+        if (retries > 0) {
+          const delay = 30000; 
+          console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          botLaunchPromise = null; 
+          return launchBot(retries - 1);
+        } else {
+          console.error('❌ Telegram Bot: Launch failed. Conflict 409 persists.');
+        }
       } else {
-        console.error('❌ Telegram Bot: Launch failed after multiple retries due to 409 Conflict.');
+        console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          botLaunchPromise = null;
+          return launchBot(retries - 1);
+        }
       }
-    } else {
-      console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
-      if (retries > 0) {
-        setTimeout(() => launchBot(retries - 1), 5000);
-      }
+      botLaunchPromise = null;
     }
-  }
+  })();
+
+  return botLaunchPromise;
 }
 
 if (bot) {
@@ -2076,31 +2197,21 @@ if (bot) {
         return ctx.reply('⚠️ Ваш Telegram не привязан к аккаунту izinet. Сначала привяжите его в личном кабинете на сайте или войдите через Email.');
       }
 
-      // 2. Generate Magic Link
       const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
         type: 'magiclink',
         email: userData.email,
-        options: {
-          redirectTo: `${process.env.APP_URL || 'https://izinet.app'}/dashboard`
-        }
+        options: { redirectTo: `${process.env.APP_URL || 'https://izinet.app'}/dashboard` }
       });
 
       if (linkErr) throw linkErr;
 
-      return ctx.reply('🔑 Нажмите на кнопку ниже, чтобы войти в свой аккаунт izinet:', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🚀 Войти в личный кабинет', url: linkData.properties.action_link }]
-          ]
-        }
+      return ctx.reply('🔑 Нажмите для входа:', {
+        reply_markup: { inline_keyboard: [[{ text: '🚀 Войти', url: linkData.properties.action_link }]] }
       });
-    } catch (error) {
-      console.error('Bot auth error:', error);
-      return ctx.reply('❌ Ошибка при генерации ссылки для входа.');
+    } catch (e) {
+      return ctx.reply('❌ Ошибка входа.');
     }
   }
-
-  // Generic welcome
   return showMainMenu(ctx);
   });
 
@@ -2148,38 +2259,19 @@ if (bot) {
     ctx.answerCbQuery();
     if (!ctx.chat) return;
     botSessions.set(ctx.chat.id, { state: 'support' });
-    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш специалист ответит вам.\n\nДля выхода из режима поддержки нажмите кнопку ниже.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '❌ Выйти из режима поддержки', callback_data: 'action_exit_mode' }]]
-      }
-    });
+    ctx.reply('🎧 Вы перешли в режим поддержки.\nНапишите ваш вопрос следующим сообщением, и наш администратор ответит вам здесь же.');
   });
 
-  bot.action('action_password', (ctx) => {
+  bot.action('action_password', async (ctx) => {
     ctx.answerCbQuery();
     if (!ctx.chat) return;
     botSessions.set(ctx.chat.id, { state: 'password' });
-    ctx.reply('🔑 Введите новый пароль для вашего аккаунта (минимум 8 символов):\n\nДля отмены нажмите кнопку ниже.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'action_exit_mode' }]]
-      }
-    });
+    ctx.reply('🔑 Введите новый пароль для вашего аккаунта (минимум 8 символов):');
   });
 
   bot.action('action_help', (ctx) => {
     ctx.answerCbQuery();
-    ctx.reply(`Доступные команды:\n• Моя подписка и баланс\n• Связаться с поддержкой\n• Сменить пароль\n\nВсё это доступно в главном меню командой /start`);
-  });
-
-  bot.action('action_exit_mode', (ctx) => {
-    ctx.answerCbQuery();
-    if (!ctx.chat) return;
-    botSessions.delete(ctx.chat.id);
-    ctx.reply('✅ Вы вернулись в обычный режим.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
-      }
-    });
+    ctx.reply('❓ Инструкция:\n1. Скачайте приложение Hiddify или V2Ray.\n2. В личном кабинете на сайте скопируйте ссылку подписки.\n3. Вставьте ссылку в приложение.\n\nЕсли возникли сложности — напишите в поддержку.');
   });
 
   bot.action('action_menu', (ctx) => {
@@ -2187,192 +2279,116 @@ if (bot) {
     return showMainMenu(ctx);
   });
 
-  // Handle all other text messages
   bot.on('text', async (ctx) => {
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
 
-    // Check if admin is replying to a forwarded user message
     if (botAdminId && chatId.toString() === botAdminId.toString()) {
       const replyToMsg = ctx.message.reply_to_message;
       if (replyToMsg) {
-        // Fallback or explicit mapping check for live-chat TG-TG
         const originalChatId = adminReplyMap.get(replyToMsg.message_id);
         if (originalChatId) {
           try {
             await ctx.telegram.sendMessage(originalChatId, `💬 Сообщение от поддержки:\n\n${text}`);
-            return;
+            return ctx.reply('✅ Ответ отправлен.');
           } catch(e) {
-            console.error('Failed to send reply to user', e);
-            return ctx.reply('❌ Ошибка отправки ответа пользователю.');
+            return ctx.reply('❌ Ошибка отправки.');
           }
         }
-        
-        // --- NEW: Handle replies to UI Tickets ---
         if ('text' in replyToMsg && replyToMsg.text) {
           const match = replyToMsg.text.match(/ID Тикета:\s*([a-f0-9\-]+)/i);
           if (match && match[1]) {
-            const ticketId = match[1];
             try {
-              // Check if ticket exists first? Just insert message.
               await supabase.from('support_messages').insert({
-                ticket_id: ticketId,
+                ticket_id: match[1],
                 sender: 'admin',
                 content: text
               });
-              
-              // Also update ticket status to in_progress or somewhat
-              // await supabase.from('support_tickets').update({status: 'in_progress'}).eq('id', ticketId);
-              
-              ctx.reply('✅ Ответ доставлен пользователю в интерфейс приложения.');
-              return;
+              return ctx.reply('✅ Ответ в тикет доставлен.');
             } catch(e) {
-              console.error('Failed to save admin reply to db', e);
-              return ctx.reply('❌ Ошибка сохранения ответа в базу данных.');
+              return ctx.reply('❌ Ошибка БД.');
             }
           }
         }
       }
     }
 
-    // Check user sessions
     const session = botSessions.get(chatId);
-    
     if (session?.state === 'support') {
-      if (!botAdminId) {
-         return ctx.reply('К сожалению, поддержка сейчас недоступна.');
-      }
+      if (!botAdminId) return ctx.reply('Поддержка недоступна.');
       try {
         const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
-        // Send to admin
-        const sentMsg = await ctx.telegram.sendMessage(botAdminId, `🆘 Вопрос от пользователя ${username} (ID: ${chatId}):\n\n${text}`);
-        // Save mapping so admin can reply
+        const sentMsg = await ctx.telegram.sendMessage(botAdminId, `🆘 Вопрос от ${username} (${chatId}):\n\n${text}`);
         adminReplyMap.set(sentMsg.message_id, chatId);
-        ctx.reply('✅ Ваше сообщение отправлено в поддержку. Ожидайте ответа (можно писать ещё сообщения, мы их получим).');
-      } catch (error) {
-         console.error('Failed to forward to admin', error);
-         ctx.reply('❌ Ошибка связи с сервером поддержки.');
+        ctx.reply('✅ Сообщение отправлено.');
+      } catch (e) {
+         ctx.reply('❌ Ошибка отправки.');
       }
       return;
     }
 
     if (session?.state === 'password') {
-      if (text.length < 8) {
-        return ctx.reply('⚠️ Пароль должен содержать минимум 8 символов. Попробуйте еще раз:');
-      }
-
-      // Reset password logic
+      if (text.length < 8) return ctx.reply('⚠️ Пароль короткий.');
       try {
-        // Find user
-        const { data: userData, error: userErr } = await supabase
-          .from('users')
-          .select('id')
-          .eq('telegram_id', chatId.toString())
-          .single();
-
-        if (userErr || !userData) {
-          botSessions.delete(chatId);
-          return ctx.reply('⚠️ Ваш Telegram не привязан к аккаунту izinet. Невозможно сменить пароль.');
-        }
-
-        const { error: updateErr } = await supabase.auth.admin.updateUserById(userData.id, {
-          password: text
-        });
-
-        if (updateErr) throw updateErr;
-
+        const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId.toString()).single();
+        if (!user) return ctx.reply('Аккаунт не найден.');
+        await supabase.auth.admin.updateUserById(user.id, { password: text });
         botSessions.delete(chatId);
-        ctx.reply('✅ Пароль успешно изменен! Вы можете использовать его для входа.', {
-          reply_markup: {
-            inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
-          }
-        });
-      } catch (error) {
-        console.error('Password change error', error);
-        ctx.reply('❌ Ошибка при смене пароля. Попробуйте позже.');
+        ctx.reply('✅ Пароль изменен!', { reply_markup: { inline_keyboard: [[{ text: '◀️ В меню', callback_data: 'action_menu' }]] } });
+      } catch (e) {
+        ctx.reply('❌ Ошибка.');
       }
       return;
     }
 
-    // Default reply if no session and not a command
-    ctx.reply('Я не понимаю эту команду. Воспользуйтесь меню.', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '◀️ В главное меню', callback_data: 'action_menu' }]]
-      }
-    });
+    ctx.reply('Используйте меню.', { reply_markup: { inline_keyboard: [[{ text: '◀️ В меню', callback_data: 'action_menu' }]] } });
   });
-
 }
 
-// --- Vite Middleware ---
+// --- Lifecycle ---
 
 async function startServer() {
-  console.log('🚀 Starting izinet server...');
+  const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production_docker";
+  console.log(`🚀 Starting izinet server... (Mode: ${isProd ? 'PRODUCTION' : 'DEVELOPMENT'})`);
   
-  // Check all active VPN servers on startup
+  // DNS Diagnostics
   try {
-    const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
-    if (servers) {
-      console.log(`📡 Found ${servers.length} active VPN servers in DB. Checking connections...`);
-      for (const server of servers) {
-        const { instance } = await getXuiForServer(server.id);
-        const ok = await instance.checkConfig();
-        console.log(`${ok ? '✅' : '❌'} Connection to server "${server.name}" (${server.id}): ${ok ? 'OK' : 'FAILED'}`);
+    const dns = await import('node:dns/promises');
+    const result = await dns.resolve('google.com');
+    console.log('🌐 DNS Check: OK (google.com resolved)');
+  } catch (dnsErr) {
+    console.error('❌ DNS Check: FAILED. Containers might not have internet access or DNS is blocked.');
+  }
+
+  try {
+    const { data: servers, error: dbErr } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
+    if (dbErr) {
+      console.error('❌ Supabase connection error:', dbErr.message);
+    } else if (servers) {
+      console.log(`📡 Connected to Supabase. Found ${servers.length} active servers.`);
+      for (const s of servers) {
+        getXuiForServer(s.id).then(({instance}) => instance.checkConfig());
       }
     }
   } catch (err) {
-    console.error('❌ Failed to check VPN servers on startup:', err);
+    console.error('❌ Startup error:', err);
   }
   
-  // Setup Realtime DB Listener for manual syncing
-  try {
-    setupRealtimeListener();
-  } catch (e) {
-    console.error('❌ Failed to setup realtime listener:', e);
-  }
-
-  // Initial traffic sync and schedule every 15 minutes
+  setupRealtimeListener();
   syncTrafficStats();
   setInterval(syncTrafficStats, 15 * 60 * 1000);
 
-  // Logging middleware to debug API routes and 405 errors
-  app.use((req, res, next) => {
-    if (req.url.startsWith('/api')) {
-      console.log(`[API] ${req.method} ${req.url}`);
-    }
-    next();
-  });
+  if (bot) launchBot();
 
-  // Launch Telegram Bot with retry logic
-  if (bot) {
-    launchBot();
-  } else {
-    console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
-  }
-
-  console.log('🛠️ Configuring Vite middleware...');
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+  if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
-    
-    // Catch-all for dev mode if Vite middleware didn't handle it
-    app.get('*', async (req, res, next) => {
-      if (req.url.startsWith('/api')) return next();
-      try {
-        const template = await vite.transformIndexHtml(req.url, '<html>...</html>'); // Minimal template
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) {
-        next(e);
-      }
-    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (req, res, next) => {
+      if (req.url.startsWith('/api')) return next();
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -2384,7 +2400,6 @@ async function startServer() {
 
 startServer();
 
-// Enable graceful stop
 if (bot) {
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));

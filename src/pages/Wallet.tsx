@@ -34,7 +34,8 @@ export default function Wallet() {
 
     setIsProcessing(true);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || '';
+      const envUrl = import.meta.env.VITE_API_URL;
+      const apiUrl = (envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : window.location.origin;
       const { data: { session } } = await supabase.auth.getSession();
       
       const response = await fetch(`${apiUrl}/api/pay/create`, {

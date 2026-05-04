@@ -1,23 +1,37 @@
-# Используем легковесный образ Node.js
-FROM node:20-alpine
-
-# Рабочая директория внутри контейнера
+# Этап сборки (Builder)
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Копируем файлы зависимостей
+# Копируем зависимости
 COPY package.json package-lock.json* ./
-
-# Устанавливаем зависимости
 RUN npm install
 
-# Копируем весь исходный код
+# Копируем исходный код
 COPY . .
 
-# Собираем frontend (React/Vite)
+# Объявляем аргументы сборки для фронтенда (Vite)
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Устанавливаем их в окружение для процесса сборки
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
+# Собираем проект (билд фронтенда)
 RUN npm run build
 
-# Указываем, что контейнер будет слушать порт 3000
+# Этап выполнения (Runner)
+FROM node:20-alpine
+WORKDIR /app
+
+# Копируем только необходимые файлы из билдера
+COPY --from=builder /app ./
+
+# Указываем окружение
+ENV NODE_ENV=production_docker
+
+# Открываем порт
 EXPOSE 3000
 
-# Команда для запуска нашего full-stack сервера
+# Запуск
 CMD ["npm", "run", "start"]

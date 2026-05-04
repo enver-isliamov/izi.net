@@ -29,8 +29,16 @@ export default function AdminServers() {
         console.error('Invalid servers data:', data);
         setServers([]);
       }
-    } catch (e) {
-      toast.error('Ошибка загрузки серверов. Убедитесь, что бэкенд доступен и VITE_API_URL настроен.');
+    } catch (e: any) {
+      const status = e.response?.status;
+      const errorData = e.response?.data?.error || e.message;
+      console.error('Fetch servers error:', e);
+      
+      if (status === 401 || status === 403) {
+        toast.error(`Доступ запрещен (Ошибка ${status}): У вас недостаточно прав администратора.`);
+      } else {
+        toast.error(`Ошибка загрузки серверов (${status || 'Network Error'}): ${errorData}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -80,10 +88,14 @@ export default function AdminServers() {
         toast.error(`Ошибка: ${data.message}`, { id: 'check-conn' });
       }
     } catch (e: any) {
-      if (e.response?.status === 404 || e.message === 'Network Error') {
-        toast.error('Бэкенд API недоступен (настройте VITE_API_URL)', { id: 'check-conn' });
+      console.error('Check connection error:', e);
+      const status = e.response?.status;
+      const errorData = e.response?.data?.error || e.message;
+      
+      if (status === 404) {
+        toast.error('Маршрут /api/admin/servers/:id/check не найден на сервере.', { id: 'check-conn' });
       } else {
-        toast.error(`Ошибка соединения: ${e.response?.data?.error || e.message}`, { id: 'check-conn' });
+        toast.error(`Ошибка соединения (${status || 'Network'}): ${errorData}`, { id: 'check-conn' });
       }
     } finally {
       setIsChecking(null);

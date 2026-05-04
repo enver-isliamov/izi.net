@@ -17,11 +17,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
+import { cn, copyToClipboard } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import axios from 'axios';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -31,13 +32,14 @@ export default function Dashboard() {
   const [subscription, setSubscription] = useState<any>(null);
   const [activeServer, setActiveServer] = useState<any>(null);
   const [referrals, setReferrals] = useState<any[]>([]);
+  const [subUrl, setSubUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const isFetching = React.useRef(false);
 
   const fetchDashboardData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
     
-    if (forceLoading || !userData) {
+    if (forceLoading) {
       setIsLoading(true);
     }
     
@@ -63,29 +65,47 @@ export default function Dashboard() {
       ]);
 
       const balanceRes = balanceResult.data;
-      const balanceErr = balanceResult.error;
 
-      if (userRes) {
-        setUserData(userRes);
-      }
-      
-      if (balanceRes) {
-        setBalance(balanceRes);
-      } else if (balanceErr) {
-        console.error('Error fetching balance:', balanceErr);
+      let serverData = null;
+      if (subRes?.server_id) {
+        const { data } = await supabase
+          .from('vpn_servers')
+          .select('*')
+          .eq('id', subRes.server_id)
+          .single();
+        serverData = data;
       }
 
+      setUserData(userRes);
+      setBalance(balanceRes);
       setSubscription(subRes);
       setReferrals(refRes || []);
-
-       if (subRes?.server_id) {
-         const { data: serverData } = await supabase
-           .from('vpn_servers')
-           .select('*')
-           .eq('id', subRes.server_id)
-           .single();
-         setActiveServer(serverData);
-       }
+      setActiveServer(serverData);
+      
+      // BUG-04: Fetch stable sub URL from backend
+      if (subRes?.id) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          // Используем axios.defaults.baseURL как основной источник правды
+          const apiBase = axios.defaults.baseURL || window.location.origin;
+          
+          const subUrlRes = await fetch(`${apiBase}/api/sub-url/${subRes.id}`, {
+            headers: { 'Authorization': `Bearer ${session?.access_token}` }
+          });
+          
+          if (subUrlRes.ok) {
+            const { url } = await subUrlRes.json();
+            setSubUrl(url);
+          } else {
+            setSubUrl(`${apiBase}/api/sub/${subRes.id}`);
+          }
+        } catch (err) {
+          console.debug('Failed to fetch stable sub URL, using fallback:', err);
+          const apiBase = axios.defaults.baseURL || window.location.origin;
+          setSubUrl(`${apiBase}/api/sub/${subRes.id}`);
+        }
+      }
+      
     } catch (error) {
       console.error('Dashboard data fetch error:', error);
     } finally {
@@ -357,7 +377,7 @@ export default function Dashboard() {
                       <div className="relative flex-1">
                         <input 
                           readOnly 
-                          value={`${window.location.origin}/api/sub/${subscription.id}`}
+                          value={subUrl}
                           className="w-full bg-background/50 border border-border/50 rounded-xl px-3 py-2 text-[10px] font-mono focus:outline-none"
                         />
                       </div>
@@ -365,9 +385,13 @@ export default function Dashboard() {
                         size="sm" 
                         variant="secondary"
                         className="rounded-xl px-3 bg-primary/10 hover:bg-primary/20 text-primary" 
-                        onClick={() => {
-                          navigator.clipboard.writeText(`${window.location.origin}/api/sub/${subscription.id}`);
-                          toast.success("Ссылка для подписки скопирована");
+                        onClick={async () => {
+                          const success = await copyToClipboard(subUrl);
+                          if (success) {
+                            toast.success("Ссылка для подписки скопирована");
+                          } else {
+                            toast.error("Не удалось скопировать. Попробуйте выделить текст вручную.");
+                          }
                         }}
                       >
                         <Copy className="w-3.5 h-3.5" />
@@ -411,9 +435,13 @@ export default function Dashboard() {
                           size="sm" 
                           variant="secondary" 
                           className="flex-1 text-[11px] h-9 rounded-xl font-medium"
-                          onClick={() => {
-                            navigator.clipboard.writeText(device.config);
-                            toast.success(`Ключ скопирован (${device.label})`);
+                          onClick={async () => {
+                            const success = await copyToClipboard(device.config);
+                            if (success) {
+                              toast.success(`Ключ скопирован (${device.label})`);
+                            } else {
+                              toast.error("Ошибка копирования");
+                            }
                           }}
                         >
                           Копировать
