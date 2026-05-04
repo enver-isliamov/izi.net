@@ -1218,22 +1218,29 @@ app.get('/api/sub/:id', async (req, res) => {
   // V2Ray apps expect Base64 encoded list of links
   const configLines = configText.split('\n')
     .map(l => l.trim())
-    .filter(line => line.startsWith('vless://'))
+    .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
     .join('\n');
   
-  // Hiddify likes it when the list ends with a newline before base64
-  const base64Config = Buffer.from(configLines + (configLines ? '\n' : '')).toString('base64');
+  if (!configLines) {
+    console.warn(`⚠️ No valid links found for subscription: ${id}`);
+    return res.status(200).send(''); 
+  }
+
+  const base64Config = Buffer.from(configLines).toString('base64');
   
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Cache-Control', 'public, max-age=60');
   
-  // Hiddify and clients like it use this header for stats
+  // Standard headers for V2Ray/Hiddify
+  res.setHeader('profile-title', 'izinet-vpn');
+  res.setHeader('profile-update-interval', '6'); // update every 6 hours
+  
   const used = Math.floor((sub.traffic_used_mb || 0) * 1024 * 1024);
   const total = Math.floor((sub.traffic_limit_mb || 0) * 1024 * 1024);
   const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
   res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
   
-  console.log(`✅ Subscription delivered: ${id}, links count: ${configLines ? configLines.split('\n').length : 0}`);
+  console.log(`✅ Subscription delivered: ${id}, nodes: ${configLines.split('\n').length}`);
   res.send(base64Config);
 });
 
@@ -1289,7 +1296,9 @@ app.post('/api/pay/create', async (req, res) => {
   }
 });
 
-// 📊 Sync user traffic manually
+// 📊 Sync user traffic manually with throttling
+const lastSyncMap = new Map<string, number>();
+
 app.post('/api/subscription/sync-traffic', async (req, res) => {
   const { userId } = req.body;
   const authHeader = req.headers.authorization;
@@ -1297,6 +1306,13 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
   if (!userId) {
     return res.status(400).json({ error: 'Missing userId' });
   }
+
+  // Throttle: Max once per 30 seconds to keep UI snappy
+  const now = Date.now();
+  if (lastSyncMap.has(userId) && (now - lastSyncMap.get(userId)!) < 30000) {
+    return res.json({ success: true, message: 'Already synced recently' });
+  }
+  lastSyncMap.set(userId, now);
 
   // Security check: Verify token
   if (authHeader) {

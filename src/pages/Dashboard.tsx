@@ -23,21 +23,32 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
+// Simple memory cache for faster tab switching
+let dashboardCache: any = null;
+let lastFetchTime = 0;
+const CACHE_TTL = 30000; // 30 seconds
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [userData, setUserData] = useState<any>(null);
-  const [balance, setBalance] = useState<any>(null);
-  const [subscription, setSubscription] = useState<any>(null);
-  const [activeServer, setActiveServer] = useState<any>(null);
-  const [referrals, setReferrals] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [userData, setUserData] = useState<any>(dashboardCache?.userData || null);
+  const [balance, setBalance] = useState<any>(dashboardCache?.balance || null);
+  const [subscription, setSubscription] = useState<any>(dashboardCache?.subscription || null);
+  const [activeServer, setActiveServer] = useState<any>(dashboardCache?.activeServer || null);
+  const [referrals, setReferrals] = useState<any[]>(dashboardCache?.referrals || []);
+  const [isLoading, setIsLoading] = useState(!dashboardCache);
   const isFetching = React.useRef(false);
 
   const fetchDashboardData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
     
-    if (forceLoading || !userData) {
+    // Check cache
+    const now = Date.now();
+    if (!forceLoading && dashboardCache && (now - lastFetchTime < CACHE_TTL)) {
+      return;
+    }
+
+    if (forceLoading && !dashboardCache) {
       setIsLoading(true);
     }
     
@@ -65,27 +76,34 @@ export default function Dashboard() {
       const balanceRes = balanceResult.data;
       const balanceErr = balanceResult.error;
 
-      if (userRes) {
-        setUserData(userRes);
-      }
-      
-      if (balanceRes) {
-        setBalance(balanceRes);
-      } else if (balanceErr) {
-        console.error('Error fetching balance:', balanceErr);
+      let serverData = null;
+      if (subRes?.server_id) {
+        const { data } = await supabase
+          .from('vpn_servers')
+          .select('*')
+          .eq('id', subRes.server_id)
+          .single();
+        serverData = data;
       }
 
+      const newData = {
+        userData: userRes,
+        balance: balanceRes,
+        subscription: subRes,
+        referrals: refRes || [],
+        activeServer: serverData
+      };
+
+      setUserData(userRes);
+      setBalance(balanceRes);
       setSubscription(subRes);
       setReferrals(refRes || []);
+      setActiveServer(serverData);
 
-       if (subRes?.server_id) {
-         const { data: serverData } = await supabase
-           .from('vpn_servers')
-           .select('*')
-           .eq('id', subRes.server_id)
-           .single();
-         setActiveServer(serverData);
-       }
+      // Update cache
+      dashboardCache = newData;
+      lastFetchTime = Date.now();
+      
     } catch (error) {
       console.error('Dashboard data fetch error:', error);
     } finally {
