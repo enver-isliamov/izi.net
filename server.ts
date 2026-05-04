@@ -324,15 +324,26 @@ class XUIService {
       }
 
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
       
       if (!resp.data.success || !resp.data.obj) {
-        console.warn(`[XUI] Could not fetch inbound ${effectiveInboundId} from ${this.host}. Returning fallback config.`);
-        return this.generateVlessLink(effectiveUuid, email);
+        throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
       }
       
       const inbound = resp.data.obj;
-      const streamSettings = JSON.parse(inbound.streamSettings || '{}');
+      
+      // Safety check for streamSettings: it can be a string or an object depending on XUI version
+      let streamSettings: any = {};
+      try {
+        if (typeof inbound.streamSettings === 'string') {
+          streamSettings = JSON.parse(inbound.streamSettings || '{}');
+        } else if (inbound.streamSettings && typeof inbound.streamSettings === 'object') {
+          streamSettings = inbound.streamSettings;
+        }
+      } catch (parseErr) {
+        console.error(`[XUI] Error parsing streamSettings for inbound ${effectiveInboundId}:`, parseErr);
+      }
+
       const security = streamSettings.security || 'none';
       const port = inbound.port;
       
