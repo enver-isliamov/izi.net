@@ -202,6 +202,10 @@ export default function Dashboard() {
     daysLeft = diffTime > 0 ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
   }
 
+  // Use VITE_API_URL if available, fallback to window.location.origin
+  const apiUrl = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, '');
+  const subUrl = subscription ? `${apiUrl}/api/sub/${subscription.id}` : '';
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Welcome Section */}
@@ -375,7 +379,7 @@ export default function Dashboard() {
                       <div className="relative flex-1">
                         <input 
                           readOnly 
-                          value={`${window.location.origin}/api/sub/${subscription.id}`}
+                          value={subUrl}
                           className="w-full bg-background/50 border border-border/50 rounded-xl px-3 py-2 text-[10px] font-mono focus:outline-none"
                         />
                       </div>
@@ -384,7 +388,6 @@ export default function Dashboard() {
                         variant="secondary"
                         className="rounded-xl px-3 bg-primary/10 hover:bg-primary/20 text-primary" 
                         onClick={async () => {
-                          const subUrl = `${window.location.origin}/api/sub/${subscription.id}`;
                           const success = await copyToClipboard(subUrl);
                           if (success) {
                             toast.success("Ссылка для подписки скопирована");

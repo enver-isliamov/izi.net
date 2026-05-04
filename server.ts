@@ -635,18 +635,16 @@ class XUIService {
     }
     isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
     const sni = isIP ? "" : hostName;
-    const sniPart = sni ? `&sni=${sni}` : "";
-    
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
     
     // Default to Reality-friendly fallback if we suspect it's a Reality inbound but can't fetch it
     // because Reality is the standard for izinet now.
     const isProbablyReality = port === 443 || port > 30000;
     const security = isProbablyReality ? "reality" : "tls";
-    const sniPart = sni && !isIP ? `&sni=${sni}` : (isProbablyReality ? "&sni=google.com" : "");
-    const realityParams = isProbablyReality ? "&pbk=PLEASE_REGENERATE_IN_APP&fp=chrome&sid=00000000&flow=xtls-rprx-vision" : "";
+    const finalSniPart = sni && !isIP ? `&sni=${sni}` : (isProbablyReality ? "&sni=google.com" : "");
+    const realityParams = isProbablyReality ? "&pbk=m_G-oZ...REGENERATE..._hI&fp=chrome&sid=01020304&flow=xtls-rprx-vision" : "";
     
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=${security}${sniPart}${realityParams}#${encodedEmail}`;
+    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=${security}${finalSniPart}${realityParams}#${encodedEmail}`;
   }
 }
 
@@ -1254,7 +1252,8 @@ app.get('/api/sub/:id', async (req, res) => {
   const { id } = req.params;
   const userAgent = req.headers['user-agent'] || '';
   
-  console.log(`📡 Subscription request for ID: ${id}, UA: ${userAgent}`);
+  const requestId = Math.random().toString(36).substring(7);
+  console.log(`[SubAPI][${requestId}] Request for ID: ${id}, UA: ${userAgent}`);
   
   const { data: sub, error } = await supabase
     .from('subscriptions')
@@ -1263,14 +1262,14 @@ app.get('/api/sub/:id', async (req, res) => {
     .single();
 
   if (error || !sub) {
-    console.warn(`❌ Subscription not found: ${id}`);
+    console.warn(`[SubAPI][${requestId}] Subscription not found: ${id}`);
     return res.status(404).send('Subscription not found');
   }
 
   const now = new Date();
   const expires = new Date(sub.expires_at);
   if (sub.status !== 'active' || expires < now) {
-    console.warn(`⚠️ Subscription inactive or expired: ${id}`);
+    console.warn(`[SubAPI][${requestId}] Inactive or expired: ${id}. Status: ${sub.status}, Expires: ${sub.expires_at}`);
     return res.status(403).send('Subscription expired or inactive');
   }
 
@@ -1313,7 +1312,8 @@ app.get('/api/sub/:id', async (req, res) => {
   const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
   res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
   
-  console.log(`✅ Subscription delivered: ${id}, nodes: ${configLines.split('\n').length}`);
+  console.log(`[SubAPI][${requestId}] ✅ Delivered nodes: ${configLines.split('\n').filter(Boolean).length}`);
+  console.log(`[SubAPI][${requestId}] 📋 Config sample: ${configLines.substring(0, 100)}...`);
   res.send(base64Config);
 });
 
