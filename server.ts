@@ -36,11 +36,12 @@ const sharedHttpAgent = new http.Agent({
 // Helper for axios requests to 3x-ui
 function getRequestConfig(url: string, headers: any = {}, customTimeout?: number) {
   const isHttps = url.startsWith('https');
+  const timeout = customTimeout || 5000; // Shorter 5s default timeout to prevent 502/Gateway failures
   return {
     headers,
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
     httpAgent: !isHttps ? sharedHttpAgent : undefined,
-    timeout: customTimeout || 15000
+    timeout: timeout
   };
 }
 
@@ -324,7 +325,9 @@ class XUIService {
 
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
       const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      
       if (!resp.data.success || !resp.data.obj) {
+        console.warn(`[XUI] Could not fetch inbound ${effectiveInboundId} from ${this.host}. Returning fallback config.`);
         return this.generateVlessLink(effectiveUuid, email);
       }
       
@@ -624,7 +627,15 @@ class XUIService {
     const sniPart = sni ? `&sni=${sni}` : "";
     
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
+    
+    // Default to Reality-friendly fallback if we suspect it's a Reality inbound but can't fetch it
+    // because Reality is the standard for izinet now.
+    const isProbablyReality = port === 443 || port > 30000;
+    const security = isProbablyReality ? "reality" : "tls";
+    const sniPart = sni && !isIP ? `&sni=${sni}` : (isProbablyReality ? "&sni=google.com" : "");
+    const realityParams = isProbablyReality ? "&pbk=PLEASE_REGENERATE_IN_APP&fp=chrome&sid=00000000&flow=xtls-rprx-vision" : "";
+    
+    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=${security}${sniPart}${realityParams}#${encodedEmail}`;
   }
 }
 
@@ -820,86 +831,69 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
 
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const { search } = req.query;
-  console.log(`[AdminAPI] GET /api/admin/users (Search: ${search || 'none'})`);
+  const requestId = Math.random().toString(36).substring(7);
   const startTime = Date.now();
+  console.log(`[AdminAPI][${requestId}] GET /api/admin/users start. Search: ${search || 'none'}`);
 
-  // Select users joined with their active subscription and assigned server
-  let query = supabase
-    .from('users')
-    .select(`
-      *,
-      subscriptions (
-        id,
-        status,
-        expires_at,
-        traffic_limit_mb,
-        traffic_used_mb,
-        server_id,
-        v2ray_config,
-        vpn_servers (
-          name,
-          location_code
+  try {
+    let query = supabase
+      .from('users')
+      .select(`
+        *,
+        subscriptions (
+          id,
+          status,
+          expires_at,
+          traffic_limit_mb,
+          traffic_used_mb,
+          server_id,
+          v2ray_config,
+          vpn_servers (
+            name,
+            location_code
+          )
         )
-      )
-    `)
-    .order('created_at', { ascending: false });
+      `)
+      .order('created_at', { ascending: false });
 
-  if (search) {
-    query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
-  }
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
+    }
 
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-  
-  if (!data || !Array.isArray(data)) {
-    return res.json([]);
-  }
+    const { data, error } = await query;
+    if (error) {
+       console.error(`[AdminAPI][${requestId}] Supabase error:`, error.message);
+       return res.status(500).json({ error: error.message });
+    }
 
-  const now = new Date().toISOString();
+    if (!data) return res.json([]);
 
-    // Transform data to flatten active subscription info
     const transformed = data.map((u: any) => {
-      let rawSubs = u.subscriptions || [];
-      let subscriptions: any[] = [];
-      if (Array.isArray(rawSubs)) {
-        subscriptions = rawSubs;
-      } else if (rawSubs && typeof rawSubs === 'object') {
-        subscriptions = [rawSubs];
-      }
+      let subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
+      const activeSub = subscriptions.find((s: any) => s.status === 'active') || subscriptions[0];
       
-      // Find active subscription: must be 'active'. 
-      // We take the latest one even if expired to show server assignment in admin
-      const sortedSubs = [...subscriptions].filter(Boolean).sort((a, b) => {
-        const da = a.expires_at ? new Date(a.expires_at).getTime() : 0;
-        const db = b.expires_at ? new Date(b.expires_at).getTime() : 0;
-        return db - da;
-      });
-
-      const activeSub = sortedSubs.find((s: any) => s.status === 'active');
-
-      let serverName = 'VPN Сервер';
-      if (activeSub) {
+      let serverName = 'Не назначен';
+      if (activeSub?.vpn_servers) {
         let vpnServer = activeSub.vpn_servers;
-        // Supabase join can return array or object
         if (Array.isArray(vpnServer)) vpnServer = vpnServer[0];
         if (vpnServer?.name) serverName = vpnServer.name;
       }
-      
+
       return {
         ...u,
         active_subscription: activeSub ? {
-          id: activeSub.id,
-          expires_at: activeSub.expires_at,
-          traffic_used_mb: activeSub.traffic_used_mb || 0,
-          traffic_limit_mb: activeSub.traffic_limit_mb || 0,
-          server_id: activeSub.server_id,
+          ...activeSub,
           server_name: serverName
         } : null
       };
     });
 
-    console.log(`[ADMIN] Fetched ${data.length} users in ${Date.now() - startTime}ms.`);
+    console.log(`[AdminAPI][${requestId}] GET /api/admin/users finished in ${Date.now() - startTime}ms. Count: ${transformed.length}`);
     res.json(transformed);
+  } catch (err: any) {
+    console.error(`[AdminAPI][${requestId}] Critical error:`, err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
