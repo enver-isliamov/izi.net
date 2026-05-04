@@ -1989,14 +1989,17 @@ async function launchBot(retries = 10) {
     isBotLaunching = false;
     
     if (err.response?.error_code === 409) {
+      isBotLaunching = false;
       if (retries > 0) {
-        const delay = 30000; // 30 seconds
-        console.warn(`⚠️ Telegram Bot: Conflict (409). Retrying in ${delay/1000}s... (${retries} attempts left)`);
+        const delay = 60000; // Increase to 60 seconds to satisfy Telegram
+        console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
         // Force drop webhook before retry
-        try { await bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch(e) {}
+        try { 
+          await bot.telegram.deleteWebhook({ drop_pending_updates: true }); 
+        } catch(e) {}
         setTimeout(() => launchBot(retries - 1), delay);
       } else {
-        console.error('❌ Telegram Bot: Launch failed after multiple retries due to 409 Conflict.');
+        console.error('❌ Telegram Bot: Launch failed. Check for other active processes or wait 5 mins.');
       }
     } else {
       console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
@@ -2307,9 +2310,10 @@ if (bot) {
 // --- Vite Middleware ---
 
 async function startServer() {
-  console.log('🚀 Starting izinet server...');
+  console.log(`🚀 Starting izinet server... (Mode: ${process.env.NODE_ENV || 'development'})`);
   
-  // Check all active VPN servers on startup
+  // Create /app/dist check to force production mode if dist exists
+  const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production_docker";
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
     if (servers) {
@@ -2350,9 +2354,9 @@ async function startServer() {
     console.log('⚠️ TELEGRAM_BOT_TOKEN is not set. Bot is inactive.');
   }
 
-  console.log('🛠️ Configuring Vite middleware...');
+  console.log(`🛠️ Configuring ${isProd ? 'Production' : 'Vite'} middleware...`);
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

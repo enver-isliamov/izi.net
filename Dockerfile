@@ -16,6 +16,9 @@ COPY . .
 # Собираем frontend (React/Vite)
 RUN npm run build
 
+# Указываем окружение для сервера
+ENV NODE_ENV=production_docker
+
 # Указываем, что контейнер будет слушать порт 3000
 EXPOSE 3000
 
