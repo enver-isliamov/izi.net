@@ -103,7 +103,7 @@ const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo']
 }));
 app.use(express.json());
 const PORT = parseInt(process.env.PORT || '3000');
@@ -2311,6 +2311,15 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production_docker";
   console.log(`🚀 Starting izinet server... (Mode: ${isProd ? 'PRODUCTION' : 'DEVELOPMENT'})`);
   
+  // DNS Diagnostics
+  try {
+    const dns = await import('node:dns/promises');
+    const result = await dns.resolve('google.com');
+    console.log('🌐 DNS Check: OK (google.com resolved)');
+  } catch (dnsErr) {
+    console.error('❌ DNS Check: FAILED. Containers might not have internet access or DNS is blocked.');
+  }
+
   try {
     const { data: servers, error: dbErr } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
     if (dbErr) {
