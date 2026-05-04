@@ -122,7 +122,8 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
     const toastId = toast.loading('Обработка платежа...');
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || '';
+      const envUrl = import.meta.env.VITE_API_URL;
+      const apiUrl = (envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : window.location.origin;
       const displayPlanName = selectedServer.id === 'lte' ? 'LTE' : 'Wi-Fi';
       
       const { data: { session } } = await supabase.auth.getSession();

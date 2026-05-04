@@ -15,7 +15,8 @@ export function useAppConfig() {
     // Otherwise, try to fetch from backend (which has access to process.env.TELEGRAM_BOT_NAME)
     const fetchConfig = async () => {
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || '';
+        const envUrl = import.meta.env.VITE_API_URL;
+        const apiUrl = (envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : window.location.origin;
         const res = await fetch(`${apiUrl}/api/config`);
         if (res.ok) {
           const data = await res.json();

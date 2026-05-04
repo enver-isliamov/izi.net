@@ -103,12 +103,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors({
-  origin: [
-    process.env.PUBLIC_URL,
-    process.env.VITE_API_URL,
-    'http://localhost:3000',
-    'http://localhost:5173',
-  ].filter(Boolean) as string[],
+  origin: true, // Разрешаем любым источникам (удобно для VPN панелей на IP)
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
   credentials: true
