@@ -102,8 +102,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+const allowedOrigins = [
+  'https://izinet.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:41758',
+  process.env.PUBLIC_URL,
+  process.env.VITE_API_URL
+].filter(Boolean).map(url => url?.replace(/\/$/, ''));
+
 app.use(cors({
-  origin: true, // Разрешаем любым источникам (удобно для VPN панелей на IP)
+  origin: (origin, callback) => {
+    // Разрешаем запросы без origin (например, от мобильных приложений или системных инструментов)
+    if (!origin) return callback(null, true);
+    
+    const isAllowed = allowedOrigins.some(allowed => origin.startsWith(allowed)) || 
+                     origin.includes('vercel.app') || 
+                     origin.includes('run.app') || 
+                     origin.includes('localhost') ||
+                     origin.includes('127.0.0.1') ||
+                     origin.includes('194.50.94.28'); 
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS WARNING] Rejected request from origin: ${origin}. If this is legitimate, add it to allowedOrigins.`);
+      callback(null, false);
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
   credentials: true
