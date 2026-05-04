@@ -23,32 +23,22 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
-// Simple memory cache for faster tab switching
-let dashboardCache: any = null;
-let lastFetchTime = 0;
-const CACHE_TTL = 30000; // 30 seconds
-
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [userData, setUserData] = useState<any>(dashboardCache?.userData || null);
-  const [balance, setBalance] = useState<any>(dashboardCache?.balance || null);
-  const [subscription, setSubscription] = useState<any>(dashboardCache?.subscription || null);
-  const [activeServer, setActiveServer] = useState<any>(dashboardCache?.activeServer || null);
-  const [referrals, setReferrals] = useState<any[]>(dashboardCache?.referrals || []);
-  const [isLoading, setIsLoading] = useState(!dashboardCache);
+  const [userData, setUserData] = useState<any>(null);
+  const [balance, setBalance] = useState<any>(null);
+  const [subscription, setSubscription] = useState<any>(null);
+  const [activeServer, setActiveServer] = useState<any>(null);
+  const [referrals, setReferrals] = useState<any[]>([]);
+  const [subUrl, setSubUrl] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
   const isFetching = React.useRef(false);
 
   const fetchDashboardData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
     
-    // Check cache
-    const now = Date.now();
-    if (!forceLoading && dashboardCache && (now - lastFetchTime < CACHE_TTL)) {
-      return;
-    }
-
-    if (forceLoading && !dashboardCache) {
+    if (forceLoading) {
       setIsLoading(true);
     }
     
@@ -74,7 +64,6 @@ export default function Dashboard() {
       ]);
 
       const balanceRes = balanceResult.data;
-      const balanceErr = balanceResult.error;
 
       let serverData = null;
       if (subRes?.server_id) {
@@ -86,23 +75,31 @@ export default function Dashboard() {
         serverData = data;
       }
 
-      const newData = {
-        userData: userRes,
-        balance: balanceRes,
-        subscription: subRes,
-        referrals: refRes || [],
-        activeServer: serverData
-      };
-
       setUserData(userRes);
       setBalance(balanceRes);
       setSubscription(subRes);
       setReferrals(refRes || []);
       setActiveServer(serverData);
-
-      // Update cache
-      dashboardCache = newData;
-      lastFetchTime = Date.now();
+      
+      // BUG-04: Fetch stable sub URL from backend
+      if (subRes?.id) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const subUrlRes = await fetch(`/api/sub-url/${subRes.id}`, {
+            headers: { 'Authorization': `Bearer ${session?.access_token}` }
+          });
+          if (subUrlRes.ok) {
+            const { url } = await subUrlRes.json();
+            setSubUrl(url);
+          }
+        } catch (err) {
+          console.debug('Failed to fetch stable sub URL, using fallback:', err);
+          const apiUrl = (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.includes('://')) 
+            ? import.meta.env.VITE_API_URL.replace(/\/$/, '') 
+            : window.location.origin;
+          setSubUrl(`${apiUrl}/api/sub/${subRes.id}`);
+        }
+      }
       
     } catch (error) {
       console.error('Dashboard data fetch error:', error);
@@ -201,14 +198,6 @@ export default function Dashboard() {
     const diffTime = end.getTime() - now.getTime();
     daysLeft = diffTime > 0 ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
   }
-
-  // Use VITE_API_URL if available, fallback to window.location.origin
-  // If we are in development/local and VITE_API_URL is set to a different port, use it.
-  // Otherwise window.location.origin is safer to avoid CORS issues.
-  const apiUrl = (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.includes('://')) 
-    ? import.meta.env.VITE_API_URL.replace(/\/$/, '') 
-    : window.location.origin;
-  const subUrl = subscription ? `${apiUrl}/api/sub/${subscription.id}` : '';
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">

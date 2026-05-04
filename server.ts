@@ -73,12 +73,14 @@ function parseVpnDevices(configStr: string | null, rootExpiresAt?: string, rootS
   const configs = configStr.split('\n---KEY_SEP---\n').filter(Boolean);
   return configs.map((cfg, index) => {
     const uuidMatch = cfg.match(/vless:\/\/([^@]+)@/);
-    const emailMatch = cfg.match(/#izinet_([^&?#\s]+)/);
+    const emailMatch = cfg.match(/#(?:izinet_)?([^&?#\s]+)/);
+    const rawEmail = emailMatch ? decodeURIComponent(emailMatch[1].replace(/^izinet_/, '')) : 'unknown';
+    
     return {
       id: index === 0 ? 'primary' : `device_${index}`,
       label: index === 0 ? 'Основное устройство' : `Доп. устройство ${index}`,
       config: cfg,
-      email: emailMatch ? emailMatch[1] : 'unknown',
+      email: rawEmail,
       uuid: uuidMatch ? uuidMatch[1] : 'unknown',
       expiresAt: rootExpiresAt || new Date().toISOString(),
       serverType: rootServerType || 'Wi-Fi',
@@ -101,9 +103,15 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors({
-  origin: '*',
+  origin: [
+    process.env.PUBLIC_URL,
+    process.env.VITE_API_URL,
+    'http://localhost:3000',
+    'http://localhost:5173',
+  ].filter(Boolean) as string[],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
+  credentials: true
 }));
 app.use(express.json());
 const PORT = parseInt(process.env.PORT || '3000');
@@ -115,6 +123,8 @@ class XUIService {
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
+  private lastLoginTime: number = 0;
+  private readonly SESSION_TTL = 30 * 60 * 1000; // 30 minutes cache for session cookie
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
@@ -159,9 +169,13 @@ class XUIService {
     }
   }
 
-  async login(): Promise<string> {
+  async login(force: boolean = false): Promise<string> {
     if (!this.host) {
       throw new Error('XUI_HOST is empty. Please set it in Settings -> Secrets.');
+    }
+
+    if (!force && this.sessionCookie && (Date.now() - this.lastLoginTime < this.SESSION_TTL)) {
+      return this.sessionCookie;
     }
     
     const tryLogin = async (path: string) => {
@@ -217,6 +231,7 @@ class XUIService {
       const cookie = response.headers['set-cookie']?.[0];
       if (!cookie) throw new Error('No cookie received from 3x-ui. Check if host URL is correct and starts with http/https.');
       this.sessionCookie = cookie;
+      this.lastLoginTime = Date.now();
       return cookie;
     } catch (error: any) {
       console.error(`❌ 3x-ui login error [${this.host}${this.basePath}]:`, error.message);
@@ -234,6 +249,12 @@ class XUIService {
       const resp = await axios.get(listUrl, getRequestConfig(listUrl, { 'Cookie': this.sessionCookie }));
       return resp.data.obj || [];
     } catch (e: any) {
+      if (e.response?.status === 401) {
+        console.log(`[XUI] Session expired for ${this.host}, re-logging in...`);
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getInbounds(); // Retry
+      }
       console.error('❌ 3x-ui getInbounds error:', e.message);
       return [];
     }
@@ -299,9 +320,10 @@ class XUIService {
           // Try to find the real server-side UUID for this email to update it correctly
           const serverClient = await this.getClientByEmail(inboundId, email);
           const effectiveUuid = serverClient?.id || uuid;
+          const effectiveInboundId = serverClient?.inboundId || inboundId;
           
-          await this.updateClient(email, effectiveUuid, inboundId, expiryTime, limitBytes);
-          return this.getInboundLink(inboundId, effectiveUuid, email);
+          await this.updateClient(email, effectiveUuid, effectiveInboundId, expiryTime, limitBytes);
+          return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
         }
         throw new Error(msg || 'Failed to add client');
       }
@@ -315,92 +337,86 @@ class XUIService {
     }
   }
 
-  async getInboundLink(inboundId: number, uuid: string, email: string) {
+  async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     if (!this.sessionCookie) await this.login();
+    
+    // First, check if we should use a different UUID that exists on the server for this email
+    let effectiveUuid = uuid;
+    let effectiveInboundId = inboundId;
+    const serverClient = await this.getClientByEmail(inboundId, email);
+    if (serverClient) {
+      if (serverClient.id) effectiveUuid = serverClient.id;
+      if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+    }
+
+    const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
+    
+    if (!resp.data.success || !resp.data.obj) {
+      throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
+    }
+    
+    const inbound = resp.data.obj;
+    
+    // Safety check for streamSettings: it can be a string or an object depending on XUI version
+    let streamSettings: any = {};
     try {
-      // First, check if we should use a different UUID that exists on the server for this email
-      let effectiveUuid = uuid;
-      let effectiveInboundId = inboundId;
-      const serverClient = await this.getClientByEmail(inboundId, email);
-      if (serverClient) {
-        if (serverClient.id) effectiveUuid = serverClient.id;
-        if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+      if (typeof inbound.streamSettings === 'string') {
+        streamSettings = JSON.parse(inbound.streamSettings || '{}');
+      } else if (inbound.streamSettings && typeof inbound.streamSettings === 'object') {
+        streamSettings = inbound.streamSettings;
       }
+    } catch (parseErr) {
+      console.error(`[XUI] Error parsing streamSettings for inbound ${effectiveInboundId}:`, parseErr);
+    }
 
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
-      
-      if (!resp.data.success || !resp.data.obj) {
-        throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
-      }
-      
-      const inbound = resp.data.obj;
-      
-      // Safety check for streamSettings: it can be a string or an object depending on XUI version
-      let streamSettings: any = {};
-      try {
-        if (typeof inbound.streamSettings === 'string') {
-          streamSettings = JSON.parse(inbound.streamSettings || '{}');
-        } else if (inbound.streamSettings && typeof inbound.streamSettings === 'object') {
-          streamSettings = inbound.streamSettings;
-        }
-      } catch (parseErr) {
-        console.error(`[XUI] Error parsing streamSettings for inbound ${effectiveInboundId}:`, parseErr);
-      }
-
-      const security = streamSettings.security || 'none';
-      const port = inbound.port;
-      
-      let hostName = 'server.izinet.app';
-      let isIP = false;
-      try {
-        const u = new URL(this.host);
-        hostName = u.hostname;
-        // Check if hostname is an IP
-        isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-      } catch (e) {
-        hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
-        isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-      }
-
-      const encodedEmail = encodeURIComponent(`izinet_${email}`);
-
-      if (security === 'reality') {
-        const realitySettings = streamSettings.realitySettings || {};
-        // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
-        const rs = realitySettings.settings || realitySettings;
-        
-        const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIP ? 'google.com' : hostName);
-        const pbk = rs.publicKey || realitySettings.publicKey || '';
-        const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
-        const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
-        const spiderX = rs.spiderX || realitySettings.spiderX || '';
-        
-        console.log(`[XUI] Generating Reality link for ${email} on ${hostName}:${port}. SNI: ${sni}, SID: ${sid}, SPX: ${spiderX}`);
-
-        let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision`;
-        if (spiderX && spiderX !== '/') {
-          link += `&spx=${encodeURIComponent(spiderX)}`;
-        }
-        return `${link}#${encodedEmail}`;
-      } else if (security === 'tls') {
-        const tlsSettings = streamSettings.tlsSettings || {};
-        const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
-        let sniPart = sni ? `&sni=${sni}` : "";
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
-      } else {
-        return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#${encodedEmail}`;
-      }
+    const security = streamSettings.security || 'none';
+    const port = inbound.port;
+    
+    let hostName = 'server.izinet.app';
+    let isIP = false;
+    try {
+      const u = new URL(this.host);
+      hostName = u.hostname;
+      // Check if hostname is an IP
+      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
     } catch (e) {
-      // Find the port from device if possible
-      let fallbackPort = 443;
-      try {
-        const portMatch = email.includes('user_') ? null : null; // redundant but to keep email ref
-        // We don't easily have device port here in the catch without passing it, 
-        // but getClientByEmail might have part of it.
-      } catch(ee) {}
+      hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
+      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
+    }
+
+    const encodedEmail = encodeURIComponent(`izinet_${email}`);
+
+    if (security === 'reality') {
+      const realitySettings = streamSettings.realitySettings || {};
+      // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
+      const rs = realitySettings.settings || realitySettings;
       
-      return this.generateVlessLink(uuid, email, undefined, fallbackPort);
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIP ? 'google.com' : hostName);
+      const pbk = rs.publicKey || realitySettings.publicKey || '';
+      
+      if (!pbk || pbk.includes('m_G-oZ_9a6')) {
+        throw new Error(`[XUI] Сервер ${hostName} вернул некорректный или пустой Reality publicKey. Пожалуйста, проверьте настройки Reality в панели XUI.`);
+      }
+
+      const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
+      const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
+      const spiderX = rs.spiderX || realitySettings.spiderX || '';
+      
+      console.log(`[XUI] Generating Reality link for ${email} on ${hostName}:${port}. SNI: ${sni}, SID: ${sid}, SPX: ${spiderX}`);
+
+      let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision`;
+      if (spiderX && spiderX !== '/') {
+        link += `&spx=${encodeURIComponent(spiderX)}`;
+      }
+      return `${link}#${encodedEmail}`;
+    } else if (security === 'tls') {
+      const tlsSettings = streamSettings.tlsSettings || {};
+      const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
+      let sniPart = sni ? `&sni=${sni}` : "";
+      return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
+    } else {
+      return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=${security}#${encodedEmail}`;
     }
   }
 
@@ -628,7 +644,6 @@ class XUIService {
 
   generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
     let hostName = customDomain;
-    let isIP = false;
     if (!hostName) {
       try {
         const u = new URL(this.host);
@@ -637,20 +652,10 @@ class XUIService {
         hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || "server.izinet.app";
       }
     }
-    isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-    const sni = isIP ? "" : hostName;
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
     
-    // Default to Reality-friendly fallback if we suspect it's a Reality inbound but can't fetch it
-    // because Reality is the standard for izinet now.
-    const isProbablyReality = port === 443 || port > 30000;
-    const security = isProbablyReality ? "reality" : "tls";
-    const finalSniPart = sni && !isIP ? `&sni=${sni}` : (isProbablyReality ? "&sni=google.com" : "");
-    // Default keys for izinet Reality setup if we can't fetch them live
-    const pbk = "m_G-oZ_9a6X6bK0_xOq4k_Q_oZ6bK0_xOq4k_Q_hI"; // Changed to a placeholder that looks valid
-    const realityParams = isProbablyReality ? `&pbk=${pbk}&fp=chrome&sid=01020304&flow=xtls-rprx-vision` : "";
-    
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=${security}${finalSniPart}${realityParams}#${encodedEmail}`;
+    // Return a basic link without security parameters as it's a fallback and we don't have reality keys
+    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=none#${encodedEmail}`;
   }
 }
 
@@ -997,6 +1002,10 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
         console.log(`➕ Adding client ${device.email} to new server [${newXui.host}] inbound ${targetInboundId}...`);
         const finalConfig = await newXui.addClient(device.email, device.uuid, targetInboundId, expiryTime, limitBytes);
         
+        if (!finalConfig || finalConfig.includes('security=none')) {
+          throw new Error(`Получен невалидный или небезопасный конфиг для ${device.email}`);
+        }
+
         console.log(`✅ Client ${device.email} migrated. New config: ${finalConfig.substring(0, 60)}...`);
         
         migratedDevices.push({
@@ -1005,12 +1014,13 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
         });
       } catch (addErr: any) {
         console.error(`❌ Failed to add client ${device.email} to new server:`, addErr.message);
-        const fallbackConfig = newXui.generateVlessLink(device.uuid, device.email, newServer?.domain);
-        migratedDevices.push({
-          ...device,
-          config: fallbackConfig
-        });
+        // DO NOT push fallbackConfig to migratedDevices to avoid saving broken configs to DB
+        // We skip this device, and sub will not be updated if ALL devices fail
       }
+    }
+
+    if (migratedDevices.length === 0) {
+      return res.status(500).json({ error: 'Миграция провалилась: не удалось создать валидные конфиги на новом сервере.' });
     }
 
     // 5. Update DB
@@ -1254,6 +1264,12 @@ app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
 });
 
 // 💰 Subscription config endpoint for apps (V2Ray/Hiddify)
+app.get('/api/sub-url/:id', async (req, res) => {
+  const publicUrl = process.env.PUBLIC_URL || process.env.VITE_API_URL || '';
+  const base = publicUrl.replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`;
+  res.json({ url: `${base}/api/sub/${req.params.id}` });
+});
+
 app.get('/api/sub/:id', async (req, res) => {
   const { id } = req.params;
   const userAgent = req.headers['user-agent'] || '';
@@ -1377,6 +1393,14 @@ app.post('/api/pay/create', async (req, res) => {
 
 // 📊 Sync user traffic manually with throttling
 const lastSyncMap = new Map<string, number>();
+
+// BUG-10: Memory leak fix - clean up old sync timestamps every 10 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [userId, ts] of lastSyncMap.entries()) {
+    if (ts < cutoff) lastSyncMap.delete(userId);
+  }
+}, 10 * 60 * 1000);
 
 app.post('/api/subscription/sync-traffic', async (req, res) => {
   const { userId } = req.body;
@@ -1758,10 +1782,8 @@ setInterval(() => processedEventIds.clear(), 30000);
 function setupRealtimeListener() {
   console.log('🔄 Setting up Unified Realtime DB Listener...');
   
-  // Create a single channel for all support-related changes
   const supportChannel = supabase
     .channel('support-realtime-unified')
-    // 1. Support Tickets
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'support_tickets' },
@@ -1788,7 +1810,6 @@ function setupRealtimeListener() {
         }
       }
     )
-    // 2. Support Messages
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'support_messages', filter: "sender=eq.user" },
@@ -1818,7 +1839,6 @@ function setupRealtimeListener() {
         }
       }
     )
-    // 3. Subscriptions (Manual Sync)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'subscriptions' },
@@ -1849,6 +1869,13 @@ function setupRealtimeListener() {
     )
     .subscribe((status) => {
       console.log(`📡 [Realtime] Unified Channel Status: ${status}`);
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.error('📡 Realtime connection lost. Reconnecting in 5s...');
+        setTimeout(() => {
+          supabase.removeChannel(supportChannel);
+          setupRealtimeListener();
+        }, 5000);
+      }
     });
 }
 
@@ -1870,6 +1897,12 @@ async function syncUserTraffic(userId: string) {
     .maybeSingle();
 
   if (!sub) return null;
+
+  // BUG-07: Handle server_id = null (legacy subscriptions or direct DB entries)
+  if (!sub.server_id && !process.env.XUI_HOST) {
+    console.debug(`[Sync] Skipping traffic sync for ${userId}: no server_id and no default XUI_HOST`);
+    return sub;
+  }
 
   // Get correct XUI instance
   const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
@@ -2039,53 +2072,58 @@ const showMainMenu = (ctx: any) => {
   });
 };
 
-let isBotLaunching = false;
+let botLaunchPromise: Promise<void> | null = null;
 
-async function launchBot(retries = 10) {
-  if (isBotLaunching) return;
-  isBotLaunching = true;
-
-  try {
-    console.log('🤖 Telegram Bot: Starting launch sequence...');
-    
-    // Always clear webhook and drop pending updates to prevent 409 and spam
-    console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
+async function launchBot(retries = 10): Promise<void> {
+  if (botLaunchPromise) return botLaunchPromise;
+  
+  botLaunchPromise = (async () => {
     try {
-      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    } catch (e: any) {
-      console.warn('⚠️ Telegram Bot: Failed to delete webhook during launch:', e.message);
-    }
-    
-    // Small delay to let Telegram settle
-    const settlementDelay = 5000; 
-    console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
-    await new Promise(resolve => setTimeout(resolve, settlementDelay));
-    
-    await bot.launch({
-      allowedUpdates: ['message', 'callback_query'],
-      dropPendingUpdates: true
-    });
-    
-    console.log('✅ Telegram Bot: Started successfully');
-    isBotLaunching = false;
-  } catch (err: any) {
-    isBotLaunching = false;
-    
-    if (err.response?.error_code === 409) {
-      if (retries > 0) {
-        const delay = 30000; 
-        console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
-        setTimeout(() => launchBot(retries - 1), delay);
+      console.log('🤖 Telegram Bot: Starting launch sequence...');
+      
+      // Always clear webhook and drop pending updates to prevent 409 and spam
+      console.log('🤖 Telegram Bot: Clearing webhook and dropping pending updates...');
+      try {
+        await bot!.telegram.deleteWebhook({ drop_pending_updates: true });
+      } catch (e: any) {
+        console.warn('⚠️ Telegram Bot: Failed to delete webhook during launch:', e.message);
+      }
+      
+      // Small delay to let Telegram settle
+      const settlementDelay = 5000; 
+      console.log(`🤖 Telegram Bot: Waiting ${settlementDelay/1000}s for settlement...`);
+      await new Promise(resolve => setTimeout(resolve, settlementDelay));
+      
+      await bot!.launch({
+        allowedUpdates: ['message', 'callback_query'],
+        dropPendingUpdates: true
+      });
+      
+      console.log('✅ Telegram Bot: Started successfully');
+    } catch (err: any) {
+      if (err.response?.error_code === 409) {
+        if (retries > 0) {
+          const delay = 30000; 
+          console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          botLaunchPromise = null; 
+          return launchBot(retries - 1);
+        } else {
+          console.error('❌ Telegram Bot: Launch failed. Conflict 409 persists.');
+        }
       } else {
-        console.error('❌ Telegram Bot: Launch failed. Conflict 409 persists.');
+        console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          botLaunchPromise = null;
+          return launchBot(retries - 1);
+        }
       }
-    } else {
-      console.error('❌ Telegram Bot: Launch failed with unexpected error:', err.message || err);
-      if (retries > 0) {
-        setTimeout(() => launchBot(retries - 1), 10000);
-      }
+      botLaunchPromise = null;
     }
-  }
+  })();
+
+  return botLaunchPromise;
 }
 
 if (bot) {
