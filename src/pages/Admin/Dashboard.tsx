@@ -120,12 +120,23 @@ export default function AdminDashboard() {
 
         <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">
           <h2 className="text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
-            <ShieldAlert size={20} /> Проверка прав доступа
+            <ShieldAlert size={20} /> Проверка системы
           </h2>
           <div className="space-y-4">
              <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                <p className="text-[10px] text-muted-foreground uppercase mb-1">Ваш текущий Email</p>
-                <p className="font-mono text-sm">{diag?.user || '...'}</p>
+                <p className="text-[10px] text-muted-foreground uppercase mb-1">Таблица настроек (DB)</p>
+                {diag?.database?.settingsTableOk ? (
+                  <p className="text-green-400 flex items-center gap-1 text-sm font-bold">
+                    <CheckCircle2 size={14} /> ТАБЛИЦА НАЙДЕНА
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-red-400 flex items-center gap-1 text-sm font-bold">
+                      <AlertCircle size={14} /> ТАБЛИЦА ОТСУТСТВУЕТ
+                    </p>
+                    <p className="text-[10px] text-red-300/50 leading-tight">Выполните SQL-скрипт из MULTI_SERVER_SETUP.md</p>
+                  </div>
+                )}
              </div>
              <div className="p-3 bg-white/5 rounded-xl border border-white/5">
                 <p className="text-[10px] text-muted-foreground uppercase mb-1">Ваша текущая Роль</p>

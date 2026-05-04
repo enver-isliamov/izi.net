@@ -754,11 +754,16 @@ class PaymentService {
   private async getEnotConfig() {
     // 1. Try to get from Database first
     try {
-      const { data: dbSettings } = await supabase
+      const { data: dbSettings, error: dbError } = await supabase
         .from('settings')
         .select('*')
         .in('key', ['ENOT_MERCHANT_ID', 'ENOT_SECRET_KEY', 'ENOT_SECRET_KEY2']);
       
+      if (dbError) {
+        console.warn('⚠️ [PaymentService] Settings table might be missing, falling back to ENV:', dbError.message);
+        return this.getEnvFallback();
+      }
+
       const settingsMap: Record<string, string> = {};
       dbSettings?.forEach(s => settingsMap[s.key] = s.value);
 
@@ -773,16 +778,20 @@ class PaymentService {
 
       return { merchantId, secretKey, secretKey2 };
     } catch (err) {
-      // Fallback if table doesn't exist yet or other DB error
-      const merchantId = (process.env.ENOT_MERCHANT_ID || '').trim();
-      const secretKey = (process.env.ENOT_SECRET_KEY || '').trim();
-      const secretKey2 = (process.env.ENOT_SECRET_KEY2 || secretKey).trim();
-
-      if (!merchantId || !secretKey) {
-        throw new Error(`Enot.io credentials missing. Check Admin Panel -> Settings.`);
-      }
-      return { merchantId, secretKey, secretKey2 };
+      console.warn('⚠️ [PaymentService] DB fetch failed, using ENV fallback');
+      return this.getEnvFallback();
     }
+  }
+
+  private getEnvFallback() {
+    const merchantId = (process.env.ENOT_MERCHANT_ID || '').trim();
+    const secretKey = (process.env.ENOT_SECRET_KEY || '').trim();
+    const secretKey2 = (process.env.ENOT_SECRET_KEY2 || secretKey).trim();
+
+    if (!merchantId || !secretKey) {
+      throw new Error(`Enot.io credentials missing. Check Admin Panel -> Settings.`);
+    }
+    return { merchantId, secretKey, secretKey2 };
   }
 
   async createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
@@ -868,11 +877,15 @@ async function adminOnly(req: any, res: any, next: any) {
 // Helper to get settings from DB with ENV fallback
 async function getSystemSetting(key: string, fallback: string = ''): Promise<string> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('settings')
       .select('value')
       .eq('key', key)
       .single();
+    if (error) {
+      // Just fallback silently to ENV if key or table missing
+      return (process.env[key] || fallback).trim();
+    }
     return (data?.value || process.env[key] || fallback).trim();
   } catch (e) {
     return (process.env[key] || fallback).trim();
@@ -957,12 +970,20 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
   }
 });
 
-app.get('/api/admin/diag', adminOnly, (req, res) => {
+app.get('/api/admin/diag', adminOnly, async (req, res) => {
+  // Check if settings table exists by doing a small query
+  const { error: tableError } = await supabase.from('settings').select('key').limit(1);
+  const tableExists = !tableError || !tableError.message.includes('not found');
+
   res.json({
     enot: {
       merchantIdLen: (process.env.ENOT_MERCHANT_ID || '').trim().length,
       secretKeyLen: (process.env.ENOT_SECRET_KEY || '').trim().length,
       secretKey2Len: (process.env.ENOT_SECRET_KEY2 || '').trim().length,
+    },
+    database: {
+      settingsTableOk: tableExists,
+      error: tableError?.message
     },
     env: process.env.NODE_ENV,
     user: (req as any).user?.email,
