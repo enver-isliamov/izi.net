@@ -1,29 +1,39 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Server, DollarSign, Activity, Zap } from 'lucide-react';
+import { Users, Server, DollarSign, Activity, Zap, ShieldAlert, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { toast } from 'sonner';
 
 export default function AdminDashboard() {
   const { session } = useAuth();
   const [stats, setStats] = useState<any>(null);
+  const [diag, setDiag] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchStats = async () => {
+    const fetchData = async () => {
       try {
-        const { data } = await axios.get('/api/admin/stats', {
-          headers: { Authorization: `Bearer ${session?.access_token}` }
-        });
-        setStats(data);
-      } catch (e) {
+        const headers = { Authorization: `Bearer ${session?.access_token}` };
+        const [statsRes, diagRes] = await Promise.all([
+          axios.get('/api/admin/stats', { headers }),
+          axios.get('/api/admin/diag', { headers }).catch(e => ({ data: null }))
+        ]);
+        setStats(statsRes.data);
+        setDiag(diagRes.data);
+      } catch (e: any) {
         console.error(e);
+        if (e.response?.status === 401 || e.response?.status === 403) {
+          toast.error(e.response.data.message || 'Ошибка доступа');
+        }
       } finally {
         setLoading(false);
       }
     };
-    fetchStats();
+    if (session?.access_token) {
+      fetchData();
+    }
   }, [session]);
 
   const cards = [
@@ -60,6 +70,71 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
         ))}
+      </div>
+      
+      {/* 🛠 Diagnostics Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">
+          <h2 className="text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
+            <Zap size={20} /> Статус платежной системы (Enot.io)
+          </h2>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
+              <span className="text-sm text-muted-foreground">Merchant ID</span>
+              {diag?.enot?.merchantIdLen > 0 ? (
+                <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
+                  <CheckCircle2 size={14} /> OK ({diag.enot.merchantIdLen} симв.)
+                </span>
+              ) : (
+                <span className="text-red-400 flex items-center gap-1 text-sm font-bold">
+                  <AlertCircle size={14} /> MISSING
+                </span>
+              )}
+            </div>
+            <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
+              <span className="text-sm text-muted-foreground">Secret Key #1</span>
+              {diag?.enot?.secretKeyLen > 0 ? (
+                <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
+                  <CheckCircle2 size={14} /> OK ({diag.enot.secretKeyLen} симв.)
+                </span>
+              ) : (
+                <span className="text-red-400 flex items-center gap-1 text-sm font-bold">
+                  <AlertCircle size={14} /> MISSING
+                </span>
+              )}
+            </div>
+            <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
+              <span className="text-sm text-muted-foreground">Secret Key #2</span>
+              {diag?.enot?.secretKey2Len > 0 ? (
+                <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
+                  <CheckCircle2 size={14} /> OK ({diag.enot.secretKey2Len} симв.)
+                </span>
+              ) : (
+                <span className="text-yellow-400 flex items-center gap-1 text-sm font-bold">
+                  <AlertCircle size={14} /> WARNING (Using Key #1)
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">
+          <h2 className="text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
+            <ShieldAlert size={20} /> Проверка прав доступа
+          </h2>
+          <div className="space-y-4">
+             <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                <p className="text-[10px] text-muted-foreground uppercase mb-1">Ваш текущий Email</p>
+                <p className="font-mono text-sm">{diag?.user || '...'}</p>
+             </div>
+             <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                <p className="text-[10px] text-muted-foreground uppercase mb-1">Ваша текущая Роль</p>
+                <p className={`font-bold text-sm uppercase tracking-wider ${diag?.role === 'superadmin' ? 'text-red-400' : 'text-blue-400'}`}>
+                  {diag?.role || '...'}
+                </p>
+             </div>
+          </div>
+        </div>
       </div>
 
       <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">

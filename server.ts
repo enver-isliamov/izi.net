@@ -754,15 +754,15 @@ class PaymentService {
   }
 
   private getEnotConfig() {
-    const merchantId = process.env.ENOT_MERCHANT_ID || '';
-    const secretKey = process.env.ENOT_SECRET_KEY || '';
-    const secretKey2 = process.env.ENOT_SECRET_KEY2 || secretKey;
+    const merchantId = (process.env.ENOT_MERCHANT_ID || '').trim();
+    const secretKey = (process.env.ENOT_SECRET_KEY || '').trim();
+    const secretKey2 = (process.env.ENOT_SECRET_KEY2 || secretKey).trim();
 
     if (!merchantId || !secretKey) {
       console.error('❌ Enot.io credentials missing in environment variables!');
-      console.log('Current ENOT_MERCHANT_ID length:', merchantId.length);
-      console.log('Current ENOT_SECRET_KEY length:', secretKey.length);
-      throw new Error('Enot.io credentials missing. Check ENOT_MERCHANT_ID and ENOT_SECRET_KEY in server environment.');
+      console.log('DEBUG: ENOT_MERCHANT_ID exists:', !!merchantId, 'Length:', merchantId.length);
+      console.log('DEBUG: ENOT_SECRET_KEY exists:', !!secretKey, 'Length:', secretKey.length);
+      throw new Error(`Enot.io credentials missing. Check ENOT_MERCHANT_ID and ENOT_SECRET_KEY in server Settings.`);
     }
 
     return { merchantId, secretKey, secretKey2 };
@@ -799,35 +799,51 @@ const payment = new PaymentService();
 // --- Admin Middleware ---
 async function adminOnly(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
+  const requestId = Math.random().toString(36).substring(7);
+
   if (!authHeader) {
-    console.warn('[AdminAuth] No auth header');
-    return res.status(401).json({ error: 'Authentication required' });
+    console.warn(`[AdminAuth][${requestId}] ⚠️ No auth header provided`);
+    return res.status(401).json({ 
+      error: 'Authentication Required', 
+      message: 'Зайдите в аккаунт заново.' 
+    });
   }
 
   const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error } = await supabase.auth.getUser(token);
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
 
-  if (error || !user) {
-    console.warn('[AdminAuth] Invalid token or user fetch error:', error?.message);
-    return res.status(401).json({ error: 'Invalid token' });
+  if (authErr || !user) {
+    console.warn(`[AdminAuth][${requestId}] ❌ Invalid token:`, authErr?.message);
+    return res.status(401).json({ 
+      error: 'Invalid Session', 
+      message: 'Сессия истекла. Пожалуйста, войдите снова.' 
+    });
   }
 
+  // Fetch fresh role from DB to ensure it's not stale
   const { data: profile, error: profileError } = await supabase
     .from('users')
-    .select('role')
+    .select('role, email')
     .eq('id', user.id)
     .single();
 
-  if (profileError) {
-    console.error('[AdminAuth] Profile fetch error:', profileError.message);
+  if (profileError || !profile) {
+    console.error(`[AdminAuth][${requestId}] ❌ Profile fetch error for ${user.email}:`, profileError?.message);
+    return res.status(403).json({ 
+      error: 'Profile Error', 
+      message: 'Не удалось получить профиль пользователя.' 
+    });
   }
 
-  if (!profile || (profile.role !== 'admin' && profile.role !== 'superadmin')) {
-    console.warn(`[AdminAuth] Access denied for ${user.email}. Role: ${profile?.role}`);
-    return res.status(403).json({ error: 'Access denied. Admin role required.' });
+  if (profile.role !== 'admin' && profile.role !== 'superadmin') {
+    console.warn(`[AdminAuth][${requestId}] 🚫 Access denied for ${profile.email}. Role: ${profile.role}`);
+    return res.status(403).json({ 
+      error: 'Insufficient Permissions', 
+      message: 'Доступ запрещен: требуются права администратора.' 
+    });
   }
 
-  console.log(`[AdminAuth] Admin verified: ${user.email} (${profile.role})`);
+  console.log(`[AdminAuth][${requestId}] ✅ Admin verified: ${profile.email} (${profile.role})`);
   req.user = { ...user, role: profile.role };
   next();
 }
@@ -875,6 +891,19 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/admin/diag', adminOnly, (req, res) => {
+  res.json({
+    enot: {
+      merchantIdLen: (process.env.ENOT_MERCHANT_ID || '').trim().length,
+      secretKeyLen: (process.env.ENOT_SECRET_KEY || '').trim().length,
+      secretKey2Len: (process.env.ENOT_SECRET_KEY2 || '').trim().length,
+    },
+    env: process.env.NODE_ENV,
+    user: (req as any).user?.email,
+    role: (req as any).user?.role
+  });
 });
 
 app.get('/api/admin/users', adminOnly, async (req, res) => {
