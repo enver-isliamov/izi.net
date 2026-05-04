@@ -740,23 +740,35 @@ const payment = new PaymentService();
 // --- Admin Middleware ---
 async function adminOnly(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Authentication required' });
+  if (!authHeader) {
+    console.warn('[AdminAuth] No auth header');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   const token = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabase.auth.getUser(token);
 
-  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+  if (error || !user) {
+    console.warn('[AdminAuth] Invalid token or user fetch error:', error?.message);
+    return res.status(401).json({ error: 'Invalid token' });
+  }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('users')
     .select('role')
     .eq('id', user.id)
     .single();
 
+  if (profileError) {
+    console.error('[AdminAuth] Profile fetch error:', profileError.message);
+  }
+
   if (!profile || (profile.role !== 'admin' && profile.role !== 'superadmin')) {
+    console.warn(`[AdminAuth] Access denied for ${user.email}. Role: ${profile?.role}`);
     return res.status(403).json({ error: 'Access denied. Admin role required.' });
   }
 
+  console.log(`[AdminAuth] Admin verified: ${user.email} (${profile.role})`);
   req.user = { ...user, role: profile.role };
   next();
 }
@@ -1040,19 +1052,19 @@ app.post('/api/admin/sync-all', adminOnly, async (req, res) => {
 });
 
 app.get('/api/admin/servers', adminOnly, async (req, res) => {
+  console.log('[AdminAPI] Fetching servers list...');
   try {
     const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('[AdminAPI] Supabase error fetching servers:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    
+    console.log(`[AdminAPI] Found ${servers.length} servers in DB. Enriching with stats...`);
     
     const enrichedServers = await Promise.all(servers.map(async (server) => {
       try {
-        const [subCount, xuiStats] = await Promise.all([
-          supabase
-            .from('subscriptions')
-            .select('*', { count: 'exact', head: true })
-            .eq('server_id', server.id)
-            .eq('status', 'active'),
-          (async () => {
+        const statsPromise = (async () => {
              const { instance } = await getXuiForServer(server.id);
              const onlines = await instance.getOnlines();
              const clients = await instance.listClients();
@@ -1060,8 +1072,21 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
                onlineCount: onlines.length,
                clientCount: clients.length 
              };
-          })().catch(err => {
-            console.warn(`Could not fetch online count for server ${server.id}:`, err.message);
+        })();
+
+        // Race against a 8-second timeout per server
+        const timeoutPromise = new Promise<{onlineCount: number, clientCount: number}>((resolve) => 
+          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 8000)
+        );
+
+        const [subCount, xuiStats] = await Promise.all([
+          supabase
+            .from('subscriptions')
+            .select('*', { count: 'exact', head: true })
+            .eq('server_id', server.id)
+            .eq('status', 'active'),
+          Promise.race([statsPromise, timeoutPromise]).catch(err => {
+            console.warn(`[AdminAPI] Could not fetch stats for server ${server.id}:`, err.message);
             return { onlineCount: 0, clientCount: 0 };
           })
         ]);
@@ -1072,18 +1097,22 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
           online_users: xuiStats.onlineCount,
           xui_total_clients: xuiStats.clientCount
         };
-      } catch (err) {
+      } catch (err: any) {
+        console.error(`[AdminAPI] Error enriching server ${server.id}:`, err.message);
         return {
           ...server,
           total_users: 0,
           online_users: 0,
-          error: true
+          error: true,
+          errorMessage: err.message
         };
       }
     }));
 
+    console.log('[AdminAPI] Successfully enriched all servers.');
     res.json(enrichedServers);
   } catch (err: any) {
+    console.error('[AdminAPI] Critical error in GET /api/admin/servers:', err);
     res.status(500).json({ error: err.message });
   }
 });

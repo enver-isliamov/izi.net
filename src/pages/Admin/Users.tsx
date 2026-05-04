@@ -27,8 +27,16 @@ export default function AdminUsers() {
       ]);
       setUsers(usersRes.data);
       setServers(serversRes.data);
-    } catch (e) {
-      toast.error('Ошибка загрузки данных. Убедитесь, что бэкенд работает и VITE_API_URL указан.');
+    } catch (e: any) {
+      const status = e.response?.status;
+      const errorMsg = e.response?.data?.error || e.message;
+      console.error('Fetch admin data error:', e);
+      
+      if (status === 401 || status === 403) {
+        toast.error(`Доступ запрещен (${status}): Недостаточно прав`);
+      } else {
+        toast.error(`Ошибка загрузки данных админки (${status || 'Network'}): ${errorMsg}`);
+      }
     } finally {
       setLoading(false);
     }
