@@ -203,7 +203,11 @@ export default function Dashboard() {
   }
 
   // Use VITE_API_URL if available, fallback to window.location.origin
-  const apiUrl = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, '');
+  // If we are in development/local and VITE_API_URL is set to a different port, use it.
+  // Otherwise window.location.origin is safer to avoid CORS issues.
+  const apiUrl = (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.includes('://')) 
+    ? import.meta.env.VITE_API_URL.replace(/\/$/, '') 
+    : window.location.origin;
   const subUrl = subscription ? `${apiUrl}/api/sub/${subscription.id}` : '';
 
   return (
