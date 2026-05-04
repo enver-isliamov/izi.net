@@ -87,7 +87,7 @@ export default function Dashboard() {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           // Используем axios.defaults.baseURL как основной источник правды
-          const apiBase = axios.defaults.baseURL || window.location.origin;
+          const apiBase = axios.defaults.baseURL || '';
           
           const subUrlRes = await fetch(`${apiBase}/api/sub-url/${subRes.id}`, {
             headers: { 'Authorization': `Bearer ${session?.access_token}` }
@@ -97,12 +97,12 @@ export default function Dashboard() {
             const { url } = await subUrlRes.json();
             setSubUrl(url);
           } else {
-            setSubUrl(`${apiBase}/api/sub/${subRes.id}`);
+            setSubUrl(`${apiBase || window.location.origin}/api/sub/${subRes.id}`);
           }
         } catch (err) {
           console.debug('Failed to fetch stable sub URL, using fallback:', err);
-          const apiBase = axios.defaults.baseURL || window.location.origin;
-          setSubUrl(`${apiBase}/api/sub/${subRes.id}`);
+          const apiBase = axios.defaults.baseURL || '';
+          setSubUrl(`${apiBase || window.location.origin}/api/sub/${subRes.id}`);
         }
       }
       
