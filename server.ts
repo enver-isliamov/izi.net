@@ -749,36 +749,43 @@ async function getXuiForServer(serverId?: string | null) {
 
 // --- Payment Service ---
 class PaymentService {
-  private enotMerchantId: string;
-  private enotSecretKey: string;
-  private enotSecretKey2: string;
-
   constructor() {
-    this.enotMerchantId = process.env.ENOT_MERCHANT_ID || '';
-    this.enotSecretKey = process.env.ENOT_SECRET_KEY || '';
-    this.enotSecretKey2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || '';
+    // No longer storing secrets in constructor to allow dynamic env updates
+  }
+
+  private getEnotConfig() {
+    const merchantId = process.env.ENOT_MERCHANT_ID || '';
+    const secretKey = process.env.ENOT_SECRET_KEY || '';
+    const secretKey2 = process.env.ENOT_SECRET_KEY2 || secretKey;
+
+    if (!merchantId || !secretKey) {
+      console.error('❌ Enot.io credentials missing in environment variables!');
+      console.log('Current ENOT_MERCHANT_ID length:', merchantId.length);
+      console.log('Current ENOT_SECRET_KEY length:', secretKey.length);
+      throw new Error('Enot.io credentials missing. Check ENOT_MERCHANT_ID and ENOT_SECRET_KEY in server environment.');
+    }
+
+    return { merchantId, secretKey, secretKey2 };
   }
 
   createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
-    if (!this.enotMerchantId || !this.enotSecretKey) {
-      throw new Error('Enot.io credentials missing. Check ENOT_MERCHANT_ID and ENOT_SECRET_KEY in server environment.');
-    }
+    const { merchantId, secretKey } = this.getEnotConfig();
 
     // Enot signature: merchant_id:amount:secret_word:order_id
     const sign = crypto
       .createHash('md5')
-      .update(`${this.enotMerchantId}:${amount}:${this.enotSecretKey}:${orderId}`)
+      .update(`${merchantId}:${amount}:${secretKey}:${orderId}`)
       .digest('hex');
 
     const params = new URLSearchParams({
-      m: this.enotMerchantId,
+      m: merchantId,
       oa: amount.toString(),
       o: orderId,
       s: sign,
       cf: userId, // Custom field to pass userId
       curr: 'RUB',
       success_url: `${origin}/dashboard`,
-      fail_url: `${origin}/wallet`
+      fail_url: `${origin}/wallet`,
     });
 
     return `https://enot.io/checkout?${params.toString()}`;

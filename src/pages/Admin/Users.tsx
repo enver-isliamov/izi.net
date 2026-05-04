@@ -100,7 +100,8 @@ export default function AdminUsers() {
       <AdminNav />
 
       <div className="bg-secondary/30 rounded-2xl border border-white/5 overflow-hidden backdrop-blur-sm">
-        <div className="overflow-x-auto">
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/5">
@@ -109,7 +110,7 @@ export default function AdminUsers() {
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Подписка</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">VPN Сервер</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Трафик</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Действия</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground text-right">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -122,7 +123,7 @@ export default function AdminUsers() {
 
                 return (
                   <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 text-nowrap">
                       <div className="flex flex-col">
                         <span className="font-medium text-white/90">{user.name || 'Без имени'}</span>
                         <span className="text-[10px] text-muted-foreground font-mono">{user.email}</span>
@@ -184,7 +185,7 @@ export default function AdminUsers() {
                       ) : <span className="opacity-30 text-xs">—</span>}
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-end gap-2">
                          {user.role !== 'admin' && user.role !== 'superadmin' ? (
                            <button 
                              onClick={() => updateUserRole(user.id, 'admin')}
@@ -209,6 +210,100 @@ export default function AdminUsers() {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Cards View */}
+        <div className="md:hidden divide-y divide-white/5">
+          {Array.isArray(users) && users.map((user) => {
+            const sub = user.active_subscription;
+            const trafficUsedGB = sub ? (sub.traffic_used_mb / 1024).toFixed(1) : 0;
+            const trafficLimitGB = sub ? (sub.traffic_limit_mb / 1024).toFixed(1) : 0;
+            const expiryDate = sub ? new Date(sub.expires_at) : null;
+            const isExpired = expiryDate ? expiryDate.getTime() < Date.now() : false;
+
+            return (
+              <div key={user.id} className="p-4 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div className="flex flex-col">
+                    <span className="font-bold text-white text-base">{user.name || 'Без имени'}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{user.email}</span>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                    user.role === 'superadmin' ? 'bg-red-500/10 text-red-500' : 
+                    user.role === 'admin' ? 'bg-blue-500/10 text-blue-500' : 'bg-white/10 text-muted-foreground'
+                  }`}>
+                    {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-2 bg-white/5 rounded-xl border border-white/5">
+                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Подписка</p>
+                    {sub ? (
+                      <div className="flex flex-col">
+                        <span className={`text-xs font-bold ${isExpired ? 'text-red-400' : 'text-green-400'}`}>
+                          {isExpired ? 'Истекла' : 'Активна'}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">до {expiryDate?.toLocaleDateString()}</span>
+                      </div>
+                    ) : <span className="text-xs italic text-muted-foreground">Нет</span>}
+                  </div>
+                  <div className="p-2 bg-white/5 rounded-xl border border-white/5">
+                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Сервер</p>
+                    {sub ? (
+                      <select 
+                        className="w-full bg-transparent border-none p-0 text-xs outline-none text-blue-400 focus:ring-0"
+                        value={sub.server_id || ''}
+                        onChange={(e) => moveUserServer(user.id, e.target.value)}
+                      >
+                        {servers.map(s => (
+                          <option key={s.id} value={s.id} className="bg-[#0f1115] text-white">
+                            {s.location_code} - {s.name.slice(0, 5)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : <span className="text-xs text-muted-foreground">-</span>}
+                  </div>
+                </div>
+
+                {sub && (
+                  <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                    <div className="flex justify-between items-center text-[10px] font-mono mb-2">
+                      <span className="text-muted-foreground uppercase">Трафик</span>
+                      <span className="text-white font-bold">{trafficUsedGB} <span className="text-muted-foreground">/ {trafficLimitGB} GB</span></span>
+                    </div>
+                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                       <div 
+                         className={`h-full transition-all duration-500 ${
+                           (Number(trafficUsedGB) / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-blue-500'
+                         }`}
+                         style={{ width: `${Math.min(100, (Number(trafficUsedGB) / Number(trafficLimitGB)) * 100)}%` }}
+                       />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                   {user.role !== 'admin' && user.role !== 'superadmin' ? (
+                     <button 
+                       onClick={() => updateUserRole(user.id, 'admin')}
+                       className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 text-blue-500 rounded-lg text-xs font-medium"
+                     >
+                       <Shield size={14} /> Назначить админом
+                     </button>
+                   ) : user.role === 'admin' ? (
+                     <button 
+                       onClick={() => updateUserRole(user.id, 'user')}
+                       className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 text-yellow-500 rounded-lg text-xs font-medium"
+                     >
+                       <ShieldAlert size={14} /> Снять права
+                     </button>
+                   ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
           {users.length === 0 && !loading && (
             <div className="px-6 py-12 text-center text-muted-foreground italic">
               Пользователи не найдены
@@ -216,6 +311,5 @@ export default function AdminUsers() {
           )}
         </div>
       </div>
-    </div>
-  );
+    );
 }

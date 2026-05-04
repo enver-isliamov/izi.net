@@ -149,14 +149,14 @@ export default function AdminServers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
         <button
           onClick={() => {
             if (isAdding) cancelEdit();
             else setIsAdding(true);
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors font-medium text-sm"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors font-medium text-sm w-full sm:w-auto"
         >
           {isAdding ? <XCircle size={18} /> : <Plus size={18} />}
           {isAdding ? 'Отмена' : 'Добавить сервер'}
