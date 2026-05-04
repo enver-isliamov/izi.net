@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import axios from 'axios';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -85,19 +86,23 @@ export default function Dashboard() {
       if (subRes?.id) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
-          const subUrlRes = await fetch(`/api/sub-url/${subRes.id}`, {
+          // Используем axios.defaults.baseURL как основной источник правды
+          const apiBase = axios.defaults.baseURL || window.location.origin;
+          
+          const subUrlRes = await fetch(`${apiBase}/api/sub-url/${subRes.id}`, {
             headers: { 'Authorization': `Bearer ${session?.access_token}` }
           });
+          
           if (subUrlRes.ok) {
             const { url } = await subUrlRes.json();
             setSubUrl(url);
+          } else {
+            setSubUrl(`${apiBase}/api/sub/${subRes.id}`);
           }
         } catch (err) {
           console.debug('Failed to fetch stable sub URL, using fallback:', err);
-          const apiUrl = (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.includes('://')) 
-            ? import.meta.env.VITE_API_URL.replace(/\/$/, '') 
-            : window.location.origin;
-          setSubUrl(`${apiUrl}/api/sub/${subRes.id}`);
+          const apiBase = axios.defaults.baseURL || window.location.origin;
+          setSubUrl(`${apiBase}/api/sub/${subRes.id}`);
         }
       }
       

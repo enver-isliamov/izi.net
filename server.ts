@@ -1260,8 +1260,15 @@ app.delete('/api/admin/servers/:id', adminOnly, async (req, res) => {
 
 // 💰 Subscription config endpoint for apps (V2Ray/Hiddify)
 app.get('/api/sub-url/:id', async (req, res) => {
+  // Priority: 1. PUBLIC_URL, 2. VITE_API_URL, 3. Host detection
   const publicUrl = process.env.PUBLIC_URL || process.env.VITE_API_URL || '';
-  const base = publicUrl.replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`;
+  let base = publicUrl.replace(/\/$/, '');
+  
+  if (!base) {
+    base = `${req.protocol}://${req.get('host')}`;
+  }
+  
+  console.log(`[SubURL] Request from ${req.get('origin') || 'Unknown'}, returning: ${base}/api/sub/${req.params.id}`);
   res.json({ url: `${base}/api/sub/${req.params.id}` });
 });
 
