@@ -7,11 +7,11 @@ import './index.css';
 const envUrl = import.meta.env.VITE_API_URL;
 const isVercel = window.location.hostname.includes('vercel.app');
 
-// Если мы на Vercel и нет явного VITE_API_URL, используем относительные пути.
-// Это заставит запросы идти через прокси vercel.json (HTTPS -> HTTP на бэкенд).
-const apiUrl = (envUrl && envUrl.startsWith('http')) 
-  ? envUrl.replace(/\/$/, '') 
-  : (isVercel ? '' : window.location.origin);
+// ВАЖНО: На Vercel ВСЕГДА используем относительные пути, чтобы работал прокси vercel.json.
+// Это предотвращает ошибку Mixed Content (HTTPS -> HTTP).
+const apiUrl = isVercel 
+  ? '' 
+  : ((envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : window.location.origin);
 
 axios.defaults.baseURL = apiUrl;
 console.log('🚀 API Config:', {
