@@ -171,11 +171,11 @@ export default function AdminSettings() {
                   </div>
                   <input
                     type={showKeys.ENOT_SECRET_KEY ? "text" : "password"}
-                    autoComplete="off"
-                    name="random_name_to_prevent_autofill_1"
+                    autoComplete="new-password"
+                    name={`enot_sk1_${Date.now()}`}
                     value={settings.ENOT_SECRET_KEY}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
                     placeholder="Из кабинета Enot.io"
                   />
                   <button
@@ -196,11 +196,11 @@ export default function AdminSettings() {
                   </div>
                   <input
                     type={showKeys.ENOT_SECRET_KEY2 ? "text" : "password"}
-                    autoComplete="off"
-                    name="random_name_to_prevent_autofill_2"
+                    autoComplete="new-password"
+                    name={`enot_sk2_${Date.now()}`}
                     value={settings.ENOT_SECRET_KEY2}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
                     placeholder="Из кабинета Enot.io (Дополнительный)"
                   />
                   <button
