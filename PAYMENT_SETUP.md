@@ -1,5 +1,15 @@
 # Настройка платежей (Enot.io)
 
+Актуальный flow:
+
+1. `POST /api/pay/create` создает `payments.status = pending`.
+2. Backend вызывает `POST https://api.enot.io/invoice/create` с `x-api-key`.
+3. ENOT отправляет webhook на `/api/pay/webhook/enot`.
+4. Backend проверяет `x-api-sha256-signature`.
+5. При `status = success` пополняется `balances`, закрывается `payments`, пишется `transactions type = deposit`.
+
+Старые ссылки `https://enot.io/checkout?...` не используются.
+
 Чтобы платежи начали работать, выполните следующие шаги:
 
 ## 1. Настройка Базы Данных (Supabase)
