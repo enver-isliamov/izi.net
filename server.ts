@@ -983,14 +983,23 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
 
 app.get('/api/admin/diag', adminOnly, async (req, res) => {
   // Check if settings table exists by doing a small query
-  const { error: tableError } = await supabase.from('settings').select('key').limit(1);
+  const { data: dbSettings, error: tableError } = await supabase.from('settings').select('*');
   const tableExists = !tableError || !tableError.message.includes('not found');
+
+  const settingsMap: Record<string, string> = {};
+  if (dbSettings) {
+    dbSettings.forEach((s: any) => settingsMap[s.key] = s.value);
+  }
+
+  const merchantId = (settingsMap['ENOT_MERCHANT_ID'] || process.env.ENOT_MERCHANT_ID || '').trim();
+  const secretKey = (settingsMap['ENOT_SECRET_KEY'] || process.env.ENOT_SECRET_KEY || '').trim();
+  const secretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || '').trim();
 
   res.json({
     enot: {
-      merchantIdLen: (process.env.ENOT_MERCHANT_ID || '').trim().length,
-      secretKeyLen: (process.env.ENOT_SECRET_KEY || '').trim().length,
-      secretKey2Len: (process.env.ENOT_SECRET_KEY2 || '').trim().length,
+      merchantIdLen: merchantId.length,
+      secretKeyLen: secretKey.length,
+      secretKey2Len: secretKey2.length,
     },
     database: {
       settingsTableOk: tableExists,

@@ -157,9 +157,10 @@ export default function AdminSettings() {
                   </div>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={settings.ENOT_SECRET_KEY}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm"
                     placeholder="Из кабинета Enot.io"
                   />
                 </div>
@@ -173,9 +174,10 @@ export default function AdminSettings() {
                   </div>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={settings.ENOT_SECRET_KEY2}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm"
                     placeholder="Из кабинета Enot.io (Дополнительный)"
                   />
                 </div>
