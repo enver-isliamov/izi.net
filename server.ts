@@ -565,6 +565,11 @@ class XUIService {
         return false;
       }
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
       console.error(`❌ 3x-ui updateClient total failure for ${email}:`, error.message);
       return false;
     }
@@ -629,6 +634,11 @@ class XUIService {
       console.warn(`⚠️ 3x-ui deleteClient response was success: false for ${email || effectiveUuid} on ${this.host}`);
       return false;
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.deleteClient(uuid, email);
+      }
       if (error.response?.status === 404) {
         console.log(`ℹ️ Client ${email || effectiveUuid} not found on ${this.host}, skipping delete.`);
         return true;
@@ -650,6 +660,11 @@ class XUIService {
       }
       return [];
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getOnlines();
+      }
       console.error(`❌ 3x-ui getOnlines error for ${this.host}${this.basePath}:`, error.message);
       return [];
     }
@@ -667,6 +682,11 @@ class XUIService {
       }
       return allClients;
     } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.listClients();
+      }
       console.error(`❌ 3x-ui listClients error for ${this.host}:`, e.message);
       return [];
     }
@@ -1922,6 +1942,7 @@ async function processSuccessfulPaymentForCurrentSchema(userId: string, amount: 
 }
 
 async function processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
+  return processSuccessfulPaymentForCurrentSchema(userId, amount, orderId, provider);
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
   
   // 1. Check if already processed to avoid double-spend
@@ -2060,12 +2081,12 @@ app.post('/api/subscription/buy', async (req, res) => {
   // Pick server: use user-selected server, existing server if renewing, otherwise find a default or least loaded one
   let serverId = reqServerId || lastSub?.server_id;
   if (!serverId) {
-    // 2B. Improved server selection: pick default server or one with fewest active subscriptions
+    // 2B. Pick the active server with the fewest active subscriptions.
+    // The production vpn_servers schema does not include an is_default column.
     const { data: servers, error: sErr } = await supabase
       .from('vpn_servers')
       .select(`
         id,
-        is_default,
         subscriptions!server_id (count)
       `)
       .eq('is_active', true);
@@ -2073,19 +2094,12 @@ app.post('/api/subscription/buy', async (req, res) => {
     if (sErr || !servers || servers.length === 0) {
       serverId = null;
     } else {
-      // Prefer default server if exists
-      const defaultServer = servers.find((s: any) => s.is_default);
-      if (defaultServer) {
-        serverId = defaultServer.id;
-      } else {
-        // Sort by subscription count
-        const sorted = servers.sort((a: any, b: any) => {
-          const countA = a.subscriptions?.[0]?.count || 0;
-          const countB = b.subscriptions?.[0]?.count || 0;
-          return countA - countB;
-        });
-        serverId = sorted[0].id;
-      }
+      const sorted = servers.sort((a: any, b: any) => {
+        const countA = a.subscriptions?.[0]?.count || 0;
+        const countB = b.subscriptions?.[0]?.count || 0;
+        return countA - countB;
+      });
+      serverId = sorted[0].id;
     }
   }
 
