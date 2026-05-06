@@ -1,50 +1,91 @@
-# React + TypeScript + Vite
+# izinet
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite личный кабинет для VPN-подписок с backend на Express, Supabase, 3x-ui, Telegram bot и Enot.io.
 
-Currently, two official plugins are available:
+## Текущая архитектура
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Frontend: React 19, Vite, Tailwind, shadcn/base-ui style components.
+- Backend: `server.ts` Express monolith.
+- Auth/database: Supabase.
+- VPN provisioning: 3x-ui API, multi-server table `vpn_servers`.
+- Payments: Enot.io new invoice API.
+- Deploy: Vercel frontend with `/api/*` proxy to backend `http://194.50.94.28:3005/api/*`.
 
-## Expanding the ESLint configuration
+## Основные пользовательские потоки
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+### Пополнение кошелька
 
-- Configure the top-level `parserOptions` property like this:
+1. `/wallet` вызывает `POST /api/pay/create`.
+2. Backend создает row в `payments` со статусом `pending`.
+3. Backend вызывает `POST https://api.enot.io/invoice/create` с `x-api-key`.
+4. Пользователь оплачивает invoice URL от ENOT.
+5. ENOT отправляет webhook на `/api/pay/webhook/enot`.
+6. Backend проверяет `x-api-sha256-signature`.
+7. При `status = success` backend:
+   - пополняет `balances`;
+   - переводит `payments.status` в `completed`;
+   - пишет `transactions` с `type = deposit`.
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+### Покупка подписки с баланса
+
+1. `/subscription` открывает `SubscriptionWizard`.
+2. Wizard читает `balances.amount`.
+3. `POST /api/subscription/buy` проверяет JWT и достаточность средств.
+4. Backend создает или продлевает клиента в 3x-ui.
+5. Backend обновляет `subscriptions.v2ray_config` в JSON-формате.
+6. Backend списывает баланс.
+
+## Важные env/settings
+
+Supabase:
+
+```env
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+Enot.io:
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
-
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+```env
+ENOT_MERCHANT_ID=shop_id_or_uuid
+ENOT_SECRET_KEY=api_key_for_x-api-key
+ENOT_SECRET_KEY2=webhook_hmac_key
 ```
+
+Backend/public:
+
+```env
+PUBLIC_URL=https://dev-izinet.vercel.app
+PORT=3005
+```
+
+3x-ui fallback is optional when `vpn_servers` contains active server credentials:
+
+```env
+XUI_HOST=
+XUI_USERNAME=
+XUI_PASSWORD=
+XUI_INBOUND_ID=4
+```
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+Checks:
+
+```bash
+npm run lint
+npm run build
+```
+
+## Operational notes
+
+- Vercel does not run the API directly. It proxies `/api/*` to the VPS backend from `vercel.json`.
+- After backend code changes, deploy and restart the process on `194.50.94.28:3005`.
+- `fix.md` contains only currently open issues.
+- `PAYMENT_SETUP.md` contains the current payment/database setup.
