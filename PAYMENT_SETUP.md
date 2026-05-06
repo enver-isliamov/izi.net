@@ -6,16 +6,30 @@
 Выполните этот SQL запрос в SQL Editor вашей панели Supabase:
 
 ```sql
--- Таблица транзакций
+-- Инвойсы и статусы платежей
+CREATE TABLE IF NOT EXISTS public.payments (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id uuid REFERENCES public.users(id),
+    amount numeric,
+    currency varchar DEFAULT 'RUB',
+    payment_method varchar,
+    status varchar DEFAULT 'pending',
+    payment_link varchar,
+    expires_at timestamp,
+    completed_at timestamp,
+    created_at timestamp DEFAULT now()
+);
+
+-- Журнал успешных операций баланса
 CREATE TABLE IF NOT EXISTS public.transactions (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    created_at timestamp with time zone DEFAULT now(),
-    user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-    amount decimal NOT NULL,
-    currency text DEFAULT 'RUB',
-    status text DEFAULT 'pending', -- pending, completed, failed, refunded
-    provider text NOT NULL, -- cryptomus, enot
-    provider_order_id text UNIQUE NOT NULL
+    user_id uuid REFERENCES auth.users(id) NOT NULL,
+    amount numeric NOT NULL,
+    currency varchar DEFAULT 'RUB',
+    type varchar CHECK (type IN ('deposit', 'withdrawal', 'referral_bonus')),
+    status varchar DEFAULT 'completed',
+    description text,
+    created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
 -- Настройка RLS для транзакций
