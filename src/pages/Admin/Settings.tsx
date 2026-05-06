@@ -20,6 +20,7 @@ export default function AdminSettings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [tableMissing, setTableMissing] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -28,19 +29,26 @@ export default function AdminSettings() {
   const fetchSettings = async () => {
     try {
       setLoading(true);
+      setTableMissing(false);
       const { data } = await axios.get('/api/admin/settings', {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       
       const mapped: Record<string, string> = {};
-      data.forEach((s: Setting) => {
-        mapped[s.key] = s.value;
-      });
+      if (Array.isArray(data)) {
+        data.forEach((s: Setting) => {
+          mapped[s.key] = s.value;
+        });
+      }
       
       setSettings(prev => ({ ...prev, ...mapped }));
     } catch (e: any) {
-      console.error(e);
-      toast.error('Ошибка при загрузке настроек');
+      console.error('Failed to fetch settings:', e.response?.data || e.message);
+      if (e.response?.status === 404 && e.response?.data?.error === 'table_not_found') {
+        setTableMissing(true);
+      } else {
+        toast.error('Ошибка при загрузке настроек');
+      }
     } finally {
       setLoading(false);
     }
@@ -88,6 +96,24 @@ export default function AdminSettings() {
 
       <AdminNav />
 
+      {tableMissing && (
+        <motion.div 
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-4 mb-6"
+        >
+          <AlertCircle className="text-red-400 shrink-0" />
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-red-400">Ошибка базы данных: Таблица не найдена</h3>
+            <p className="text-xs text-red-200/70 leading-relaxed">
+              Таблица <code className="bg-red-500/20 px-1 rounded text-red-300">public.settings</code> отсутствует в вашем Supabase проекте. 
+              Без неё настройки платежей не будут сохраняться. Пожалуйста, выполните SQL скрипт из файла 
+              <code className="bg-white/5 px-1 rounded text-white italic ml-1">MULTI_SERVER_SETUP.md</code> в панели SQL Editor вашего Supabase.
+            </p>
+          </div>
+        </motion.div>
+      )}
+
       <form onSubmit={handleSave} className="space-y-8">
         {/* Enot.io Section */}
         <motion.div 
@@ -124,7 +150,7 @@ export default function AdminSettings() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Secret Key #1</label>
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Секретный ключ</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
                     <Key size={18} />
@@ -134,13 +160,13 @@ export default function AdminSettings() {
                     value={settings.ENOT_SECRET_KEY}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
-                    placeholder="Секретный ключ"
+                    placeholder="Из кабинета Enot.io"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Secret Key #2</label>
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Дополнительный ключ</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
                     <Key size={18} />
@@ -150,7 +176,7 @@ export default function AdminSettings() {
                     value={settings.ENOT_SECRET_KEY2}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
-                    placeholder="Секретный ключ #2 (вебхуки)"
+                    placeholder="Из кабинета Enot.io (Дополнительный)"
                   />
                 </div>
               </div>
@@ -159,10 +185,10 @@ export default function AdminSettings() {
             <div className="flex items-start gap-3 p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
               <AlertCircle className="text-blue-400 shrink-0 mt-0.5" size={16} />
               <div className="space-y-1">
-                <p className="text-[11px] text-blue-200">Примечание к вебхукам</p>
+                <p className="text-[11px] text-blue-200">Как настроить ключи</p>
                 <p className="text-[10px] text-blue-200/60 leading-relaxed">
-                  Secret Key #1 используется для формирования подписи оплаты на стороне клиента. <br />
-                  Secret Key #2 используется для верификации уведомлений от сервера Enot.io. Если он не задан, будет использован Key #1.
+                  1. Скопируйте <b>Секретный ключ</b> из кабинета Enot.io в первое поле. <br />
+                  2. Скопируйте <b>Дополнительный ключ</b> во второе поле. Именно он отвечает за проверку оплаты сервером (Webhook).
                 </p>
               </div>
             </div>

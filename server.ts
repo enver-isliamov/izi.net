@@ -760,7 +760,7 @@ class PaymentService {
         .in('key', ['ENOT_MERCHANT_ID', 'ENOT_SECRET_KEY', 'ENOT_SECRET_KEY2']);
       
       if (dbError) {
-        console.warn('⚠️ [PaymentService] Settings table might be missing, falling back to ENV:', dbError.message);
+        console.warn('⚠️ [PaymentService] Settings table fetch failed (might be missing):', dbError.message);
         return this.getEnvFallback();
       }
 
@@ -772,13 +772,13 @@ class PaymentService {
       const secretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || secretKey).trim();
 
       if (!merchantId || !secretKey) {
-        console.error('❌ Enot.io credentials missing in DB and ENV!');
-        throw new Error(`Enot.io credentials missing. Check Admin Panel -> Settings.`);
+        console.error('❌ Enot.io credentials missing! MerchantID or SecretKey is empty.');
+        throw new Error('Enot.io credentials missing. Please set them in Admin Panel -> Settings.');
       }
 
       return { merchantId, secretKey, secretKey2 };
-    } catch (err) {
-      console.warn('⚠️ [PaymentService] DB fetch failed, using ENV fallback');
+    } catch (err: any) {
+      console.warn('⚠️ [PaymentService] DB fetch error, falling back to ENV:', err.message);
       return this.getEnvFallback();
     }
   }
@@ -897,15 +897,15 @@ app.get('/api/admin/settings', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('settings').select('*');
     if (error) {
-      if (error.code === 'PGRST116' || error.message?.includes('not found')) {
-        return res.json([]); // Return empty if table missing
+      if (error.message?.includes('not found')) {
+        return res.status(404).json({ error: 'table_not_found', message: "Таблица 'settings' не найдена в базе данных." });
       }
       throw error;
     }
     res.json(data || []);
   } catch (err: any) {
     console.error('Settings Fetch Error:', err);
-    res.json([]); // Still return empty to prevent UI crash
+    res.status(500).json({ error: err.message });
   }
 });
 
