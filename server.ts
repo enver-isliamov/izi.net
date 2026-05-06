@@ -792,31 +792,90 @@ class PaymentService {
     return { merchantId, secretKey, secretKey2 };
   }
 
-  async createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
+  async createEnotInvoice(amount: number, userId: string, orderId: string, origin: string, email?: string) {
     const { merchantId, secretKey } = await this.getEnotConfig();
 
-    // Enot signature: merchant_id:amount:secret_word:order_id
-    const sign = crypto
-      .createHash('md5')
-      .update(`${merchantId}:${amount}:${secretKey}:${orderId}`)
-      .digest('hex');
-
-    const params = new URLSearchParams({
-      m: merchantId,
-      oa: amount.toString(),
-      o: orderId,
-      s: sign,
-      cf: userId, // Custom field to pass userId
-      curr: 'RUB',
+    const payload: Record<string, any> = {
+      amount,
+      order_id: orderId,
+      currency: 'RUB',
+      shop_id: merchantId,
+      custom_fields: JSON.stringify({ user_id: userId }),
+      comment: 'izinet balance top-up',
       success_url: `${origin}/dashboard`,
       fail_url: `${origin}/wallet`,
+      hook_url: `${origin}/api/pay/webhook/enot`,
+      expire: 300
+    };
+
+    if (email) {
+      payload.email = email;
+    }
+
+    const response = await axios.post('https://api.enot.io/invoice/create', payload, {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'x-api-key': secretKey
+      },
+      timeout: 15000,
+      httpsAgent: sharedHttpsAgent,
+      validateStatus: () => true
     });
 
-    return `https://enot.io/checkout?${params.toString()}`;
+    if (!response.data?.status_check || !response.data?.data?.url) {
+      const enotError = response.data?.error || response.data?.message || response.data;
+      throw new Error(`Enot.io invoice creation failed: ${typeof enotError === 'string' ? enotError : JSON.stringify(enotError)}`);
+    }
+
+    return {
+      url: response.data.data.url,
+      invoiceId: response.data.data.id,
+      expired: response.data.data.expired
+    };
+  }
+
+  async verifyEnotWebhook(body: any, headerSignature: string | undefined) {
+    const { secretKey2 } = await this.getEnotConfig();
+    if (!secretKey2) {
+      throw new Error('Enot.io webhook secret is missing');
+    }
+    if (!headerSignature) {
+      return false;
+    }
+
+    const calculatedSign = crypto
+      .createHmac('sha256', secretKey2)
+      .update(stableJsonStringify(body))
+      .digest('hex');
+
+    const received = headerSignature.toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(received)) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(
+      Buffer.from(received, 'hex'),
+      Buffer.from(calculatedSign, 'hex')
+    );
   }
 }
 
 const payment = new PaymentService();
+
+function stableJsonStringify(value: any): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJsonStringify).join(', ')}]`;
+  }
+
+  const sortedKeys = Object.keys(value).sort();
+  const entries = sortedKeys.map((key) => `${JSON.stringify(key)}: ${stableJsonStringify(value[key])}`);
+  return `{${entries.join(', ')}}`;
+}
 
 // --- API Routes ---
 
@@ -994,7 +1053,8 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
 
   const merchantId = (settingsMap['ENOT_MERCHANT_ID'] || process.env.ENOT_MERCHANT_ID || '').trim();
   const secretKey = (settingsMap['ENOT_SECRET_KEY'] || process.env.ENOT_SECRET_KEY || '').trim();
-  const secretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || '').trim();
+  const rawSecretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || '').trim();
+  const secretKey2 = rawSecretKey2 || secretKey;
 
   res.json({
     enot: {
@@ -1010,7 +1070,7 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
       },
       secretKey2: {
         len: secretKey2.length,
-        source: settingsMap['ENOT_SECRET_KEY2'] ? 'DB' : (process.env.ENOT_SECRET_KEY2 ? 'ENV' : 'MISSING'),
+        source: rawSecretKey2 ? (settingsMap['ENOT_SECRET_KEY2'] ? 'DB' : 'ENV') : (secretKey ? 'FALLBACK_KEY_1' : 'MISSING'),
         preview: secretKey2 ? `${secretKey2.substring(0, 3)}...` : null
       }
     },
@@ -1530,42 +1590,67 @@ app.post('/api/pay/create', async (req, res) => {
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
-  // Security check: Verify token
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !user || user.id !== userId) {
-      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
-    }
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
+  }
+
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount < 10) {
+    return res.status(400).json({ error: 'Invalid amount' });
+  }
+
+  const paymentId = crypto.randomUUID();
 
   try {
-    // Save pending transaction to DB
-    const { error: txErr } = await supabase
-      .from('transactions')
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const { error: paymentErr } = await supabase
+      .from('payments')
       .insert({
+        id: paymentId,
         user_id: userId,
-        amount: amount,
+        amount: numericAmount,
+        currency: 'RUB',
+        payment_method: method,
         status: 'pending',
-        provider: method,
-        provider_order_id: orderId
+        expires_at: expiresAt
       });
 
-    if (txErr) console.warn('Could not log pending transaction:', txErr.message);
+    if (paymentErr) {
+      throw new Error(`Could not create pending payment: ${paymentErr.message}`);
+    }
 
     const origin = req.headers.origin || `https://${req.headers.host}`;
 
     let url = '';
+    let invoiceId = '';
     if (method === 'enot') {
-      url = await payment.createEnotInvoice(amount, userId, orderId, origin);
+      const invoice = await payment.createEnotInvoice(numericAmount, userId, paymentId, origin, user.email);
+      url = invoice.url;
+      invoiceId = invoice.invoiceId;
     } else {
       throw new Error('Unsupported payment method');
     }
 
-    res.json({ success: true, url });
+    await supabase
+      .from('payments')
+      .update({
+        payment_link: url,
+        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+      })
+      .eq('id', paymentId);
+
+    res.json({ success: true, url, orderId: paymentId, invoiceId });
   } catch (error: any) {
+    await supabase
+      .from('payments')
+      .update({ status: 'failed' })
+      .eq('id', paymentId);
     console.error('Payment creation error:', error.message);
     res.status(500).json({ error: error.message });
   }
@@ -1616,7 +1701,19 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
 });
 
 // ⚓ Enot Webhook
-app.post('/api/pay/webhook/enot', async (req, res) => {
+app.post('/api/pay/webhook/enot-v2', async (req, res) => {
+  return handleEnotWebhook(req, res);
+});
+
+app.post('/api/pay/webhook/enot', async (req, res, next) => {
+  if (req.headers['x-api-sha256-signature']) {
+    return handleEnotWebhook(req, res);
+  }
+
+  next();
+});
+
+app.post('/api/pay/webhook/enot-legacy', async (req, res) => {
   console.log('🔗 Enot Webhook Received:', JSON.stringify(req.body));
   
   const { merchant_id, amount, intid, custom_field, sign } = req.body;
@@ -1661,6 +1758,168 @@ app.post('/api/pay/webhook/enot', async (req, res) => {
     res.status(500).send('Internal Error');
   }
 });
+
+async function handleEnotWebhook(req: any, res: any) {
+  console.log('Enot Webhook Received:', JSON.stringify(req.body));
+
+  const signature = req.headers['x-api-sha256-signature'];
+  const headerSignature = Array.isArray(signature) ? signature[0] : signature;
+  const { amount, status, invoice_id, custom_fields } = req.body;
+  const orderId = req.body.order_id;
+
+  if (!amount || !status || !invoice_id || !orderId) {
+    console.warn('Malformed Enot webhook payload');
+    return res.status(400).send('Malformed payload');
+  }
+
+  try {
+    const isValidSignature = await payment.verifyEnotWebhook(req.body, headerSignature);
+    if (!isValidSignature) {
+      console.warn('Invalid Enot webhook signature');
+      return res.status(400).send('Invalid signature');
+    }
+  } catch (err: any) {
+    console.error('Enot webhook signature verification failed:', err.message);
+    return res.status(500).send('Configuration Error');
+  }
+
+  try {
+    const { data: paymentRow, error: paymentErr } = await supabase
+      .from('payments')
+      .select('user_id, amount, status')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (paymentErr) {
+      throw new Error(`Payment lookup failed: ${paymentErr.message}`);
+    }
+
+    const userId = paymentRow?.user_id || parseEnotCustomFields(custom_fields).user_id;
+    if (!userId) {
+      console.error('No user_id found for Enot webhook order:', orderId);
+      return res.status(400).send('Missing user_id');
+    }
+
+    const paidAmount = parseFloat(amount);
+    if (!Number.isFinite(paidAmount)) {
+      return res.status(400).send('Invalid amount');
+    }
+
+    if (paymentRow?.amount && Math.abs(Number(paymentRow.amount) - paidAmount) > 0.01) {
+      console.warn(`Enot amount mismatch for ${orderId}: expected ${paymentRow.amount}, got ${amount}`);
+      return res.status(400).send('Amount mismatch');
+    }
+
+    if (paymentRow?.status === 'completed') {
+      console.log(`Payment ${orderId} already processed.`);
+      return res.send('YES');
+    }
+
+    if (status !== 'success') {
+      await markPaymentStatus(orderId, status === 'refund' ? 'refunded' : 'failed');
+      return res.send('YES');
+    }
+
+    await processSuccessfulPaymentForCurrentSchema(userId, paidAmount, orderId, 'enot');
+    return res.send('YES');
+  } catch (err: any) {
+    console.error('Error processing Enot payment:', err.message);
+    return res.status(500).send('Internal Error');
+  }
+}
+
+function parseEnotCustomFields(customFields: any): Record<string, any> {
+  if (!customFields) return {};
+  if (typeof customFields === 'object') return customFields;
+  if (typeof customFields === 'string') {
+    try {
+      return JSON.parse(customFields);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+async function markPaymentStatus(orderId: string, status: string) {
+  const { error } = await supabase
+    .from('payments')
+    .update({ status })
+    .eq('id', orderId)
+    .eq('status', 'pending');
+
+  if (error) {
+    throw new Error(`Payment status update failed: ${error.message}`);
+  }
+}
+
+async function processSuccessfulPaymentForCurrentSchema(userId: string, amount: number, orderId: string, provider: string) {
+  console.log(`Processing payment: ${amount} for user ${userId} via ${provider}`);
+
+  const { data: existingPayment, error: paymentReadErr } = await supabase
+    .from('payments')
+    .select('status')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (paymentReadErr) {
+    throw new Error(`Payment read failed: ${paymentReadErr.message}`);
+  }
+
+  if (existingPayment?.status === 'completed') {
+    console.log(`Payment ${orderId} already processed.`);
+    return;
+  }
+
+  const { data: balanceData } = await supabase
+    .from('balances')
+    .select('amount')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const currentAmount = Number(balanceData?.amount || 0);
+  const { error: balErr } = await supabase
+    .from('balances')
+    .upsert({
+      user_id: userId,
+      amount: currentAmount + amount,
+      currency: 'RUB',
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+
+  if (balErr) {
+    throw new Error(`Balance update failed: ${balErr.message}`);
+  }
+
+  const { error: paymentStatusErr } = await supabase
+    .from('payments')
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString()
+    })
+    .eq('id', orderId);
+
+  if (paymentStatusErr) {
+    console.error('Failed to update payment status:', paymentStatusErr.message);
+  }
+
+  const { error: txInsertErr } = await supabase
+    .from('transactions')
+    .insert({
+      user_id: userId,
+      amount,
+      currency: 'RUB',
+      type: 'deposit',
+      status: 'completed',
+      description: `Balance top-up via ${provider}. Payment ID: ${orderId}`
+    });
+
+  if (txInsertErr) {
+    console.error('Failed to insert transaction journal row:', txInsertErr.message);
+  }
+
+  console.log(`Balance successfully updated for user ${userId}. New total: ${currentAmount + amount}`);
+}
 
 async function processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
@@ -1710,10 +1969,7 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   // 3. Update transaction status
   const { error: statusErr } = await supabase
     .from(tableName)
-    .update({ 
-      status: 'completed',
-      completed_at: new Date().toISOString() 
-    })
+    .update({ status: 'completed' })
     .eq('provider_order_id', orderId);
 
   if (statusErr) {
