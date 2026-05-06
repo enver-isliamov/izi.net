@@ -4,7 +4,7 @@
 
 ```sql
 -- 1. Создание таблицы серверов
-create table public.vpn_servers (
+create table if not exists public.vpn_servers (
   id uuid default gen_random_uuid() primary key,
   name text not null,
   ip text not null,
@@ -29,6 +29,10 @@ alter table public.subscriptions add column if not exists server_id uuid referen
 -- 5. Включение RLS для vpn_servers (доступ только админам)
 alter table public.vpn_servers enable row level security;
 
+-- Удаляем старые политики перед созданием
+drop policy if exists "Admins can manage servers" on public.vpn_servers;
+drop policy if exists "Users can view active servers" on public.vpn_servers;
+
 create policy "Admins can manage servers"
   on public.vpn_servers for all
   using (
@@ -43,7 +47,18 @@ create policy "Users can view active servers"
   using (is_active = true);
 
 -- 6. Добавление vpn_servers в Realtime публикацию
-ALTER PUBLICATION supabase_realtime ADD TABLE public.vpn_servers;
+-- Примечание: Эта команда может выдать предупреждение, если таблица уже добавлена
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND schemaname = 'public' 
+    AND tablename = 'vpn_servers'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.vpn_servers;
+  END IF;
+END $$;
 
 -- 7. Таблица системных настроек (для платежей и прочего)
 create table if not exists public.settings (
@@ -53,6 +68,9 @@ create table if not exists public.settings (
 );
 
 alter table public.settings enable row level security;
+
+-- Сначала удаляем старую политику, если она есть, чтобы не было ошибки 42710
+drop policy if exists "Admins can manage settings" on public.settings;
 
 create policy "Admins can manage settings"
   on public.settings for all

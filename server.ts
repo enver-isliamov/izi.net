@@ -896,15 +896,21 @@ async function getSystemSetting(key: string, fallback: string = ''): Promise<str
 app.get('/api/admin/settings', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('settings').select('*');
-    if (error) throw error;
+    if (error) {
+      if (error.code === 'PGRST116' || error.message?.includes('not found')) {
+        return res.json([]); // Return empty if table missing
+      }
+      throw error;
+    }
     res.json(data || []);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('Settings Fetch Error:', err);
+    res.json([]); // Still return empty to prevent UI crash
   }
 });
 
 app.post('/api/admin/settings', adminOnly, async (req, res) => {
-  const { settings } = req.body; // Array of { key, value }
+  const { settings } = req.body; 
   if (!Array.isArray(settings)) return res.status(400).send('Invalid data');
 
   try {
@@ -918,7 +924,12 @@ app.post('/api/admin/settings', adminOnly, async (req, res) => {
       .from('settings')
       .upsert(updates, { onConflict: 'key' });
 
-    if (error) throw error;
+    if (error) {
+       if (error.message?.includes('not found')) {
+         return res.status(400).json({ error: "Таблица 'settings' не найдена в БД. Пожалуйста, выполните SQL скрипт в панели Supabase." });
+       }
+       throw error;
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
