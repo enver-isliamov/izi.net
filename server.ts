@@ -749,27 +749,53 @@ async function getXuiForServer(serverId?: string | null) {
 
 // --- Payment Service ---
 class PaymentService {
-  constructor() {
-    // No longer storing secrets in constructor to allow dynamic env updates
+  constructor() {}
+
+  private async getEnotConfig() {
+    // 1. Try to get from Database first
+    try {
+      const { data: dbSettings, error: dbError } = await supabase
+        .from('settings')
+        .select('*')
+        .in('key', ['ENOT_MERCHANT_ID', 'ENOT_SECRET_KEY', 'ENOT_SECRET_KEY2']);
+      
+      if (dbError) {
+        console.warn('⚠️ [PaymentService] Settings table might be missing, falling back to ENV:', dbError.message);
+        return this.getEnvFallback();
+      }
+
+      const settingsMap: Record<string, string> = {};
+      dbSettings?.forEach(s => settingsMap[s.key] = s.value);
+
+      const merchantId = (settingsMap['ENOT_MERCHANT_ID'] || process.env.ENOT_MERCHANT_ID || '').trim();
+      const secretKey = (settingsMap['ENOT_SECRET_KEY'] || process.env.ENOT_SECRET_KEY || '').trim();
+      const secretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || secretKey).trim();
+
+      if (!merchantId || !secretKey) {
+        console.error('❌ Enot.io credentials missing in DB and ENV!');
+        throw new Error(`Enot.io credentials missing. Check Admin Panel -> Settings.`);
+      }
+
+      return { merchantId, secretKey, secretKey2 };
+    } catch (err) {
+      console.warn('⚠️ [PaymentService] DB fetch failed, using ENV fallback');
+      return this.getEnvFallback();
+    }
   }
 
-  private getEnotConfig() {
+  private getEnvFallback() {
     const merchantId = (process.env.ENOT_MERCHANT_ID || '').trim();
     const secretKey = (process.env.ENOT_SECRET_KEY || '').trim();
     const secretKey2 = (process.env.ENOT_SECRET_KEY2 || secretKey).trim();
 
     if (!merchantId || !secretKey) {
-      console.error('❌ Enot.io credentials missing in environment variables!');
-      console.log('DEBUG: ENOT_MERCHANT_ID exists:', !!merchantId, 'Length:', merchantId.length);
-      console.log('DEBUG: ENOT_SECRET_KEY exists:', !!secretKey, 'Length:', secretKey.length);
-      throw new Error(`Enot.io credentials missing. Check ENOT_MERCHANT_ID and ENOT_SECRET_KEY in server Settings.`);
+      throw new Error(`Enot.io credentials missing. Check Admin Panel -> Settings.`);
     }
-
     return { merchantId, secretKey, secretKey2 };
   }
 
-  createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
-    const { merchantId, secretKey } = this.getEnotConfig();
+  async createEnotInvoice(amount: number, userId: string, orderId: string, origin: string) {
+    const { merchantId, secretKey } = await this.getEnotConfig();
 
     // Enot signature: merchant_id:amount:secret_word:order_id
     const sign = crypto
@@ -848,6 +874,57 @@ async function adminOnly(req: any, res: any, next: any) {
   next();
 }
 
+// Helper to get settings from DB with ENV fallback
+async function getSystemSetting(key: string, fallback: string = ''): Promise<string> {
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', key)
+      .single();
+    if (error) {
+      // Just fallback silently to ENV if key or table missing
+      return (process.env[key] || fallback).trim();
+    }
+    return (data?.value || process.env[key] || fallback).trim();
+  } catch (e) {
+    return (process.env[key] || fallback).trim();
+  }
+}
+
+// Admin Settings Endpoints
+app.get('/api/admin/settings', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('settings').select('*');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/settings', adminOnly, async (req, res) => {
+  const { settings } = req.body; // Array of { key, value }
+  if (!Array.isArray(settings)) return res.status(400).send('Invalid data');
+
+  try {
+    const updates = settings.map(s => ({
+      key: s.key,
+      value: s.value,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error } = await supabase
+      .from('settings')
+      .upsert(updates, { onConflict: 'key' });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Admin API Routes ---
 
 app.get('/api/admin/stats', adminOnly, async (req, res) => {
@@ -893,12 +970,20 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
   }
 });
 
-app.get('/api/admin/diag', adminOnly, (req, res) => {
+app.get('/api/admin/diag', adminOnly, async (req, res) => {
+  // Check if settings table exists by doing a small query
+  const { error: tableError } = await supabase.from('settings').select('key').limit(1);
+  const tableExists = !tableError || !tableError.message.includes('not found');
+
   res.json({
     enot: {
       merchantIdLen: (process.env.ENOT_MERCHANT_ID || '').trim().length,
       secretKeyLen: (process.env.ENOT_SECRET_KEY || '').trim().length,
       secretKey2Len: (process.env.ENOT_SECRET_KEY2 || '').trim().length,
+    },
+    database: {
+      settingsTableOk: tableExists,
+      error: tableError?.message
     },
     env: process.env.NODE_ENV,
     user: (req as any).user?.email,
@@ -1441,9 +1526,7 @@ app.post('/api/pay/create', async (req, res) => {
 
     let url = '';
     if (method === 'enot') {
-      // Assuming amount is in USD on frontend, converting to RUB for Enot if needed
-      // For now, assume amount is already correct from UI
-      url = payment.createEnotInvoice(amount, userId, orderId, origin);
+      url = await payment.createEnotInvoice(amount, userId, orderId, origin);
     } else {
       throw new Error('Unsupported payment method');
     }
@@ -1512,10 +1595,10 @@ app.post('/api/pay/webhook/enot', async (req, res) => {
   }
 
   // Enot webhook sign: merchant_id:amount:secret_word2:merchant_order_id
-  const secret2 = process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || ''; 
+  const secret2 = await getSystemSetting('ENOT_SECRET_KEY2', process.env.ENOT_SECRET_KEY || ''); 
   
   if (!secret2) {
-    console.error('❌ ENOT_SECRET_KEY2 is not defined in environment variables!');
+    console.error('❌ ENOT_SECRET_KEY2 is not defined in DB or environment!');
     return res.status(500).send('Configuration Error');
   }
 

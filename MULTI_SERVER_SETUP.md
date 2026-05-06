@@ -44,6 +44,24 @@ create policy "Users can view active servers"
 
 -- 6. Добавление vpn_servers в Realtime публикацию
 ALTER PUBLICATION supabase_realtime ADD TABLE public.vpn_servers;
+
+-- 7. Таблица системных настроек (для платежей и прочего)
+create table if not exists public.settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamp with time zone default now()
+);
+
+alter table public.settings enable row level security;
+
+create policy "Admins can manage settings"
+  on public.settings for all
+  using (
+    exists (
+      select 1 from public.users
+      where id = auth.uid() and role in ('admin', 'superadmin')
+    )
+  );
 ```
 
 **После выполнения этого запроса:**
