@@ -1,6 +1,15 @@
 // Force bypass for expired certificates (Environment has future date: 2026)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+// Global error handlers to prevent app from crashing and restarting
+process.on('uncaughtException', (err) => {
+  console.error('🔥 CRITICAL: Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔥 CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
@@ -997,9 +1006,21 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
 
   res.json({
     enot: {
-      merchantIdLen: merchantId.length,
-      secretKeyLen: secretKey.length,
-      secretKey2Len: secretKey2.length,
+      merchantId: {
+        len: merchantId.length,
+        source: settingsMap['ENOT_MERCHANT_ID'] ? 'DB' : (process.env.ENOT_MERCHANT_ID ? 'ENV' : 'MISSING'),
+        preview: merchantId ? `${merchantId.substring(0, 3)}...` : null
+      },
+      secretKey: {
+        len: secretKey.length,
+        source: settingsMap['ENOT_SECRET_KEY'] ? 'DB' : (process.env.ENOT_SECRET_KEY ? 'ENV' : 'MISSING'),
+        preview: secretKey ? `${secretKey.substring(0, 3)}...` : null
+      },
+      secretKey2: {
+        len: secretKey2.length,
+        source: settingsMap['ENOT_SECRET_KEY2'] ? 'DB' : (process.env.ENOT_SECRET_KEY2 ? 'ENV' : 'MISSING'),
+        preview: secretKey2 ? `${secretKey2.substring(0, 3)}...` : null
+      }
     },
     database: {
       settingsTableOk: tableExists,

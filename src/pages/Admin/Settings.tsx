@@ -142,7 +142,7 @@ export default function AdminSettings() {
                   type="text"
                   value={settings.ENOT_MERCHANT_ID}
                   onChange={(e) => setSettings({ ...settings, ENOT_MERCHANT_ID: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
                   placeholder="Ваш Merchant ID"
                 />
               </div>
@@ -160,7 +160,7 @@ export default function AdminSettings() {
                     autoComplete="new-password"
                     value={settings.ENOT_SECRET_KEY}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
                     placeholder="Из кабинета Enot.io"
                   />
                 </div>
@@ -169,7 +169,7 @@ export default function AdminSettings() {
               <div className="space-y-2">
                 <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Дополнительный ключ</label>
                 <div className="relative group">
-                  <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
+                   <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
                     <Key size={18} />
                   </div>
                   <input
@@ -177,7 +177,7 @@ export default function AdminSettings() {
                     autoComplete="new-password"
                     value={settings.ENOT_SECRET_KEY2}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
                     placeholder="Из кабинета Enot.io (Дополнительный)"
                   />
                 </div>
