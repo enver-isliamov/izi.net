@@ -154,7 +154,7 @@ class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
-  private readonly SESSION_TTL = 30 * 60 * 1000; // 30 minutes cache for session cookie
+  private readonly SESSION_TTL = 4 * 60 * 1000; // 4 minutes cache for session cookie (BUG-05: 3x-ui sessions expire fast)
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
@@ -673,19 +673,8 @@ class XUIService {
   }
 
   generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
-    let hostName = customDomain;
-    if (!hostName) {
-      try {
-        const u = new URL(this.host);
-        hostName = u.hostname;
-      } catch (e) {
-        hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || "server.izinet.app";
-      }
-    }
-    const encodedEmail = encodeURIComponent(`izinet_${email}`);
-    
-    // Return a basic link without security parameters as it's a fallback and we don't have reality keys
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=none#${encodedEmail}`;
+    // BUG-09: Do not generate broken links. Throw error to force using getInboundLink which has Reality params.
+    throw new Error(`[XUI] Не удалось получить реальный конфиг с Reality для ${email}. Проверьте соединение с сервером.`);
   }
 }
 
@@ -705,11 +694,11 @@ async function getXuiForServer(serverId?: string | null) {
 
   if (xuiInstances.has(serverId)) {
     // We still need the server object for domain etc, so fetch from DB
-    const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+    const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).maybeSingle();
     return { instance: xuiInstances.get(serverId)!, server };
   }
 
-  const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+  const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).maybeSingle();
   if (!server) {
     const defaultId = 'env_default';
     if (!xuiInstances.has(defaultId)) xuiInstances.set(defaultId, new XUIService());
@@ -1307,9 +1296,9 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
              };
         })();
 
-        // Race against a 5-second timeout per server (reduced from 8s)
+        // Race against a 15-second timeout per server (increased from 5s) - BUG-12
         const timeoutPromise = new Promise<{onlineCount: number, clientCount: number}>((resolve) => 
-          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 5000)
+          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 15000)
         );
 
         const [subCount, xuiStats] = await Promise.all([
@@ -1474,7 +1463,7 @@ app.get('/api/sub/:id', async (req, res) => {
     .from('subscriptions')
     .select('*')
     .eq('id', id)
-    .single();
+    .maybeSingle();
 
   if (error || !sub) {
     console.warn(`[SubAPI][${requestId}] Subscription not found: ${id}`);
@@ -1677,25 +1666,14 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
   
   // 1. Check if already processed to avoid double-spend
-  // Using 'payments' as primary table name as per SETUP.md, but falling back to 'transactions'
-  let tableName = 'payments';
+  // BUG-01: Standardize on 'transactions' table only
+  const tableName = 'transactions';
   
-  const { data: existingPay, error: tableCheckErr } = await supabase
-    .from('payments')
-    .select('status')
-    .eq('provider_order_id', orderId)
-    .single();
-
-  if (tableCheckErr && tableCheckErr.code === 'PGRST116') {
-    // If table not found or column issue, try transactions
-    tableName = 'transactions';
-  }
-
   const { data: existingTx } = await supabase
     .from(tableName)
     .select('status')
     .eq('provider_order_id', orderId)
-    .single();
+    .maybeSingle(); // BUG-11: use maybeSingle to avoid 406/PGRST116 log spam
 
   if (existingTx?.status === 'completed') {
     console.log(`⚠️ Payment ${orderId} already processed in table ${tableName}.`);
@@ -1708,7 +1686,7 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     .from('balances')
     .select('amount')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
 
   const currentAmount = balanceData?.amount || 0;
   
@@ -1720,7 +1698,8 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     .upsert({ 
       user_id: userId, 
       amount: currentAmount + amount,
-      updated_at: new Date().toISOString()
+      // BUG-03: updated_at column does not exist in balances schema, removing it
+      currency: 'RUB'
     }, { onConflict: 'user_id' });
 
   if (balErr) {
@@ -1802,7 +1781,7 @@ app.post('/api/subscription/buy', async (req, res) => {
       .from('balances')
       .select('amount')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     if (balanceErr || !balanceData) throw new Error('Balance not found');
     if (balanceData.amount < price) return res.status(400).json({ error: 'Insufficient balance' });
@@ -1910,8 +1889,9 @@ app.post('/api/subscription/buy', async (req, res) => {
       console.log(`♻️ Syncing expiration for specific device ${targetDevice.email} on server ${serverId || 'default'}`);
       await xuiInstance.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
       
-      // Update config link in case domain/ip changed
-      targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
+      // BUG-02: DO NOT overwrite config with broken link during RENEW. 
+      // The Reality link is immutable and already correct.
+      // targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
     }
 
     // Determine absolute max expiry for the subscription row
@@ -2025,11 +2005,11 @@ function setupRealtimeListener() {
         
         if (bot && botAdminId) {
           try {
-            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).single();
+            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).maybeSingle();
             const msg = `📨 <b>Новый чат поддержки!</b>\n\n` +
                         `👤 <b>От:</b> ${user?.email || 'Пользователь'}\n` +
                         `💬 <b>Сообщение:</b> ${newTicket.message}\n\n` +
-                        `<i>ID: ${newTicket.id}</i>\n` +
+                        `<i>ID Тикета: ${newTicket.id}</i>\n` + // BUG-04: unified format for regex
                         `----------\n` +
                         `ОТВЕТЬТЕ на это сообщение, чтобы отправить ответ в чат.`;
             await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
@@ -2051,9 +2031,9 @@ function setupRealtimeListener() {
 
         if (bot && botAdminId) {
           try {
-             const {data: t} = await supabase.from('support_tickets').select('user_id').eq('id', newMessage.ticket_id).single();
+             const {data: t} = await supabase.from('support_tickets').select('user_id').eq('id', newMessage.ticket_id).maybeSingle();
              if (t) {
-               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).single();
+               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).maybeSingle();
                const msg = `💬 <b>Новое сообщение в чате</b>\n\n` +
                            `👤 <b>От:</b> ${u?.email || 'Пользователь'}\n` +
                            `📝 <b>Текст:</b> ${newMessage.content}\n\n` +
@@ -2192,8 +2172,11 @@ async function syncTrafficStats() {
     // Use a Set to avoid duplicate syncs if a user somehow has multiple active subs
     const userIds = Array.from(new Set(subs.map(s => s.user_id)));
 
-    for (const userId of userIds) {
-      await syncUserTraffic(userId);
+    // BUG-06: Batch processing (concurrency control) to avoid event loop blockage
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
+      const batch = userIds.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(batch.map(uid => syncUserTraffic(uid)));
     }
     
   } catch (err) {
@@ -2234,7 +2217,7 @@ app.post('/api/auth/telegram/verify', async (req, res) => {
       .from('users')
       .select('*')
       .eq('telegram_id', telegramId.toString())
-      .single();
+      .maybeSingle(); // BUG-11: avoiding PGRST116 noise
 
     let userId = userData?.id;
 
@@ -2336,7 +2319,8 @@ async function launchBot(retries = 10): Promise<void> {
           console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
           await new Promise(resolve => setTimeout(resolve, delay));
           botLaunchPromise = null; 
-          return launchBot(retries - 1);
+          botLaunchPromise = launchBot(retries - 1); // BUG-08: fixed race by assigning new promise
+          return botLaunchPromise;
         } else {
           console.error('❌ Telegram Bot: Launch failed. Conflict 409 persists.');
         }
@@ -2345,7 +2329,8 @@ async function launchBot(retries = 10): Promise<void> {
         if (retries > 0) {
           await new Promise(resolve => setTimeout(resolve, 10000));
           botLaunchPromise = null;
-          return launchBot(retries - 1);
+          botLaunchPromise = launchBot(retries - 1);
+          return botLaunchPromise;
         }
       }
       botLaunchPromise = null;
@@ -2557,7 +2542,8 @@ if (bot) {
     if (session?.state === 'password') {
       if (text.length < 8) return ctx.reply('⚠️ Пароль короткий.');
       try {
-        const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId.toString()).single();
+        const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId.toString()).maybeSingle();
+        if (!user) return ctx.reply('❌ Аккаунт не привязан к вашему Telegram.');
         if (!user) return ctx.reply('Аккаунт не найден.');
         await supabase.auth.admin.updateUserById(user.id, { password: text });
         botSessions.delete(chatId);
@@ -2601,6 +2587,11 @@ async function startServer() {
     console.error('❌ Startup error:', err);
   }
   
+  // BUG-07: Ensure PUBLIC_URL is set for stable sub links
+  if (!process.env.PUBLIC_URL && isProd) {
+    console.warn('⚠️ WARNING: PUBLIC_URL environment variable is not set! Subscription links may be unstable or broken.');
+  }
+
   setupRealtimeListener();
   syncTrafficStats();
   setInterval(syncTrafficStats, 15 * 60 * 1000);

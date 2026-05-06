@@ -257,15 +257,15 @@ balances...single() → maybeSingle()
 
 | # | Баг | Влияние | Статус |
 |---|-----|---------|--------|
-| 01 | processSuccessfulPayment — PGRST116 | Оплата не зачисляется | ⬜ Fix нужен |
-| 02 | VPN конфиг ломается при продлении | Ключи не работают | ⬜ Fix нужен |
-| 03 | Balance upsert updated_at | Оплата не зачисляется | ⬜ Fix нужен |
-| 04 | Telegram regex тикет | Поддержка не отвечает в чате | ⬜ Fix нужен |
-| 05 | XUI сессия TTL | Случайные 401 ошибки | ⬜ Fix нужен |
-| 06 | Traffic sync блокировка | Server timeout / restart | ⬜ Fix нужен |
-| 07 | Sub URL нестабильна | Ключи рвутся при деплое | ⬜ Fix нужен |
-| 08 | Bot launch race condition | 409 Telegram конфликт | ⬜ Fix нужен |
-| 09 | generateVlessLink невалид | Тихо сломанные ключи | ⬜ Fix нужен |
+| 01 | processSuccessfulPayment — PGRST116 | Оплата не зачисляется | ✅ Исправлено |
+| 02 | VPN конфиг ломается при продлении | Ключи не работают | ✅ Исправлено |
+| 03 | Balance upsert updated_at | Оплата не зачисляется | ✅ Исправлено |
+| 04 | Telegram regex тикет | Поддержка не отвечает в чате | ✅ Исправлено |
+| 05 | XUI сессия TTL | Случайные 401 ошибки | ✅ Исправлено |
+| 06 | Traffic sync блокировка | Server timeout / restart | ✅ Исправлено |
+| 07 | Sub URL нестабильна | Ключи рвутся при деплое | ✅ Исправлено |
+| 08 | Bot launch race condition | 409 Telegram конфликт | ✅ Исправлено |
+| 09 | generateVlessLink невалид | Тихо сломанные ключи | ✅ Исправлено |
 | 10 | Настройки кэш | Минорное | ⬜ Улучшение |
-| 11 | single() vs maybeSingle() | Лишние логи | ⬜ Улучшение |
-| 12 | Admin stats таймаут | Пустая статистика | ⬜ Fix нужен |
+| 11 | single() vs maybeSingle() | Лишние логи | ✅ Исправлено |
+| 12 | Admin stats таймаут | Пустая статистика | ✅ Исправлено |
