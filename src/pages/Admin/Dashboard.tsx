@@ -11,6 +11,7 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
   const [diag, setDiag] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showDebug, setShowDebug] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -169,6 +170,28 @@ export default function AdminDashboard() {
           Выберите нужный раздел в боковом меню или кнопках управления.
         </p>
       </div>
+
+      {/* Debug Section for Superadmins */}
+      {diag?.role === 'superadmin' && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-8 p-6 bg-black/40 rounded-2xl border border-white/10"
+        >
+          <button 
+            onClick={() => setShowDebug(!showDebug)}
+            className="text-xs text-muted-foreground hover:text-white transition-colors uppercase tracking-widest font-mono"
+          >
+            {showDebug ? '[-] Hide Debug Data' : '[+] Show Debug Data'}
+          </button>
+          
+          {showDebug && (
+            <pre className="mt-4 p-4 bg-black rounded-xl overflow-auto text-[10px] font-mono text-blue-300/80 max-h-60 border border-white/5">
+              {JSON.stringify(diag, null, 2)}
+            </pre>
+          )}
+        </motion.div>
+      )}
     </div>
   );
 }

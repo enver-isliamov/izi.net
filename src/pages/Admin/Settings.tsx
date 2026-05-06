@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle } from 'lucide-react';
+import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -54,17 +54,31 @@ export default function AdminSettings() {
     }
   };
 
+  const [showKeys, setShowKeys] = useState<{ [key: string]: boolean }>({});
+
+  const toggleKey = (key: string) => {
+    setShowKeys(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setSaving(true);
-      const payload = Object.entries(settings).map(([key, value]) => ({ key, value }));
+      // Clean values
+      const cleanSettings = {
+        ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim(),
+        ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim(),
+        ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim(),
+      };
+      
+      const payload = Object.entries(cleanSettings).map(([key, value]) => ({ key, value }));
       
       await axios.post('/api/admin/settings', { settings: payload }, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       
       toast.success('Настройки успешно сохранены');
+      fetchSettings(); // Refresh to be sure
     } catch (e: any) {
       console.error(e);
       toast.error(e.response?.data?.error || 'Ошибка при сохранении');
@@ -156,13 +170,21 @@ export default function AdminSettings() {
                     <Key size={18} />
                   </div>
                   <input
-                    type="password"
-                    autoComplete="new-password"
+                    type={showKeys.ENOT_SECRET_KEY ? "text" : "password"}
+                    autoComplete="off"
+                    name="random_name_to_prevent_autofill_1"
                     value={settings.ENOT_SECRET_KEY}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
                     placeholder="Из кабинета Enot.io"
                   />
+                  <button
+                    type="button"
+                    onClick={() => toggleKey('ENOT_SECRET_KEY')}
+                    className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {showKeys.ENOT_SECRET_KEY ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -173,13 +195,21 @@ export default function AdminSettings() {
                     <Key size={18} />
                   </div>
                   <input
-                    type="password"
-                    autoComplete="new-password"
+                    type={showKeys.ENOT_SECRET_KEY2 ? "text" : "password"}
+                    autoComplete="off"
+                    name="random_name_to_prevent_autofill_2"
                     value={settings.ENOT_SECRET_KEY2}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield] [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
                     placeholder="Из кабинета Enot.io (Дополнительный)"
                   />
+                  <button
+                    type="button"
+                    onClick={() => toggleKey('ENOT_SECRET_KEY2')}
+                    className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {showKeys.ENOT_SECRET_KEY2 ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
             </div>

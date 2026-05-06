@@ -929,11 +929,14 @@ app.post('/api/admin/settings', adminOnly, async (req, res) => {
       updated_at: new Date().toISOString()
     }));
 
+    console.log('📝 [Settings] Saving updates to Supabase:', updates.map(u => ({ key: u.key, valLen: u.value?.length })));
+
     const { error } = await supabase
       .from('settings')
       .upsert(updates, { onConflict: 'key' });
 
     if (error) {
+       console.error('❌ [Settings] Supabase Upsert Error:', error);
        if (error.message?.includes('not found')) {
          return res.status(400).json({ error: "Таблица 'settings' не найдена в БД. Пожалуйста, выполните SQL скрипт в панели Supabase." });
        }
