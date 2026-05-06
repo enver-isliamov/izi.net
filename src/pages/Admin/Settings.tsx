@@ -147,7 +147,7 @@ export default function AdminSettings() {
 
           <div className="grid gap-6">
             <div className="space-y-2">
-              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Merchant ID</label>
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Shop ID</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
                   <ShieldCheck size={18} />
@@ -157,7 +157,7 @@ export default function AdminSettings() {
                   value={settings.ENOT_MERCHANT_ID}
                   onChange={(e) => setSettings({ ...settings, ENOT_MERCHANT_ID: e.target.value })}
                   className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
-                  placeholder="Ваш Merchant ID"
+                  placeholder="UUID кассы Enot.io"
                 />
               </div>
             </div>
@@ -219,8 +219,9 @@ export default function AdminSettings() {
               <div className="space-y-1">
                 <p className="text-[11px] text-blue-200">Как настроить ключи</p>
                 <p className="text-[10px] text-blue-200/60 leading-relaxed">
-                  1. Скопируйте <b>Секретный ключ</b> из кабинета Enot.io в первое поле. <br />
-                  2. Скопируйте <b>Дополнительный ключ</b> во второе поле. Именно он отвечает за проверку оплаты сервером (Webhook).
+                  1. В поле Shop ID укажите идентификатор кассы из Enot.io. <br />
+                  2. В первое поле ключа вставьте <b>секретный ключ кассы</b> для заголовка x-api-key. <br />
+                  3. Во второе поле вставьте <b>дополнительный ключ</b> для проверки HMAC-подписи webhook.
                 </p>
               </div>
             </div>
