@@ -570,6 +570,11 @@ class XUIService {
         await this.login(true);
         return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
       console.error(`❌ 3x-ui updateClient total failure for ${email}:`, error.message);
       return false;
     }
@@ -682,6 +687,11 @@ class XUIService {
       }
       return allClients;
     } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.listClients();
+      }
       if (e.response?.status === 401) {
         this.sessionCookie = null;
         await this.login(true);
@@ -1695,6 +1705,10 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
     return res.status(400).json({ error: 'Missing userId' });
   }
 
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
   // Throttle: Max once per 30 seconds to keep UI snappy
   const now = Date.now();
   if (lastSyncMap.has(userId) && (now - lastSyncMap.get(userId)!) < 30000) {
@@ -1702,13 +1716,10 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
   }
   lastSyncMap.set(userId, now);
 
-  // Security check: Verify token
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !user || user.id !== userId) {
-      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
-    }
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
   }
 
   try {
@@ -1945,14 +1956,14 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   return processSuccessfulPaymentForCurrentSchema(userId, amount, orderId, provider);
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
   
-  // 1. Check if already processed to avoid double-spend
-  // BUG-01: Standardize on 'transactions' table only
-  const tableName = 'transactions';
+  // Legacy wrapper retained for old webhook compatibility.
+  // Current payment flow is handled by processSuccessfulPaymentForCurrentSchema().
+  const tableName = 'payments';
   
   const { data: existingTx } = await supabase
     .from(tableName)
     .select('status')
-    .eq('provider_order_id', orderId)
+    .eq('id', orderId)
     .maybeSingle(); // BUG-11: use maybeSingle to avoid 406/PGRST116 log spam
 
   if (existingTx?.status === 'completed') {
@@ -1978,8 +1989,8 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     .upsert({ 
       user_id: userId, 
       amount: currentAmount + amount,
-      // BUG-03: updated_at column does not exist in balances schema, removing it
-      currency: 'RUB'
+      currency: 'RUB',
+      updated_at: new Date().toISOString()
     }, { onConflict: 'user_id' });
 
   if (balErr) {
@@ -1987,11 +1998,11 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     throw new Error(`Balance update failed: ${balErr.message}`);
   }
 
-  // 3. Update transaction status
+  // 3. Update payment status
   const { error: statusErr } = await supabase
     .from(tableName)
     .update({ status: 'completed' })
-    .eq('provider_order_id', orderId);
+    .eq('id', orderId);
 
   if (statusErr) {
     console.error(`❌ Failed to update status in ${tableName}:`, statusErr.message);
@@ -2033,6 +2044,73 @@ app.get('/api/health', (req, res) => {
 });
 
 // --- Subscription Routes ---
+app.post('/api/subscription/device/delete', async (req, res) => {
+  const { userId, deviceId } = req.body;
+  const authHeader = req.headers.authorization;
+
+  if (!userId || !deviceId) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
+  }
+
+  try {
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subErr) throw subErr;
+    if (!sub) return res.status(404).json({ error: 'Active subscription not found' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const target = devices.find((device) => device.id === deviceId);
+    if (!target) return res.status(404).json({ error: 'Device not found' });
+    if (target.id === 'primary') {
+      return res.status(400).json({ error: 'Primary device cannot be deleted' });
+    }
+
+    const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+    await xuiInstance.deleteClient(target.uuid, target.email);
+
+    const nextDevices = devices.filter((device) => device.id !== deviceId);
+    const maxExpiryDate = nextDevices.reduce((max, device) => {
+      const expiresAt = new Date(device.expiresAt);
+      return expiresAt > max ? expiresAt : max;
+    }, new Date(sub.expires_at || Date.now()));
+
+    const { data: updatedSub, error: updateErr } = await supabase
+      .from('subscriptions')
+      .update({
+        v2ray_config: JSON.stringify(nextDevices),
+        device_limit: Math.max(1, nextDevices.length),
+        expires_at: maxExpiryDate.toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sub.id)
+      .select()
+      .maybeSingle();
+
+    if (updateErr) throw updateErr;
+    res.json({ success: true, subscription: updatedSub, devices: nextDevices });
+  } catch (error: any) {
+    console.error('Device delete error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 app.post('/api/subscription/buy', async (req, res) => {
   const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
   const authHeader = req.headers.authorization;
@@ -2043,13 +2121,15 @@ app.post('/api/subscription/buy', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
 
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
   // 0. Security check: Verify token
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !user || user.id !== userId) {
-      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
-    }
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
   }
 
   try {
@@ -2221,7 +2301,10 @@ app.post('/api/subscription/buy', async (req, res) => {
     // 5. Deduct balance
     const { error: deductErr } = await supabase
       .from('balances')
-      .update({ amount: balanceData.amount - price })
+      .update({
+        amount: balanceData.amount - price,
+        updated_at: new Date().toISOString()
+      })
       .eq('user_id', userId);
 
     if (deductErr) console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
