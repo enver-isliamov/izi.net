@@ -11,6 +11,7 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
   const [diag, setDiag] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showDebug, setShowDebug] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -79,36 +80,50 @@ export default function AdminDashboard() {
             <Zap size={20} /> Статус платежной системы (Enot.io)
           </h2>
           <div className="space-y-3">
+            {/* Merchant ID */}
             <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
               <span className="text-sm text-muted-foreground">Merchant ID</span>
-              {diag?.enot?.merchantIdLen > 0 ? (
-                <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
-                  <CheckCircle2 size={14} /> OK ({diag.enot.merchantIdLen} симв.)
-                </span>
+              {diag?.enot?.merchantId?.len > 0 ? (
+                <div className="flex flex-col items-end">
+                  <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
+                    <CheckCircle2 size={14} /> OK ({diag.enot.merchantId.len} симв.)
+                  </span>
+                  <span className="text-[9px] text-muted-foreground uppercase opacity-50">Источник: {diag.enot.merchantId.source}</span>
+                </div>
               ) : (
                 <span className="text-red-400 flex items-center gap-1 text-sm font-bold">
                   <AlertCircle size={14} /> MISSING
                 </span>
               )}
             </div>
+
+            {/* Secret Key #1 */}
             <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
               <span className="text-sm text-muted-foreground">Secret Key #1</span>
-              {diag?.enot?.secretKeyLen > 0 ? (
-                <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
-                  <CheckCircle2 size={14} /> OK ({diag.enot.secretKeyLen} симв.)
-                </span>
+              {diag?.enot?.secretKey?.len > 0 ? (
+                <div className="flex flex-col items-end">
+                  <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
+                    <CheckCircle2 size={14} /> OK ({diag.enot.secretKey.len} симв.)
+                  </span>
+                  <span className="text-[9px] text-muted-foreground uppercase opacity-50">Источник: {diag.enot.secretKey.source}</span>
+                </div>
               ) : (
                 <span className="text-red-400 flex items-center gap-1 text-sm font-bold">
                   <AlertCircle size={14} /> MISSING
                 </span>
               )}
             </div>
+
+            {/* Secret Key #2 */}
             <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
               <span className="text-sm text-muted-foreground">Secret Key #2</span>
-              {diag?.enot?.secretKey2Len > 0 ? (
-                <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
-                  <CheckCircle2 size={14} /> OK ({diag.enot.secretKey2Len} симв.)
-                </span>
+              {diag?.enot?.secretKey2?.len > 0 ? (
+                <div className="flex flex-col items-end">
+                  <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
+                    <CheckCircle2 size={14} /> OK ({diag.enot.secretKey2.len} симв.)
+                  </span>
+                  <span className="text-[9px] text-muted-foreground uppercase opacity-50">Источник: {diag.enot.secretKey2.source}</span>
+                </div>
               ) : (
                 <span className="text-yellow-400 flex items-center gap-1 text-sm font-bold">
                   <AlertCircle size={14} /> WARNING (Using Key #1)
@@ -155,6 +170,28 @@ export default function AdminDashboard() {
           Выберите нужный раздел в боковом меню или кнопках управления.
         </p>
       </div>
+
+      {/* Debug Section for Superadmins */}
+      {diag?.role === 'superadmin' && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-8 p-6 bg-black/40 rounded-2xl border border-white/10"
+        >
+          <button 
+            onClick={() => setShowDebug(!showDebug)}
+            className="text-xs text-muted-foreground hover:text-white transition-colors uppercase tracking-widest font-mono"
+          >
+            {showDebug ? '[-] Hide Debug Data' : '[+] Show Debug Data'}
+          </button>
+          
+          {showDebug && (
+            <pre className="mt-4 p-4 bg-black rounded-xl overflow-auto text-[10px] font-mono text-blue-300/80 max-h-60 border border-white/5">
+              {JSON.stringify(diag, null, 2)}
+            </pre>
+          )}
+        </motion.div>
+      )}
     </div>
   );
 }

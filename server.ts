@@ -1,6 +1,15 @@
 // Force bypass for expired certificates (Environment has future date: 2026)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+// Global error handlers to prevent app from crashing and restarting
+process.on('uncaughtException', (err) => {
+  console.error('🔥 CRITICAL: Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔥 CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
@@ -145,7 +154,7 @@ class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
-  private readonly SESSION_TTL = 30 * 60 * 1000; // 30 minutes cache for session cookie
+  private readonly SESSION_TTL = 4 * 60 * 1000; // 4 minutes cache for session cookie (BUG-05: 3x-ui sessions expire fast)
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
@@ -664,19 +673,8 @@ class XUIService {
   }
 
   generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
-    let hostName = customDomain;
-    if (!hostName) {
-      try {
-        const u = new URL(this.host);
-        hostName = u.hostname;
-      } catch (e) {
-        hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || "server.izinet.app";
-      }
-    }
-    const encodedEmail = encodeURIComponent(`izinet_${email}`);
-    
-    // Return a basic link without security parameters as it's a fallback and we don't have reality keys
-    return `vless://${uuid}@${hostName}:${port}?type=tcp&security=none#${encodedEmail}`;
+    // BUG-09: Do not generate broken links. Throw error to force using getInboundLink which has Reality params.
+    throw new Error(`[XUI] Не удалось получить реальный конфиг с Reality для ${email}. Проверьте соединение с сервером.`);
   }
 }
 
@@ -696,11 +694,11 @@ async function getXuiForServer(serverId?: string | null) {
 
   if (xuiInstances.has(serverId)) {
     // We still need the server object for domain etc, so fetch from DB
-    const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+    const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).maybeSingle();
     return { instance: xuiInstances.get(serverId)!, server };
   }
 
-  const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
+  const { data: server } = await supabase.from('vpn_servers').select('*').eq('id', serverId).maybeSingle();
   if (!server) {
     const defaultId = 'env_default';
     if (!xuiInstances.has(defaultId)) xuiInstances.set(defaultId, new XUIService());
@@ -760,7 +758,7 @@ class PaymentService {
         .in('key', ['ENOT_MERCHANT_ID', 'ENOT_SECRET_KEY', 'ENOT_SECRET_KEY2']);
       
       if (dbError) {
-        console.warn('⚠️ [PaymentService] Settings table might be missing, falling back to ENV:', dbError.message);
+        console.warn('⚠️ [PaymentService] Settings table fetch failed (might be missing):', dbError.message);
         return this.getEnvFallback();
       }
 
@@ -772,13 +770,13 @@ class PaymentService {
       const secretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || secretKey).trim();
 
       if (!merchantId || !secretKey) {
-        console.error('❌ Enot.io credentials missing in DB and ENV!');
-        throw new Error(`Enot.io credentials missing. Check Admin Panel -> Settings.`);
+        console.error('❌ Enot.io credentials missing! MerchantID or SecretKey is empty.');
+        throw new Error('Enot.io credentials missing. Please set them in Admin Panel -> Settings.');
       }
 
       return { merchantId, secretKey, secretKey2 };
-    } catch (err) {
-      console.warn('⚠️ [PaymentService] DB fetch failed, using ENV fallback');
+    } catch (err: any) {
+      console.warn('⚠️ [PaymentService] DB fetch error, falling back to ENV:', err.message);
       return this.getEnvFallback();
     }
   }
@@ -896,15 +894,21 @@ async function getSystemSetting(key: string, fallback: string = ''): Promise<str
 app.get('/api/admin/settings', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('settings').select('*');
-    if (error) throw error;
+    if (error) {
+      if (error.message?.includes('not found')) {
+        return res.status(404).json({ error: 'table_not_found', message: "Таблица 'settings' не найдена в базе данных." });
+      }
+      throw error;
+    }
     res.json(data || []);
   } catch (err: any) {
+    console.error('Settings Fetch Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/admin/settings', adminOnly, async (req, res) => {
-  const { settings } = req.body; // Array of { key, value }
+  const { settings } = req.body; 
   if (!Array.isArray(settings)) return res.status(400).send('Invalid data');
 
   try {
@@ -914,11 +918,19 @@ app.post('/api/admin/settings', adminOnly, async (req, res) => {
       updated_at: new Date().toISOString()
     }));
 
+    console.log('📝 [Settings] Saving updates to Supabase:', updates.map(u => ({ key: u.key, valLen: u.value?.length })));
+
     const { error } = await supabase
       .from('settings')
       .upsert(updates, { onConflict: 'key' });
 
-    if (error) throw error;
+    if (error) {
+       console.error('❌ [Settings] Supabase Upsert Error:', error);
+       if (error.message?.includes('not found')) {
+         return res.status(400).json({ error: "Таблица 'settings' не найдена в БД. Пожалуйста, выполните SQL скрипт в панели Supabase." });
+       }
+       throw error;
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -972,14 +984,35 @@ app.get('/api/admin/stats', adminOnly, async (req, res) => {
 
 app.get('/api/admin/diag', adminOnly, async (req, res) => {
   // Check if settings table exists by doing a small query
-  const { error: tableError } = await supabase.from('settings').select('key').limit(1);
+  const { data: dbSettings, error: tableError } = await supabase.from('settings').select('*');
   const tableExists = !tableError || !tableError.message.includes('not found');
+
+  const settingsMap: Record<string, string> = {};
+  if (dbSettings) {
+    dbSettings.forEach((s: any) => settingsMap[s.key] = s.value);
+  }
+
+  const merchantId = (settingsMap['ENOT_MERCHANT_ID'] || process.env.ENOT_MERCHANT_ID || '').trim();
+  const secretKey = (settingsMap['ENOT_SECRET_KEY'] || process.env.ENOT_SECRET_KEY || '').trim();
+  const secretKey2 = (settingsMap['ENOT_SECRET_KEY2'] || process.env.ENOT_SECRET_KEY2 || '').trim();
 
   res.json({
     enot: {
-      merchantIdLen: (process.env.ENOT_MERCHANT_ID || '').trim().length,
-      secretKeyLen: (process.env.ENOT_SECRET_KEY || '').trim().length,
-      secretKey2Len: (process.env.ENOT_SECRET_KEY2 || '').trim().length,
+      merchantId: {
+        len: merchantId.length,
+        source: settingsMap['ENOT_MERCHANT_ID'] ? 'DB' : (process.env.ENOT_MERCHANT_ID ? 'ENV' : 'MISSING'),
+        preview: merchantId ? `${merchantId.substring(0, 3)}...` : null
+      },
+      secretKey: {
+        len: secretKey.length,
+        source: settingsMap['ENOT_SECRET_KEY'] ? 'DB' : (process.env.ENOT_SECRET_KEY ? 'ENV' : 'MISSING'),
+        preview: secretKey ? `${secretKey.substring(0, 3)}...` : null
+      },
+      secretKey2: {
+        len: secretKey2.length,
+        source: settingsMap['ENOT_SECRET_KEY2'] ? 'DB' : (process.env.ENOT_SECRET_KEY2 ? 'ENV' : 'MISSING'),
+        preview: secretKey2 ? `${secretKey2.substring(0, 3)}...` : null
+      }
     },
     database: {
       settingsTableOk: tableExists,
@@ -1263,9 +1296,9 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
              };
         })();
 
-        // Race against a 5-second timeout per server (reduced from 8s)
+        // Race against a 15-second timeout per server (increased from 5s) - BUG-12
         const timeoutPromise = new Promise<{onlineCount: number, clientCount: number}>((resolve) => 
-          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 5000)
+          setTimeout(() => resolve({ onlineCount: 0, clientCount: 0 }), 15000)
         );
 
         const [subCount, xuiStats] = await Promise.all([
@@ -1430,7 +1463,7 @@ app.get('/api/sub/:id', async (req, res) => {
     .from('subscriptions')
     .select('*')
     .eq('id', id)
-    .single();
+    .maybeSingle();
 
   if (error || !sub) {
     console.warn(`[SubAPI][${requestId}] Subscription not found: ${id}`);
@@ -1633,25 +1666,14 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
   
   // 1. Check if already processed to avoid double-spend
-  // Using 'payments' as primary table name as per SETUP.md, but falling back to 'transactions'
-  let tableName = 'payments';
+  // BUG-01: Standardize on 'transactions' table only
+  const tableName = 'transactions';
   
-  const { data: existingPay, error: tableCheckErr } = await supabase
-    .from('payments')
-    .select('status')
-    .eq('provider_order_id', orderId)
-    .single();
-
-  if (tableCheckErr && tableCheckErr.code === 'PGRST116') {
-    // If table not found or column issue, try transactions
-    tableName = 'transactions';
-  }
-
   const { data: existingTx } = await supabase
     .from(tableName)
     .select('status')
     .eq('provider_order_id', orderId)
-    .single();
+    .maybeSingle(); // BUG-11: use maybeSingle to avoid 406/PGRST116 log spam
 
   if (existingTx?.status === 'completed') {
     console.log(`⚠️ Payment ${orderId} already processed in table ${tableName}.`);
@@ -1664,7 +1686,7 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     .from('balances')
     .select('amount')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
 
   const currentAmount = balanceData?.amount || 0;
   
@@ -1676,7 +1698,8 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     .upsert({ 
       user_id: userId, 
       amount: currentAmount + amount,
-      updated_at: new Date().toISOString()
+      // BUG-03: updated_at column does not exist in balances schema, removing it
+      currency: 'RUB'
     }, { onConflict: 'user_id' });
 
   if (balErr) {
@@ -1758,7 +1781,7 @@ app.post('/api/subscription/buy', async (req, res) => {
       .from('balances')
       .select('amount')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     if (balanceErr || !balanceData) throw new Error('Balance not found');
     if (balanceData.amount < price) return res.status(400).json({ error: 'Insufficient balance' });
@@ -1866,8 +1889,9 @@ app.post('/api/subscription/buy', async (req, res) => {
       console.log(`♻️ Syncing expiration for specific device ${targetDevice.email} on server ${serverId || 'default'}`);
       await xuiInstance.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
       
-      // Update config link in case domain/ip changed
-      targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
+      // BUG-02: DO NOT overwrite config with broken link during RENEW. 
+      // The Reality link is immutable and already correct.
+      // targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
     }
 
     // Determine absolute max expiry for the subscription row
@@ -1981,11 +2005,11 @@ function setupRealtimeListener() {
         
         if (bot && botAdminId) {
           try {
-            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).single();
+            const { data: user } = await supabase.from('users').select('email').eq('id', newTicket.user_id).maybeSingle();
             const msg = `📨 <b>Новый чат поддержки!</b>\n\n` +
                         `👤 <b>От:</b> ${user?.email || 'Пользователь'}\n` +
                         `💬 <b>Сообщение:</b> ${newTicket.message}\n\n` +
-                        `<i>ID: ${newTicket.id}</i>\n` +
+                        `<i>ID Тикета: ${newTicket.id}</i>\n` + // BUG-04: unified format for regex
                         `----------\n` +
                         `ОТВЕТЬТЕ на это сообщение, чтобы отправить ответ в чат.`;
             await bot.telegram.sendMessage(botAdminId, msg, { parse_mode: 'HTML' });
@@ -2007,9 +2031,9 @@ function setupRealtimeListener() {
 
         if (bot && botAdminId) {
           try {
-             const {data: t} = await supabase.from('support_tickets').select('user_id').eq('id', newMessage.ticket_id).single();
+             const {data: t} = await supabase.from('support_tickets').select('user_id').eq('id', newMessage.ticket_id).maybeSingle();
              if (t) {
-               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).single();
+               const {data: u} = await supabase.from('users').select('email').eq('id', t.user_id).maybeSingle();
                const msg = `💬 <b>Новое сообщение в чате</b>\n\n` +
                            `👤 <b>От:</b> ${u?.email || 'Пользователь'}\n` +
                            `📝 <b>Текст:</b> ${newMessage.content}\n\n` +
@@ -2148,8 +2172,11 @@ async function syncTrafficStats() {
     // Use a Set to avoid duplicate syncs if a user somehow has multiple active subs
     const userIds = Array.from(new Set(subs.map(s => s.user_id)));
 
-    for (const userId of userIds) {
-      await syncUserTraffic(userId);
+    // BUG-06: Batch processing (concurrency control) to avoid event loop blockage
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
+      const batch = userIds.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(batch.map(uid => syncUserTraffic(uid)));
     }
     
   } catch (err) {
@@ -2190,7 +2217,7 @@ app.post('/api/auth/telegram/verify', async (req, res) => {
       .from('users')
       .select('*')
       .eq('telegram_id', telegramId.toString())
-      .single();
+      .maybeSingle(); // BUG-11: avoiding PGRST116 noise
 
     let userId = userData?.id;
 
@@ -2292,7 +2319,8 @@ async function launchBot(retries = 10): Promise<void> {
           console.warn(`⚠️ Telegram Bot: Conflict (409). Another instance is active. Retrying in ${delay/1000}s... (${retries} attempts left)`);
           await new Promise(resolve => setTimeout(resolve, delay));
           botLaunchPromise = null; 
-          return launchBot(retries - 1);
+          botLaunchPromise = launchBot(retries - 1); // BUG-08: fixed race by assigning new promise
+          return botLaunchPromise;
         } else {
           console.error('❌ Telegram Bot: Launch failed. Conflict 409 persists.');
         }
@@ -2301,7 +2329,8 @@ async function launchBot(retries = 10): Promise<void> {
         if (retries > 0) {
           await new Promise(resolve => setTimeout(resolve, 10000));
           botLaunchPromise = null;
-          return launchBot(retries - 1);
+          botLaunchPromise = launchBot(retries - 1);
+          return botLaunchPromise;
         }
       }
       botLaunchPromise = null;
@@ -2513,7 +2542,8 @@ if (bot) {
     if (session?.state === 'password') {
       if (text.length < 8) return ctx.reply('⚠️ Пароль короткий.');
       try {
-        const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId.toString()).single();
+        const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId.toString()).maybeSingle();
+        if (!user) return ctx.reply('❌ Аккаунт не привязан к вашему Telegram.');
         if (!user) return ctx.reply('Аккаунт не найден.');
         await supabase.auth.admin.updateUserById(user.id, { password: text });
         botSessions.delete(chatId);
@@ -2557,6 +2587,11 @@ async function startServer() {
     console.error('❌ Startup error:', err);
   }
   
+  // BUG-07: Ensure PUBLIC_URL is set for stable sub links
+  if (!process.env.PUBLIC_URL && isProd) {
+    console.warn('⚠️ WARNING: PUBLIC_URL environment variable is not set! Subscription links may be unstable or broken.');
+  }
+
   setupRealtimeListener();
   syncTrafficStats();
   setInterval(syncTrafficStats, 15 * 60 * 1000);
