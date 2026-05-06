@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
     user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
     amount decimal NOT NULL,
     currency text DEFAULT 'RUB',
-    status text DEFAULT 'pending', -- pending, completed, failed
+    status text DEFAULT 'pending', -- pending, completed, failed, refunded
     provider text NOT NULL, -- cryptomus, enot
     provider_order_id text UNIQUE NOT NULL
 );
@@ -31,9 +31,9 @@ USING (auth.uid() = user_id);
 Добавьте следующие переменные в **Settings -> Secrets** в Google AI Studio:
 
 ### Для Enot.io:
-- `ENOT_MERCHANT_ID`: ID кассы
-- `ENOT_SECRET_KEY`: Секретный пароль (тот, что используется для подписи)
-- `ENOT_SECRET_KEY2`: Второй секретный пароль (для вебхуков) — *Примечание: в коде используется ENOT_SECRET_KEY, если у вас один ключ, используйте его.*
+- `ENOT_MERCHANT_ID`: Shop ID / UUID кассы Enot.io
+- `ENOT_SECRET_KEY`: секретный ключ кассы для API-запросов (`x-api-key`)
+- `ENOT_SECRET_KEY2`: дополнительный ключ кассы для HMAC SHA-256 проверки webhook
 - `VITE_APP_URL`: URL вашего приложения (например, `shared-app-url.run.app`) — нужно для вебхуков.
 
 ## 3. Webhook URL
