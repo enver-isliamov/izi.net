@@ -1,21 +1,45 @@
 # Настройка платежей (Enot.io)
 
+Актуальный flow:
+
+1. `POST /api/pay/create` создает `payments.status = pending`.
+2. Backend вызывает `POST https://api.enot.io/invoice/create` с `x-api-key`.
+3. ENOT отправляет webhook на `/api/pay/webhook/enot`.
+4. Backend проверяет `x-api-sha256-signature`.
+5. При `status = success` пополняется `balances`, закрывается `payments`, пишется `transactions type = deposit`.
+
+Старые ссылки `https://enot.io/checkout?...` не используются.
+
 Чтобы платежи начали работать, выполните следующие шаги:
 
 ## 1. Настройка Базы Данных (Supabase)
 Выполните этот SQL запрос в SQL Editor вашей панели Supabase:
 
 ```sql
--- Таблица транзакций
+-- Инвойсы и статусы платежей
+CREATE TABLE IF NOT EXISTS public.payments (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id uuid REFERENCES public.users(id),
+    amount numeric,
+    currency varchar DEFAULT 'RUB',
+    payment_method varchar,
+    status varchar DEFAULT 'pending',
+    payment_link varchar,
+    expires_at timestamp,
+    completed_at timestamp,
+    created_at timestamp DEFAULT now()
+);
+
+-- Журнал успешных операций баланса
 CREATE TABLE IF NOT EXISTS public.transactions (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    created_at timestamp with time zone DEFAULT now(),
-    user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-    amount decimal NOT NULL,
-    currency text DEFAULT 'RUB',
-    status text DEFAULT 'pending', -- pending, completed, failed
-    provider text NOT NULL, -- cryptomus, enot
-    provider_order_id text UNIQUE NOT NULL
+    user_id uuid REFERENCES auth.users(id) NOT NULL,
+    amount numeric NOT NULL,
+    currency varchar DEFAULT 'RUB',
+    type varchar CHECK (type IN ('deposit', 'withdrawal', 'referral_bonus')),
+    status varchar DEFAULT 'completed',
+    description text,
+    created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
 -- Настройка RLS для транзакций
@@ -31,9 +55,9 @@ USING (auth.uid() = user_id);
 Добавьте следующие переменные в **Settings -> Secrets** в Google AI Studio:
 
 ### Для Enot.io:
-- `ENOT_MERCHANT_ID`: ID кассы
-- `ENOT_SECRET_KEY`: Секретный пароль (тот, что используется для подписи)
-- `ENOT_SECRET_KEY2`: Второй секретный пароль (для вебхуков) — *Примечание: в коде используется ENOT_SECRET_KEY, если у вас один ключ, используйте его.*
+- `ENOT_MERCHANT_ID`: Shop ID / UUID кассы Enot.io
+- `ENOT_SECRET_KEY`: секретный ключ кассы для API-запросов (`x-api-key`)
+- `ENOT_SECRET_KEY2`: дополнительный ключ кассы для HMAC SHA-256 проверки webhook
 - `VITE_APP_URL`: URL вашего приложения (например, `shared-app-url.run.app`) — нужно для вебхуков.
 
 ## 3. Webhook URL
