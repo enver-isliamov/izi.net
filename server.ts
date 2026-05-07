@@ -1616,15 +1616,15 @@ app.get('/api/sub/:id', async (req, res) => {
 
 // 💰 Create Payment Link
 app.post('/api/pay/create', async (req, res) => {
-  const { userId, amount, method } = req.body;
   const authHeader = req.headers.authorization;
+  const { userId, amount, method } = req.body;
   
-  if (!userId || !amount || !method) {
-    return res.status(400).json({ error: 'Missing parameters' });
-  }
-
   if (!authHeader) {
     return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!userId || !amount || !method) {
+    return res.status(400).json({ error: 'Missing parameters' });
   }
 
   const token = authHeader.replace('Bearer ', '');
@@ -1701,15 +1701,15 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 app.post('/api/subscription/sync-traffic', async (req, res) => {
-  const { userId } = req.body;
   const authHeader = req.headers.authorization;
+  const { userId } = req.body;
   
-  if (!userId) {
-    return res.status(400).json({ error: 'Missing userId' });
-  }
-
   if (!authHeader) {
     return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
   }
 
   // Throttle: Max once per 30 seconds to keep UI snappy
@@ -2048,15 +2048,15 @@ app.get('/api/health', (req, res) => {
 
 // --- Subscription Routes ---
 app.post('/api/subscription/device/delete', async (req, res) => {
-  const { userId, deviceId } = req.body;
   const authHeader = req.headers.authorization;
-
-  if (!userId || !deviceId) {
-    return res.status(400).json({ error: 'Missing required parameters' });
-  }
+  const { userId, deviceId } = req.body;
 
   if (!authHeader) {
     return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!userId || !deviceId) {
+    return res.status(400).json({ error: 'Missing required parameters' });
   }
 
   const token = authHeader.replace('Bearer ', '');
@@ -2115,17 +2115,17 @@ app.post('/api/subscription/device/delete', async (req, res) => {
 });
 
 app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
   const authHeader = req.headers.authorization;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   console.log(`[BUY] Request received: user=${userId}, plan=${planName}, reqServer=${reqServerId}, targetDevice=${targetDeviceId}`);
 
   if (!userId || !planId || !price) {
     return res.status(400).json({ error: 'Missing required parameters' });
-  }
-
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Authentication required' });
   }
 
   // 0. Security check: Verify token

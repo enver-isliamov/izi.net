@@ -27,13 +27,14 @@
 
 ## BUG-01: VPS backend не синхронизирован с security-правками
 
-Статус: открыт до деплоя на `194.50.94.28:3005`.
+Статус: [x] ИСПРАВЛЕНО. 
+Все API-эндпоинты теперь проверяют `Authorization` заголовок ДО валидации параметров тела запроса.
 
-После деплоя проверить:
-```text
-POST /api/subscription/sync-traffic без Authorization -> ожидается 401
-POST /api/subscription/buy без Authorization -> ожидается 401
-```
+Как протестировать:
+1. Выполните запрос без заголовка Authorization: 
+   `curl -X POST http://194.50.94.28:3005/api/subscription/buy -d '{"planId": "test"}'`
+2. Ожидаемый результат: `401 Unauthorized`.
+3. (Раньше возвращалось `400 Missing parameters`).
 
 ## BUG-02: E2E-проверка оплаты и покупки подписки требует authenticated сессию
 
