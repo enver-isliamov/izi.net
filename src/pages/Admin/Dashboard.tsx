@@ -80,9 +80,9 @@ export default function AdminDashboard() {
             <Zap size={20} /> Статус платежной системы (Enot.io)
           </h2>
           <div className="space-y-3">
-            {/* Shop ID */}
+            {/* Merchant ID */}
             <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
-              <span className="text-sm text-muted-foreground">Shop ID</span>
+              <span className="text-sm text-muted-foreground">Merchant ID</span>
               {diag?.enot?.merchantId?.len > 0 ? (
                 <div className="flex flex-col items-end">
                   <span className="text-green-400 flex items-center gap-1 text-sm font-mono">

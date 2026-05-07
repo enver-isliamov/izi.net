@@ -145,37 +145,28 @@ export default function Subscription() {
       return;
     }
     
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch('/api/subscription/device/delete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
-        },
-        body: JSON.stringify({ userId: user?.id, deviceId })
-      });
-
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result.error || 'Не удалось удалить устройство');
-      }
-
-      setVpnKeys(result.devices || vpnKeys.filter((k: any) => k.id !== deviceId));
-      toast.success('Устройство удалено. Лимиты пересчитаны.');
-      fetchSubscriptionData();
-      return;
-    } catch (err: any) {
-      console.error('Delete device error:', err);
-      toast.error(err.message || 'Ошибка удаления устройства');
-      return;
-    }
-
+    const newKeys = vpnKeys.filter((k: any) => k.id !== deviceId);
+    // Optimistic UI update
+    setVpnKeys(newKeys);
     toast.success('Устройство удалено. Лимиты пересчитаны.');
     
     if (subscriptions[0] && subscriptions[0].id) {
        try {
-         fetchSubscriptionData();
+         const mainSubData = subscriptions[0];
+         // Only handle legacy string format separation since it's the main way keys are stored based on earlier code
+         const sep = '\n---KEY_SEP---\n';
+         const updatedConfigStr = newKeys.map((k: any) => k.config || k.v2ray_config).join(sep);
+         
+         const { error } = await supabase.from('subscriptions').update({
+           v2ray_config: updatedConfigStr,
+           device_limit: Math.max(1, (mainSubData.device_limit || 2) - 1)
+         }).eq('id', mainSubData.id);
+         
+         if (error) {
+            console.error('Update err:', error);
+         } else {
+           fetchSubscriptionData();
+         }
        } catch (err) {
          console.warn(err);
        }
