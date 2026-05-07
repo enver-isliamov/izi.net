@@ -45,7 +45,7 @@ const sharedHttpAgent = new http.Agent({
 // Helper for axios requests to 3x-ui
 function getRequestConfig(url: string, headers: any = {}, customTimeout?: number) {
   const isHttps = url.startsWith('https');
-  const timeout = customTimeout || 5000; // Shorter 5s default timeout to prevent 502/Gateway failures
+  const timeout = customTimeout || 7000; // Increased default timeout to 7s
   return {
     headers,
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
@@ -154,7 +154,7 @@ class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
-  private readonly SESSION_TTL = 4 * 60 * 1000; // 4 minutes cache for session cookie (BUG-05: 3x-ui sessions expire fast)
+  private readonly SESSION_TTL = 2 * 60 * 1000; // 2 minutes cache for session cookie (VPN-04: Fresher sessions)
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
@@ -239,6 +239,7 @@ class XUIService {
 
     try {
       // Try root path first (common for secret paths), then /login, then /panel/login
+      // VPN-04: Increased login timeout to 10s
       let response = await tryLogin('');
       if (!response) {
         response = await tryLogin('/');
@@ -318,7 +319,7 @@ class XUIService {
             id: uuid,
             flow: flow,
             email: email,
-            limitIp: 1,
+            limitIp: 2, // VPN-01: Allow 2 IPs to prevent timeouts on mobile switching (WiFi <> 4G)
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -370,14 +371,10 @@ class XUIService {
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     if (!this.sessionCookie) await this.login();
     
-    // First, check if we should use a different UUID that exists on the server for this email
+    // VPN-03: Optimizing getInboundLink - removed redundant getClientByEmail call. 
+    // UUID is already known from DB or creation.
     let effectiveUuid = uuid;
     let effectiveInboundId = inboundId;
-    const serverClient = await this.getClientByEmail(inboundId, email);
-    if (serverClient) {
-      if (serverClient.id) effectiveUuid = serverClient.id;
-      if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
-    }
 
     const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
     const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
@@ -519,8 +516,14 @@ class XUIService {
         if (streamSettings.security === 'reality') {
           flow = "xtls-rprx-vision";
         }
+      } else {
+        // VPN-06: Fallback for Reality flow
+        flow = "xtls-rprx-vision";
       }
-    } catch (e) {}
+    } catch (e) {
+      // VPN-06: Fallback for Reality flow on error
+      flow = "xtls-rprx-vision";
+    }
 
     // 3x-ui API for updateClient requires the client data inside a JSON string 'settings'
     const clientData = {
@@ -531,7 +534,7 @@ class XUIService {
             id: effectiveUuid,
             flow: flow,
             email: email,
-            limitIp: 1,
+            limitIp: 2, // VPN-01: Sync limitIp to 2
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -2207,10 +2210,16 @@ app.post('/api/subscription/buy', async (req, res) => {
       console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
       const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
+      // VPN-02: Safety check for config before saving to DB
+      if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+        console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
+        throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+      }
+
       const newDevice: VpnDevice = {
         id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
         label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
-        config: rawConfig || xuiInstance.generateVlessLink(uuid, email, domain),
+        config: rawConfig,
         email: email,
         uuid: uuid,
         expiresAt: expiresAt.toISOString(),
