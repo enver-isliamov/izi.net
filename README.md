@@ -9,7 +9,7 @@ React + Vite личный кабинет для VPN-подписок с backend 
 - Auth/database: Supabase.
 - VPN provisioning: 3x-ui API, multi-server table `vpn_servers`.
 - Payments: Enot.io new invoice API.
-- Deploy: Vercel frontend with `/api/*` proxy to backend `http://194.50.94.28:3005/api/*`.
+- Deploy: Vercel frontend with `/api/*` proxy to backend `http://YOUR_VPS_IP:3005/api/*`.
 
 ## Основные пользовательские потоки
 
@@ -86,6 +86,6 @@ npm run build
 ## Operational notes
 
 - Vercel does not run the API directly. It proxies `/api/*` to the VPS backend from `vercel.json`.
-- After backend code changes, deploy and restart the process on `194.50.94.28:3005`.
+- After backend code changes, deploy and restart the process on `YOUR_VPS_IP:3005`.
 - `fix.md` contains only currently open issues.
 - `PAYMENT_SETUP.md` contains the current payment/database setup.

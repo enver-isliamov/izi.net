@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://194.50.94.28:3005/api/:path*"
+      "destination": "http://YOUR_VPS_IP:3005/api/:path*"
     },
     {
       "source": "/(.*)",
