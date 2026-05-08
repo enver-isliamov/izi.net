@@ -883,14 +883,35 @@ class PaymentService {
       .digest('hex');
 
     const received = headerSignature.toLowerCase();
+    
+    // Попробуем также вариант без пробелов (стандартный JSON.stringify)
+    const calculatedSignCompact = crypto
+      .createHmac('sha256', secretKey2)
+      .update(JSON.stringify(body))
+      .digest('hex');
+
+    console.log(`[EnotDebug] Signature Check:
+      - Received: ${received}
+      - Calc (Stable): ${calculatedSign}
+      - Calc (Compact): ${calculatedSignCompact}
+      - Order ID: ${body.order_id}
+      - Status: ${body.status}`);
+
     if (!/^[a-f0-9]{64}$/.test(received)) {
       return false;
     }
 
-    return crypto.timingSafeEqual(
+    const matchesStable = crypto.timingSafeEqual(
       Buffer.from(received, 'hex'),
       Buffer.from(calculatedSign, 'hex')
     );
+
+    const matchesCompact = crypto.timingSafeEqual(
+      Buffer.from(received, 'hex'),
+      Buffer.from(calculatedSignCompact, 'hex')
+    );
+
+    return matchesStable || matchesCompact;
   }
 }
 
@@ -1835,9 +1856,9 @@ async function handleEnotWebhook(req: any, res: any) {
       throw new Error(`Payment lookup failed: ${paymentErr.message}`);
     }
 
-    const userId = paymentRow?.user_id || parseEnotCustomFields(custom_fields).user_id;
+    const userId = paymentRow?.user_id || parseEnotCustomFields(custom_fields).user_id || parseEnotCustomFields(custom_fields).userId;
     if (!userId) {
-      console.error('No user_id found for Enot webhook order:', orderId);
+      console.error('❌ [EnotWebhook] No user_id found for order:', orderId, 'Body:', JSON.stringify(req.body));
       return res.status(400).send('Missing user_id');
     }
 
