@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { UserHistoryModal } from '@/components/admin/UserHistoryModal';
 
 export default function AdminUsers() {
   const { session, user: currentUser } = useAuth();
@@ -12,6 +13,8 @@ export default function AdminUsers() {
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -192,6 +195,16 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
+                         <button 
+                           onClick={() => {
+                             setSelectedUser(user);
+                             setIsHistoryOpen(true);
+                           }}
+                           className="p-2 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white rounded-lg transition-all"
+                           title="История транзакций"
+                         >
+                           <History size={14} />
+                         </button>
                          {user.role !== 'admin' && user.role !== 'superadmin' ? (
                            <button 
                              onClick={() => updateUserRole(user.id, 'admin')}
@@ -294,6 +307,15 @@ export default function AdminUsers() {
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                   <button 
+                     onClick={() => {
+                        setSelectedUser(user);
+                        setIsHistoryOpen(true);
+                     }}
+                     className="flex items-center gap-2 px-3 py-1.5 bg-white/5 text-muted-foreground rounded-lg text-xs font-medium"
+                   >
+                     <History size={14} /> История
+                   </button>
                    {user.role !== 'admin' && user.role !== 'superadmin' ? (
                      <button 
                        onClick={() => updateUserRole(user.id, 'admin')}
@@ -320,6 +342,12 @@ export default function AdminUsers() {
             </div>
           )}
         </div>
+
+        <UserHistoryModal 
+          user={selectedUser}
+          isOpen={isHistoryOpen}
+          onClose={() => setIsHistoryOpen(false)}
+        />
       </div>
     );
 }

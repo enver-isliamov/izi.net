@@ -1264,6 +1264,43 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
   }
 });
 
+app.get('/api/admin/users/:userId/transactions', adminOnly, async (req, res) => {
+  const startTime = Date.now();
+  const requestId = Math.random().toString(36).substring(7);
+  const { userId } = req.params;
+
+  try {
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Calculate totals
+    const deposits = transactions
+      .filter(t => t.type === 'deposit' && t.status === 'completed')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    
+    const withdrawals = transactions
+      .filter(t => t.type === 'withdrawal' && t.status === 'completed')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    res.json({
+      transactions,
+      summary: {
+        totalDeposits: deposits,
+        totalWithdrawals: withdrawals,
+        netProfit: withdrawals
+      }
+    });
+  } catch (err: any) {
+    console.error(`[AdminAPI][${requestId}] Error fetching transactions:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   const { userId, newServerId } = req.body;
   if (!userId || !newServerId) return res.status(400).json({ error: 'Missing parameters' });
@@ -2396,7 +2433,22 @@ app.post('/api/subscription/buy', async (req, res) => {
       })
       .eq('user_id', userId);
 
-    if (deductErr) console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
+    if (deductErr) {
+      console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
+    } else {
+      // 6. Log withdrawal transaction
+      const { error: txErr } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          amount: price,
+          currency: 'RUB',
+          type: 'withdrawal',
+          status: 'completed',
+          description: `Продление/покупка подписки: ${planName}`
+        });
+      if (txErr) console.error('Failed to log withdrawal transaction:', txErr);
+    }
 
     res.json({ success: true, subscription: subData, updatedDevice: targetDevice });
 
@@ -2409,8 +2461,28 @@ app.post('/api/subscription/buy', async (req, res) => {
   }
 });
 
-// Supabase Setup
-// Already initialized at the top
+// Get user's own transaction history
+app.get('/api/transactions', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Auth required' });
+
+  try {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(transactions);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
