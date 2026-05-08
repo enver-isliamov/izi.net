@@ -107,6 +107,7 @@ export default function AdminUsers() {
               <tr className="border-b border-white/5 bg-white/5">
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Пользователь</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Роль</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Баланс</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Подписка</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">VPN Сервер</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Трафик</th>
@@ -136,6 +137,11 @@ export default function AdminUsers() {
                       }`}>
                         {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-mono text-xs text-blue-400 font-bold">{user.balance || 0} ₽</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       {sub ? (
@@ -237,6 +243,10 @@ export default function AdminUsers() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="p-2 bg-white/5 rounded-xl border border-white/5">
+                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Баланс</p>
+                    <span className="text-xs font-bold text-blue-400 font-mono">{user.balance || 0} ₽</span>
+                  </div>
                   <div className="p-2 bg-white/5 rounded-xl border border-white/5">
                     <p className="text-[10px] text-muted-foreground uppercase mb-1">Подписка</p>
                     {sub ? (

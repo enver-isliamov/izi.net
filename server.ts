@@ -1128,6 +1128,9 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       .from('users')
       .select(`
         *,
+        balances (
+          amount
+        ),
         subscriptions (
           id,
           status,
@@ -1160,6 +1163,9 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       let subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
       const activeSub = subscriptions.find((s: any) => s.status === 'active') || subscriptions[0];
       
+      const balanceObj = Array.isArray(u.balances) ? u.balances[0] : u.balances;
+      const balance = balanceObj ? balanceObj.amount : 0;
+
       let serverName = 'Не назначен';
       if (activeSub?.vpn_servers) {
         let vpnServer = activeSub.vpn_servers;
@@ -1169,6 +1175,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
       return {
         ...u,
+        balance: balance,
         active_subscription: activeSub ? {
           ...activeSub,
           server_name: serverName
