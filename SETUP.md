@@ -1,5 +1,7 @@
 # 🚀 Руководство по настройке izinet Dashboard
 
+> Актуально на 2026-05-06: Vercel обслуживает frontend и проксирует `/api/*` на VPS backend `194.50.94.28:3005`. Оплата работает через новый ENOT invoice API, а не через старый `enot.io/checkout`. Для точной схемы платежей см. `PAYMENT_SETUP.md`; для открытых проблем см. `fix.md`.
+
 ## Шаг 1: Создайте Supabase проект
 
 1. Перейдите на [supabase.com](https://supabase.com)

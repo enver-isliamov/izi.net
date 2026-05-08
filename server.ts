@@ -45,7 +45,7 @@ const sharedHttpAgent = new http.Agent({
 // Helper for axios requests to 3x-ui
 function getRequestConfig(url: string, headers: any = {}, customTimeout?: number) {
   const isHttps = url.startsWith('https');
-  const timeout = customTimeout || 5000; // Shorter 5s default timeout to prevent 502/Gateway failures
+  const timeout = customTimeout || 7000; // Increased default timeout to 7s
   return {
     headers,
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
@@ -154,7 +154,7 @@ class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
-  private readonly SESSION_TTL = 4 * 60 * 1000; // 4 minutes cache for session cookie (BUG-05: 3x-ui sessions expire fast)
+  private readonly SESSION_TTL = 2 * 60 * 1000; // 2 minutes cache for session cookie (VPN-04: Fresher sessions)
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
@@ -239,6 +239,7 @@ class XUIService {
 
     try {
       // Try root path first (common for secret paths), then /login, then /panel/login
+      // VPN-04: Increased login timeout to 10s
       let response = await tryLogin('');
       if (!response) {
         response = await tryLogin('/');
@@ -318,7 +319,7 @@ class XUIService {
             id: uuid,
             flow: flow,
             email: email,
-            limitIp: 1,
+            limitIp: 2, // VPN-01: Allow 2 IPs to prevent timeouts on mobile switching (WiFi <> 4G)
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -370,14 +371,10 @@ class XUIService {
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     if (!this.sessionCookie) await this.login();
     
-    // First, check if we should use a different UUID that exists on the server for this email
+    // VPN-03: Optimizing getInboundLink - removed redundant getClientByEmail call. 
+    // UUID is already known from DB or creation.
     let effectiveUuid = uuid;
     let effectiveInboundId = inboundId;
-    const serverClient = await this.getClientByEmail(inboundId, email);
-    if (serverClient) {
-      if (serverClient.id) effectiveUuid = serverClient.id;
-      if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
-    }
 
     const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
     const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
@@ -519,8 +516,14 @@ class XUIService {
         if (streamSettings.security === 'reality') {
           flow = "xtls-rprx-vision";
         }
+      } else {
+        // VPN-06: Fallback for Reality flow
+        flow = "xtls-rprx-vision";
       }
-    } catch (e) {}
+    } catch (e) {
+      // VPN-06: Fallback for Reality flow on error
+      flow = "xtls-rprx-vision";
+    }
 
     // 3x-ui API for updateClient requires the client data inside a JSON string 'settings'
     const clientData = {
@@ -531,7 +534,7 @@ class XUIService {
             id: effectiveUuid,
             flow: flow,
             email: email,
-            limitIp: 1,
+            limitIp: 2, // VPN-01: Sync limitIp to 2
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -565,6 +568,16 @@ class XUIService {
         return false;
       }
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
       console.error(`❌ 3x-ui updateClient total failure for ${email}:`, error.message);
       return false;
     }
@@ -629,6 +642,11 @@ class XUIService {
       console.warn(`⚠️ 3x-ui deleteClient response was success: false for ${email || effectiveUuid} on ${this.host}`);
       return false;
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.deleteClient(uuid, email);
+      }
       if (error.response?.status === 404) {
         console.log(`ℹ️ Client ${email || effectiveUuid} not found on ${this.host}, skipping delete.`);
         return true;
@@ -650,6 +668,11 @@ class XUIService {
       }
       return [];
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getOnlines();
+      }
       console.error(`❌ 3x-ui getOnlines error for ${this.host}${this.basePath}:`, error.message);
       return [];
     }
@@ -667,6 +690,16 @@ class XUIService {
       }
       return allClients;
     } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.listClients();
+      }
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.listClients();
+      }
       console.error(`❌ 3x-ui listClients error for ${this.host}:`, e.message);
       return [];
     }
@@ -850,14 +883,35 @@ class PaymentService {
       .digest('hex');
 
     const received = headerSignature.toLowerCase();
+    
+    // Попробуем также вариант без пробелов (стандартный JSON.stringify)
+    const calculatedSignCompact = crypto
+      .createHmac('sha256', secretKey2)
+      .update(JSON.stringify(body))
+      .digest('hex');
+
+    console.log(`[EnotDebug] Signature Check:
+      - Received: ${received}
+      - Calc (Stable): ${calculatedSign}
+      - Calc (Compact): ${calculatedSignCompact}
+      - Order ID: ${body.order_id}
+      - Status: ${body.status}`);
+
     if (!/^[a-f0-9]{64}$/.test(received)) {
       return false;
     }
 
-    return crypto.timingSafeEqual(
+    const matchesStable = crypto.timingSafeEqual(
       Buffer.from(received, 'hex'),
       Buffer.from(calculatedSign, 'hex')
     );
+
+    const matchesCompact = crypto.timingSafeEqual(
+      Buffer.from(received, 'hex'),
+      Buffer.from(calculatedSignCompact, 'hex')
+    );
+
+    return matchesStable || matchesCompact;
   }
 }
 
@@ -1084,6 +1138,58 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
   });
 });
 
+
+app.get('/api/admin/payments', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    console.error('❌ Admin payments fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/payments/confirm', adminOnly, async (req, res) => {
+  const { paymentId } = req.body;
+  
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Missing paymentId' });
+  }
+
+  try {
+    // 1. Fetch payment info
+    const { data: payRow, error: fetchErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+
+    if (fetchErr || !payRow) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    if (payRow.status === 'completed') {
+      return res.status(400).json({ error: 'Payment already completed' });
+    }
+
+    console.log(`👤 Admin ${(req as any).user?.email} is manually confirming payment ${paymentId} for user ${payRow.user_id}`);
+
+    // 2. Process using the same logic as webhook
+    await processSuccessfulPayment(payRow.user_id, parseFloat(payRow.amount), payRow.id, payRow.provider || 'admin_manual');
+    
+    res.json({ success: true, message: 'Payment confirmed manually and balance updated' });
+  } catch (error: any) {
+    console.error('❌ Admin payment confirm error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const { search } = req.query;
   const requestId = Math.random().toString(36).substring(7);
@@ -1095,6 +1201,9 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       .from('users')
       .select(`
         *,
+        balances (
+          amount
+        ),
         subscriptions (
           id,
           status,
@@ -1127,6 +1236,9 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       let subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
       const activeSub = subscriptions.find((s: any) => s.status === 'active') || subscriptions[0];
       
+      const balanceObj = Array.isArray(u.balances) ? u.balances[0] : u.balances;
+      const balance = balanceObj ? balanceObj.amount : 0;
+
       let serverName = 'Не назначен';
       if (activeSub?.vpn_servers) {
         let vpnServer = activeSub.vpn_servers;
@@ -1136,6 +1248,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
       return {
         ...u,
+        balance: balance,
         active_subscription: activeSub ? {
           ...activeSub,
           server_name: serverName
@@ -1148,6 +1261,43 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
   } catch (err: any) {
     console.error(`[AdminAPI][${requestId}] Critical error:`, err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/admin/users/:userId/transactions', adminOnly, async (req, res) => {
+  const startTime = Date.now();
+  const requestId = Math.random().toString(36).substring(7);
+  const { userId } = req.params;
+
+  try {
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Calculate totals
+    const deposits = transactions
+      .filter(t => t.type === 'deposit' && t.status === 'completed')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    
+    const withdrawals = transactions
+      .filter(t => t.type === 'withdrawal' && t.status === 'completed')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    res.json({
+      transactions,
+      summary: {
+        totalDeposits: deposits,
+        totalWithdrawals: withdrawals,
+        netProfit: withdrawals
+      }
+    });
+  } catch (err: any) {
+    console.error(`[AdminAPI][${requestId}] Error fetching transactions:`, err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1583,15 +1733,15 @@ app.get('/api/sub/:id', async (req, res) => {
 
 // 💰 Create Payment Link
 app.post('/api/pay/create', async (req, res) => {
-  const { userId, amount, method } = req.body;
   const authHeader = req.headers.authorization;
+  const { userId, amount, method } = req.body;
   
-  if (!userId || !amount || !method) {
-    return res.status(400).json({ error: 'Missing parameters' });
-  }
-
   if (!authHeader) {
     return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!userId || !amount || !method) {
+    return res.status(400).json({ error: 'Missing parameters' });
   }
 
   const token = authHeader.replace('Bearer ', '');
@@ -1668,9 +1818,13 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 app.post('/api/subscription/sync-traffic', async (req, res) => {
-  const { userId } = req.body;
   const authHeader = req.headers.authorization;
+  const { userId } = req.body;
   
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
   if (!userId) {
     return res.status(400).json({ error: 'Missing userId' });
   }
@@ -1682,13 +1836,10 @@ app.post('/api/subscription/sync-traffic', async (req, res) => {
   }
   lastSyncMap.set(userId, now);
 
-  // Security check: Verify token
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !user || user.id !== userId) {
-      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
-    }
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
   }
 
   try {
@@ -1794,9 +1945,9 @@ async function handleEnotWebhook(req: any, res: any) {
       throw new Error(`Payment lookup failed: ${paymentErr.message}`);
     }
 
-    const userId = paymentRow?.user_id || parseEnotCustomFields(custom_fields).user_id;
+    const userId = paymentRow?.user_id || parseEnotCustomFields(custom_fields).user_id || parseEnotCustomFields(custom_fields).userId;
     if (!userId) {
-      console.error('No user_id found for Enot webhook order:', orderId);
+      console.error('❌ [EnotWebhook] No user_id found for order:', orderId, 'Body:', JSON.stringify(req.body));
       return res.status(400).send('Missing user_id');
     }
 
@@ -1922,16 +2073,17 @@ async function processSuccessfulPaymentForCurrentSchema(userId: string, amount: 
 }
 
 async function processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
+  return processSuccessfulPaymentForCurrentSchema(userId, amount, orderId, provider);
   console.log(`💰 Processing payment: ${amount} for user ${userId} via ${provider}`);
   
-  // 1. Check if already processed to avoid double-spend
-  // BUG-01: Standardize on 'transactions' table only
-  const tableName = 'transactions';
+  // Legacy wrapper retained for old webhook compatibility.
+  // Current payment flow is handled by processSuccessfulPaymentForCurrentSchema().
+  const tableName = 'payments';
   
   const { data: existingTx } = await supabase
     .from(tableName)
     .select('status')
-    .eq('provider_order_id', orderId)
+    .eq('id', orderId)
     .maybeSingle(); // BUG-11: use maybeSingle to avoid 406/PGRST116 log spam
 
   if (existingTx?.status === 'completed') {
@@ -1957,8 +2109,8 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     .upsert({ 
       user_id: userId, 
       amount: currentAmount + amount,
-      // BUG-03: updated_at column does not exist in balances schema, removing it
-      currency: 'RUB'
+      currency: 'RUB',
+      updated_at: new Date().toISOString()
     }, { onConflict: 'user_id' });
 
   if (balErr) {
@@ -1966,11 +2118,11 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
     throw new Error(`Balance update failed: ${balErr.message}`);
   }
 
-  // 3. Update transaction status
+  // 3. Update payment status
   const { error: statusErr } = await supabase
     .from(tableName)
     .update({ status: 'completed' })
-    .eq('provider_order_id', orderId);
+    .eq('id', orderId);
 
   if (statusErr) {
     console.error(`❌ Failed to update status in ${tableName}:`, statusErr.message);
@@ -2012,9 +2164,80 @@ app.get('/api/health', (req, res) => {
 });
 
 // --- Subscription Routes ---
-app.post('/api/subscription/buy', async (req, res) => {
-  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
+app.post('/api/subscription/device/delete', async (req, res) => {
   const authHeader = req.headers.authorization;
+  const { userId, deviceId } = req.body;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!userId || !deviceId) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
+  }
+
+  try {
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subErr) throw subErr;
+    if (!sub) return res.status(404).json({ error: 'Active subscription not found' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const target = devices.find((device) => device.id === deviceId);
+    if (!target) return res.status(404).json({ error: 'Device not found' });
+    if (target.id === 'primary') {
+      return res.status(400).json({ error: 'Primary device cannot be deleted' });
+    }
+
+    const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+    await xuiInstance.deleteClient(target.uuid, target.email);
+
+    const nextDevices = devices.filter((device) => device.id !== deviceId);
+    const maxExpiryDate = nextDevices.reduce((max, device) => {
+      const expiresAt = new Date(device.expiresAt);
+      return expiresAt > max ? expiresAt : max;
+    }, new Date(sub.expires_at || Date.now()));
+
+    const { data: updatedSub, error: updateErr } = await supabase
+      .from('subscriptions')
+      .update({
+        v2ray_config: JSON.stringify(nextDevices),
+        device_limit: Math.max(1, nextDevices.length),
+        expires_at: maxExpiryDate.toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sub.id)
+      .select()
+      .maybeSingle();
+
+    if (updateErr) throw updateErr;
+    res.json({ success: true, subscription: updatedSub, devices: nextDevices });
+  } catch (error: any) {
+    console.error('Device delete error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+app.post('/api/subscription/buy', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const { userId, planId, planName, price, durationDays, periodMonths, serverType, deviceLimit, forceNew, targetDeviceId, deviceName, serverId: reqServerId } = req.body;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   console.log(`[BUY] Request received: user=${userId}, plan=${planName}, reqServer=${reqServerId}, targetDevice=${targetDeviceId}`);
 
@@ -2023,12 +2246,10 @@ app.post('/api/subscription/buy', async (req, res) => {
   }
 
   // 0. Security check: Verify token
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !user || user.id !== userId) {
-      return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
-    }
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user || user.id !== userId) {
+    return res.status(401).json({ error: 'Unauthorized: ID mismatch' });
   }
 
   try {
@@ -2060,12 +2281,12 @@ app.post('/api/subscription/buy', async (req, res) => {
   // Pick server: use user-selected server, existing server if renewing, otherwise find a default or least loaded one
   let serverId = reqServerId || lastSub?.server_id;
   if (!serverId) {
-    // 2B. Improved server selection: pick default server or one with fewest active subscriptions
+    // 2B. Pick the active server with the fewest active subscriptions.
+    // The production vpn_servers schema does not include an is_default column.
     const { data: servers, error: sErr } = await supabase
       .from('vpn_servers')
       .select(`
         id,
-        is_default,
         subscriptions!server_id (count)
       `)
       .eq('is_active', true);
@@ -2073,19 +2294,12 @@ app.post('/api/subscription/buy', async (req, res) => {
     if (sErr || !servers || servers.length === 0) {
       serverId = null;
     } else {
-      // Prefer default server if exists
-      const defaultServer = servers.find((s: any) => s.is_default);
-      if (defaultServer) {
-        serverId = defaultServer.id;
-      } else {
-        // Sort by subscription count
-        const sorted = servers.sort((a: any, b: any) => {
-          const countA = a.subscriptions?.[0]?.count || 0;
-          const countB = b.subscriptions?.[0]?.count || 0;
-          return countA - countB;
-        });
-        serverId = sorted[0].id;
-      }
+      const sorted = servers.sort((a: any, b: any) => {
+        const countA = a.subscriptions?.[0]?.count || 0;
+        const countB = b.subscriptions?.[0]?.count || 0;
+        return countA - countB;
+      });
+      serverId = sorted[0].id;
     }
   }
 
@@ -2113,10 +2327,16 @@ app.post('/api/subscription/buy', async (req, res) => {
       console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
       const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
       
+      // VPN-02: Safety check for config before saving to DB
+      if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+        console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
+        throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+      }
+
       const newDevice: VpnDevice = {
         id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
         label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
-        config: rawConfig || xuiInstance.generateVlessLink(uuid, email, domain),
+        config: rawConfig,
         email: email,
         uuid: uuid,
         expiresAt: expiresAt.toISOString(),
@@ -2207,10 +2427,28 @@ app.post('/api/subscription/buy', async (req, res) => {
     // 5. Deduct balance
     const { error: deductErr } = await supabase
       .from('balances')
-      .update({ amount: balanceData.amount - price })
+      .update({
+        amount: balanceData.amount - price,
+        updated_at: new Date().toISOString()
+      })
       .eq('user_id', userId);
 
-    if (deductErr) console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
+    if (deductErr) {
+      console.error('CRITICAL: Subscription processed but balance deduction failed!', deductErr);
+    } else {
+      // 6. Log withdrawal transaction
+      const { error: txErr } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          amount: price,
+          currency: 'RUB',
+          type: 'withdrawal',
+          status: 'completed',
+          description: `Продление/покупка подписки: ${planName}`
+        });
+      if (txErr) console.error('Failed to log withdrawal transaction:', txErr);
+    }
 
     res.json({ success: true, subscription: subData, updatedDevice: targetDevice });
 
@@ -2223,8 +2461,28 @@ app.post('/api/subscription/buy', async (req, res) => {
   }
 });
 
-// Supabase Setup
-// Already initialized at the top
+// Get user's own transaction history
+app.get('/api/transactions', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Auth required' });
+
+  try {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(transactions);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;

@@ -1,165 +1,65 @@
-🧠 izinet Skill: Engineering Standard (Pro)
+---
+name: izinet
+description: Use for any work in the izinet VPN subscription service: payments, wallet balance, subscriptions, 3x-ui provisioning, Supabase schema/RLS, Telegram bot, Vercel/VPS deployment, or project documentation.
+---
 
-Этот скилл задаёт строгий инженерный стандарт разработки.
-Цель: предсказуемость, безопасность, масштабируемость и минимизация лишних действий.
+# izinet Project Skill
 
-1. ⚙️ Execution Lifecycle (ОБЯЗАТЕЛЬНЫЙ ПРОЦЕСС)
+## Stack
 
-Всегда следуй этому пайплайну:
+- Frontend: React + Vite + Tailwind.
+- Backend: Express monolith in `server.ts`.
+- Database/Auth: Supabase.
+- VPN provisioning: 3x-ui.
+- Payments: Enot.io new invoice API.
+- Deploy: Vercel frontend proxies `/api/*` to VPS backend `194.50.94.28:3005`.
 
-1.1 Анализ задачи
-Определи тип задачи:
-bug / feature / refactor / question
-Уточни:
-ожидаемый результат
-ограничения
-затронутые части системы
-1.2 План (обязателен перед кодом)
+## Payment Contract
 
-Выводи:
+Use the current ENOT flow only:
 
-список файлов
-изменения по каждому файлу
-изменения в БД (если есть)
-потенциальные риски
+1. `POST /api/pay/create`
+2. Insert `payments` row with `status = pending`.
+3. `POST https://api.enot.io/invoice/create` with `x-api-key`.
+4. ENOT webhook hits `/api/pay/webhook/enot`.
+5. Verify `x-api-sha256-signature` with HMAC SHA-256.
+6. On `status = success`:
+   - update `balances.amount`;
+   - set `payments.status = completed`;
+   - insert `transactions` row with `type = deposit`.
 
-Формат:
+Never use old `https://enot.io/checkout?...` links.
 
-План:
-1. file.tsx — что меняем
-2. migration.sql — что добавляем
-3. ...
+## Database Rules
 
-❗ Без плана код писать запрещено
+- `payments` stores invoice/payment lifecycle.
+- `transactions` stores successful balance operations.
+- `balances.user_id` is unique and should be upserted with `updated_at`.
+- `subscriptions.v2ray_config` should be JSON for new device-aware flows.
+- Avoid direct client writes for sensitive subscription/device operations; use authenticated API endpoints.
 
-1.3 Реализация
-Меняй только необходимые файлы
-Не переписывай существующий код без причины
-Соблюдай текущий стиль проекта
-1.4 Валидация
+## Subscription Rules
 
-Обязательно проверяй:
+- `POST /api/subscription/buy` must require JWT.
+- Check balance server-side before provisioning.
+- Create/update 3x-ui client before final subscription update.
+- Deduct balance after successful subscription provisioning.
+- Do not regenerate VLESS links with fallback `security=none`.
+- Device deletion must remove the 3x-ui client and preserve JSON `v2ray_config`.
 
-TypeScript ошибки
-runtime риски (undefined, null)
-совместимость с текущей архитектурой
-1.5 Итоговый отчёт
+## Verification Checklist
 
-Кратко:
+After payment/subscription changes:
 
-что сделано
-какие файлы изменены
-что протестировать
-следующие шаги
-2. 🏗 Архитектурные стандарты
-2.1 Стек (фиксированный)
-Frontend: React + Vite + Tailwind
-Backend: Supabase
-UI: shadcn / Base UI
-2.2 React правила (жёсткие)
-✅ Обязательно:
-?. для всех потенциально nullable объектов (user, session)
-forwardRef для всех UI компонентов
-разделение:
-UI
-hooks
-data logic
-❌ Запрещено:
-прямой доступ к данным без проверки
-большие компоненты (>200 строк без декомпозиции)
-дублирование логики
-2.3 Структура компонентов
-/components/ui
-/components/features
-/hooks
-/lib
-3. 🔐 Работа с Supabase (КРИТИЧЕСКИЙ БЛОК)
-3.1 Любые изменения БД = миграция
+1. Check `/api/pay/create` rejects unauthenticated requests.
+2. Check ENOT invoice URL is returned from the API response, not old checkout.
+3. Check webhook signature logic.
+4. Check balance update.
+5. Check subscription purchase from balance.
+6. Check VPS backend was redeployed, not only Vercel frontend.
 
-Формат:
+## Documentation Rules
 
-supabase/migrations/[timestamp]_name.sql
-3.2 RLS (обязательно)
-
-Каждая таблица:
-
-ALTER TABLE table_name ENABLE ROW LEVEL SECURITY;
-
-Базовая политика:
-
-CREATE POLICY "Users can access their own data"
-ON public.table_name
-FOR ALL
-USING (auth.uid() = user_id);
-3.3 Жёсткие запреты
-
-❌ НЕЛЬЗЯ:
-
-allow all
-отключать RLS
-использовать anon доступ для приватных данных
-4. 🧩 Работа с данными
-Правила:
-Всегда учитывать loading / error состояния
-Не доверять данным с клиента
-Кэшировать, где это оправдано
-5. 🧪 Обработка ошибок
-Принцип:
-
-Ошибка должна быть объяснима
-
-Примеры:
-504 → инфраструктура
-Quota → лимиты Supabase/Vercel
-undefined → ошибка логики
-6. 📚 Объяснение (для пользователя)
-
-Если пользователь не эксперт:
-
-объясняй просто
-избегай перегрузки терминологией
-давай аналогии
-7. 📁 Контекст проекта
-
-Всегда учитывать:
-
-Todo.md
-fix.md
-Главная цель:
-
-👉 заменить mock → реальные данные Supabase
-
-Интеграции:
-VPN: 3x-ui
-Платежи: Enot.io
-8. 🚨 Оптимизация токенов
-Не генерируй лишний код
-Не повторяйся
-Не объясняй очевидное
-Фокус только на задаче
-9. 🎯 Триггеры активации
-
-Использовать этот скилл если:
-
-упоминается izinet
-требуется:
-новая фича
-исправление бага
-миграция
-архитектурное решение
-"что дальше?"
-10. 🧨 Антипаттерны (избегать)
-"Сейчас просто сделаем быстро"
-"Потом поправим"
-отсутствие RLS
-хаотичная структура
-правка без плана
-11. 🏁 Definition of Done
-
-Задача считается завершённой если:
-
-нет ошибок
-соблюдена архитектура
-есть план + отчёт
-безопасно (RLS)
-можно масштабировать
+- `fix.md` contains only open bugs.
+- Move fixed items out of `fix.md`.
+- Keep `PAYMENT_SETUP.md`, `Testing_Checklist.md`, and `README.md` aligned with current code.

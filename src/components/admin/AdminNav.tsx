@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Server, Users, Settings } from 'lucide-react';
+import { LayoutDashboard, Server, Users, Settings, DollarSign } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function AdminNav() {
@@ -10,6 +10,7 @@ export function AdminNav() {
     { name: 'Статистика', path: '/admin', icon: LayoutDashboard },
     { name: 'Серверы', path: '/admin/servers', icon: Server },
     { name: 'Пользователи', path: '/admin/users', icon: Users },
+    { name: 'Платежи', path: '/admin/payments', icon: DollarSign },
     { name: 'Настройки', path: '/admin/settings', icon: Settings },
   ];
 

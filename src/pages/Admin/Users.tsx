@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { UserHistoryModal } from '@/components/admin/UserHistoryModal';
 
 export default function AdminUsers() {
   const { session, user: currentUser } = useAuth();
@@ -12,6 +13,8 @@ export default function AdminUsers() {
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -107,6 +110,7 @@ export default function AdminUsers() {
               <tr className="border-b border-white/5 bg-white/5">
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Пользователь</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Роль</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Баланс</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Подписка</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">VPN Сервер</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Трафик</th>
@@ -136,6 +140,11 @@ export default function AdminUsers() {
                       }`}>
                         {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-mono text-xs text-blue-400 font-bold">{user.balance || 0} ₽</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       {sub ? (
@@ -186,6 +195,16 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
+                         <button 
+                           onClick={() => {
+                             setSelectedUser(user);
+                             setIsHistoryOpen(true);
+                           }}
+                           className="p-2 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white rounded-lg transition-all"
+                           title="История транзакций"
+                         >
+                           <History size={14} />
+                         </button>
                          {user.role !== 'admin' && user.role !== 'superadmin' ? (
                            <button 
                              onClick={() => updateUserRole(user.id, 'admin')}
@@ -238,6 +257,10 @@ export default function AdminUsers() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-2 bg-white/5 rounded-xl border border-white/5">
+                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Баланс</p>
+                    <span className="text-xs font-bold text-blue-400 font-mono">{user.balance || 0} ₽</span>
+                  </div>
+                  <div className="p-2 bg-white/5 rounded-xl border border-white/5">
                     <p className="text-[10px] text-muted-foreground uppercase mb-1">Подписка</p>
                     {sub ? (
                       <div className="flex flex-col">
@@ -284,6 +307,15 @@ export default function AdminUsers() {
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                   <button 
+                     onClick={() => {
+                        setSelectedUser(user);
+                        setIsHistoryOpen(true);
+                     }}
+                     className="flex items-center gap-2 px-3 py-1.5 bg-white/5 text-muted-foreground rounded-lg text-xs font-medium"
+                   >
+                     <History size={14} /> История
+                   </button>
                    {user.role !== 'admin' && user.role !== 'superadmin' ? (
                      <button 
                        onClick={() => updateUserRole(user.id, 'admin')}
@@ -310,6 +342,12 @@ export default function AdminUsers() {
             </div>
           )}
         </div>
+
+        <UserHistoryModal 
+          user={selectedUser}
+          isOpen={isHistoryOpen}
+          onClose={() => setIsHistoryOpen(false)}
+        />
       </div>
     );
 }

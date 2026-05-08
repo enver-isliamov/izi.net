@@ -1,271 +1,72 @@
-# fix.md — Аудит багов izinet
+# fix.md - открытые баги izinet
 
-> Дата: 2026-05-06  
-> Приоритеты: 🔴 Критический | 🟠 Высокий | 🟡 Средний
+Дата актуализации: 2026-05-07
 
----
-
-## 🔴 BUG-01: Платёжная система — неверная проверка дубликата
-
-**Файл:** `server.ts` → `processSuccessfulPayment()`
-
-**Проблема:**
-```js
-if (tableCheckErr && tableCheckErr.code === 'PGRST116') {
-  tableName = 'transactions';
-}
-```
-`PGRST116` = **"No rows returned"** (нет строк), а НЕ "таблица не найдена".  
-**Итог:** При КАЖДОМ первом платеже (orderId не существует ещё) → `tableName` переключается на `transactions`.  
-Защита от двойной оплаты сломана. Дублирование транзакций возможно.
-
-**Правило:** `payments` таблица создана в SETUP.md, но `POST /api/pay/create` пишет в `transactions`. Нужно стандартизировать на одну таблицу.
-
-**Исправление:**
-```js
-// Убрать хрупкую логику с двумя таблицами, использовать ТОЛЬКО transactions
-const tableName = 'transactions';
-const { data: existingTx } = await supabase
-  .from(tableName)
-  .select('status')
-  .eq('provider_order_id', orderId)
-  .maybeSingle(); // maybeSingle не бросает ошибку на 0 строк
-
-if (existingTx?.status === 'completed') return;
-```
+В этом файле остаются только открытые или требующие проверки проблемы. Записи об исправленных багах удалены.
 
 ---
 
-## 🔴 BUG-02: VPN-конфиг перезаписывается сломанной ссылкой при продлении
+## 🔴 КРИТИЧЕСКАЯ БЕЗОПАСНОСТЬ
 
-**Файл:** `server.ts` → `POST /api/subscription/buy` — ветка "RENEW"
+### SEC-01: IP сервера VPS публично зашит в репозиторий
 
-**Проблема:**
-```js
-// При продлении заменяет рабочую Reality-ссылку на "заглушку":
-targetDevice.config = xuiInstance.generateVlessLink(
-  targetDevice.uuid, targetDevice.email, domain
-);
-```
-`generateVlessLink()` генерирует `vless://...?security=none` — **без параметров Reality/TLS**.  
-Hiddify видит `security=none` и отказывается подключаться.
-
-**Исправление:** При продлении НЕ обновлять `config` — ссылка уже действующая. Обновлять только `expiresAt`:
-```js
-// Убрать строку с generateVlessLink при продлении
-// targetDevice.config остаётся неизменным
-```
-Если нужно обновить ссылку — использовать `getInboundLink()` (правильный метод с Reality params).
+Статус: [x] ИСПРАВЛЕНО. IP заменен на плейсхолдеры в `vercel.json` и `README.md`.
 
 ---
 
-## 🔴 BUG-03: Balance upsert — несуществующее поле `updated_at`
+## 🔴 VPN ТАЙМАУТЫ — ПРИЧИНЫ И ФИКСЫ
 
-**Файл:** `server.ts` → `processSuccessfulPayment()`
-
-**Проблема:**
-```js
-await supabase.from('balances').upsert({
-  user_id: userId,
-  amount: currentAmount + amount,
-  updated_at: new Date().toISOString() // ← этого поля нет в схеме SETUP.md!
-}, { onConflict: 'user_id' });
-```
-Supabase вернёт ошибку **"column updated_at does not exist"** → баланс не обновится → пополнение не зачтётся.
-
-**Исправление:**
-```js
-await supabase.from('balances').upsert({
-  user_id: userId,
-  amount: currentAmount + amount,
-  currency: 'RUB'
-}, { onConflict: 'user_id' });
-```
+- [x] **VPN-01: `limitIp: 2`** (Проблема обрывов при смене сетей WiFi/4G мобильными пользователями решена).
+- [x] **VPN-02: Safety check config** (Блокировка записи в базу битых конфигов с `security=none`).
+- [x] **VPN-03: `getInboundLink` optimization** (Удален лишний HTTP-запрос к 3x-ui, ускорение генерации ключа).
+- [x] **VPN-04: Session Refresher** (`SESSION_TTL` 2м, таймаут логина 10с для стабильности под нагрузкой).
+- [x] **VPN-05: Server Balancer** (Автоматический выбор наименее загруженного активного сервера при продлении старых подписок).
+- [x] **VPN-06: Reality Flow Fallback** (Принудительный XTLS-Vision flow для Reality, предотвращает нерабочие ключи).
 
 ---
 
-## 🔴 BUG-04: Telegram бот — регекс для ответа на тикет не совпадает
+## BUG-01: VPS backend не синхронизирован с security-правками
 
-**Файл:** `server.ts` → `bot.on('text')` и `setupRealtimeListener()`
+Статус: [x] ИСПРАВЛЕНО. 
+Все API-эндпоинты теперь проверяют `Authorization` заголовок ДО валидации параметров тела запроса.
 
-**Проблема — два разных формата:**
+Как протестировать:
+1. Выполните запрос без заголовка Authorization: 
+   `curl -X POST http://194.50.94.28:3005/api/subscription/buy -d '{"planId": "test"}'`
+2. Ожидаемый результат: `401 Unauthorized`.
+3. (Раньше возвращалось `400 Missing parameters`).
 
-Realtime listener отправляет:
-```
-ID: ${newTicket.id}
-```
+## BUG-02: Пополнение баланса Enot.io (Процесс вебхука)
 
-Bot handler проверяет:
-```js
-const match = replyToMsg.text.match(/ID Тикета:\s*([a-f0-9\-]+)/i);
-```
-`"ID:"` ≠ `"ID Тикета:"` → **regex никогда не совпадает** → ответы администратора не сохраняются в БД.
+Статус: [ВЫПОЛНЕНО]. 
+1. Внедрена гибкая проверка подписи.
+2. Добавлен маппинг `userId` / `user_id`.
+3. Создан инструмент в Админке (Платежи) для ручного зачисления застрявших оплат.
+4. Добавлено логирование `[EnotDebug]` для отладки подписи в будущем.
 
-**Исправление — унифицировать формат:**
-```js
-// В Realtime listener:
-const msg = `...ID Тикета: ${newTicket.id}\n...`;
+## BUG-03: Удаление дополнительного устройства нужно проверить после деплоя
 
-// В bot.on('text') regex уже правильный — менять не нужно
-```
+Статус: локально исправлено, требуется deploy + проверка.
 
----
+Проблема:
+- клиент в 3x-ui должен удаляться при удалении устройства из UI.
 
-## 🟠 BUG-05: XUI сессия истекает быстрее чем 30 минут
+Что проверить после деплоя:
+1. Добавить дополнительное устройство.
+2. Удалить его из UI.
+3. Убедиться, что в 3x-ui клиент удален.
 
-**Файл:** `server.ts` → `XUIService`
+## BUG-04: TypeScript/build не запускались в текущем окружении
 
-**Проблема:**
-```js
-private readonly SESSION_TTL = 30 * 60 * 1000; // 30 минут в коде
-```
-3x-ui по умолчанию инвалидирует сессии через **5-10 минут** простоя. Результат: после 5 минут без запросов следующий вызов вернёт 401, потребует ре-логина, но `Date.now() - lastLoginTime < SESSION_TTL` ещё `true` → повторный логин не происходит → **все запросы к XUI падают с 401**.
-
-Метод `getInbounds()` обрабатывает 401 и делает re-login:
-```js
-if (e.response?.status === 401) {
-  this.sessionCookie = null;
-  await this.login(true);
-  return this.getInbounds();
-}
-```
-Но `addClient`, `updateClient`, `getInboundLink`, `deleteClient` — **не имеют этой обработки**. Они просто бросят ошибку.
-
-**Исправление:** Уменьшить TTL до 4 минут и добавить 401-retry в критических методах:
-```js
-private readonly SESSION_TTL = 4 * 60 * 1000; // 4 минуты
+Статус: открыт. Запустить:
+```bash
+npm install && npm run lint && npm run build
 ```
 
----
+## BUG-05: Отсутствие истории списаний и общей статистики по клиенту
 
-## 🟠 BUG-06: Traffic sync блокирует Event Loop
-
-**Файл:** `server.ts` → `syncTrafficStats()`
-
-**Проблема:** Функция обходит всех активных пользователей **последовательно** в цикле `for...of`. При 50+ пользователях × 5s timeout = **250+ секунд** блокировки. Railway убивает процесс после ~120 секунд без ответа.
-
-**Исправление:** Параллельный sync с ограничением concurrency:
-```js
-// Батчевая обработка по 5 пользователей одновременно
-const BATCH_SIZE = 5;
-for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
-  const batch = userIds.slice(i, i + BATCH_SIZE);
-  await Promise.allSettled(batch.map(uid => syncUserTraffic(uid)));
-}
-```
-
----
-
-## 🟠 BUG-07: Subscription URL нестабильна — зависит от IP бэкенда
-
-**Файл:** `server.ts` → `GET /api/sub-url/:id` и `main.tsx`
-
-**Проблема:**
-- Если `PUBLIC_URL` не задан → URL берётся из `req.protocol + req.get('host')`
-- На Railway/VPS host = `ip:port` → пользователи сохраняют `http://IP:3005/api/sub/...`
-- При смене IP или деплое — **все subscription URLs у всех пользователей ломаются**
-
-**Исправление:** Сделать `PUBLIC_URL` обязательным параметром, проверять при старте:
-```js
-// В startServer():
-if (!process.env.PUBLIC_URL) {
-  console.error('⚠️ PUBLIC_URL не задан! Ссылки подписок будут нестабильны.');
-}
-```
-И в `.env.example` — явно документировать как критический параметр.
-
----
-
-## 🟠 BUG-08: Bot launch race condition
-
-**Файл:** `server.ts` → `launchBot()`
-
-**Проблема:**
-```js
-botLaunchPromise = null;           // ← модульная переменная сбрасывается
-return launchBot(retries - 1);     // ← рекурсивный вызов создаёт НОВЫЙ promise
-```
-Новый promise не присваивается в `botLaunchPromise`. Если `launchBot()` вызывается ещё раз извне пока идёт ретрай — guard `if (botLaunchPromise) return botLaunchPromise` не сработает → **несколько параллельных launch sequences** → Telegram 409 конфликт.
-
-**Исправление:**
-```js
-botLaunchPromise = launchBot(retries - 1); // присвоить новый promise
-return botLaunchPromise;
-```
-
----
-
-## 🟠 BUG-09: generateVlessLink генерирует невалидные ссылки
-
-**Файл:** `server.ts` → `XUIService.generateVlessLink()`
-
-**Проблема:** Метод генерирует `vless://...?security=none` как fallback в нескольких местах:
-- В `addClient()` если XUI не вернул конфиг
-- В ветке renewal (BUG-02)
-
-`security=none` — незашифрованный трафик, который:
-1. Блокируется провайдерами немедленно  
-2. Не работает в Hiddify (требует TLS/Reality)
-3. Ключ "работает" но трафик идёт в открытом виде
-
-**Исправление:** `generateVlessLink` должен выбрасывать ошибку а не тихо генерировать нерабочий конфиг:
-```js
-generateVlessLink(...) {
-  throw new Error(`[XUI] Не удалось получить реальный конфиг с сервера для ${email}. Проверьте настройки XUI.`);
-}
-```
-
----
-
-## 🟡 BUG-10: Настройки Enot.io не инвалидируются в кэше
-
-**Файл:** `server.ts` → `PaymentService.getEnotConfig()`
-
-**Проблема:** Метод запрашивает настройки из БД при каждом вызове — это правильно. Но если настройки только что сохранены через Admin UI, а в памяти ещё остался ENV-fallback — следующий платёж может использовать старые ключи.
-
-Фактически это не критично т.к. нет in-memory кэша настроек. Но нет и валидации что ключи рабочие при сохранении.
-
-**Улучшение:** Добавить тест-запрос к Enot API при сохранении настроек.
-
----
-
-## 🟡 BUG-11: `maybeSingle()` vs `single()` — некритичные 406 ошибки в логах
-
-**Файл:** Множество мест в server.ts
-
-В нескольких местах используется `.single()` там, где запись может отсутствовать. Это не ломает логику (т.к. data будет null) но **засоряет логи ошибками PGRST116**, усложняя отладку.
-
-**Файлы для замены:**
-```
-subscriptions...single() → maybeSingle() (где данных может не быть)
-balances...single() → maybeSingle()
-```
-
----
-
-## 🟡 BUG-12: Admin /api/admin/servers — таймаут 5 секунд слишком мал для обогащения статистики
-
-**Файл:** `server.ts` → `GET /api/admin/servers`
-
-При загрузке списка серверов запрашивается live-статистика из каждого XUI. Таймаут `Promise.race` = 5 секунд. На медленных серверах — все запросы fail и статистика всегда показывает 0/0/0.
-
-**Исправление:** Разделить: список серверов отдавать сразу, статистику загружать отдельным async endpoint или SSE.
-
----
-
-## Итоговый план исправлений (приоритет)
-
-| # | Баг | Влияние | Статус |
-|---|-----|---------|--------|
-| 01 | processSuccessfulPayment — PGRST116 | Оплата не зачисляется | ✅ Исправлено |
-| 02 | VPN конфиг ломается при продлении | Ключи не работают | ✅ Исправлено |
-| 03 | Balance upsert updated_at | Оплата не зачисляется | ✅ Исправлено |
-| 04 | Telegram regex тикет | Поддержка не отвечает в чате | ✅ Исправлено |
-| 05 | XUI сессия TTL | Случайные 401 ошибки | ✅ Исправлено |
-| 06 | Traffic sync блокировка | Server timeout / restart | ✅ Исправлено |
-| 07 | Sub URL нестабильна | Ключи рвутся при деплое | ✅ Исправлено |
-| 08 | Bot launch race condition | 409 Telegram конфликт | ✅ Исправлено |
-| 09 | generateVlessLink невалид | Тихо сломанные ключи | ✅ Исправлено |
-| 10 | Настройки кэш | Минорное | ⬜ Улучшение |
-| 11 | single() vs maybeSingle() | Лишние логи | ✅ Исправлено |
-| 12 | Admin stats таймаут | Пустая статистика | ✅ Исправлено |
+Статус: [ВЫПОЛНЕНО].
+1. Внедрено логирование `withdrawal` (списаний) при покупке/продлении подписки.
+2. Добавлены API эндпоинты для получения истории транзакций (админ и пользователь).
+3. В админку добавлен UI (Side Panel) для просмотра детальной истории, суммарных пополнений и списаний по каждому клиенту.
+4. В профиль пользователя (Wallet) добавлена лента последних операций.

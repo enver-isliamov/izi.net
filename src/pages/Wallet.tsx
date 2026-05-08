@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   CreditCard, 
   Bitcoin, 
@@ -6,7 +6,10 @@ import {
   ArrowLeft,
   CheckCircle2,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Clock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,15 +18,37 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import axios from 'axios';
 
 const PRESET_AMOUNTS = [100, 500, 1000, 2500, 5000];
 
 export default function Wallet() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const navigate = useNavigate();
   const [amount, setAmount] = useState<string>('500');
   const [method, setMethod] = useState<'enot'>('enot');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [user]);
+
+  const fetchHistory = async () => {
+    try {
+      setLoadingHistory(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await axios.get('/api/transactions', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      setTransactions(res.data);
+    } catch (err) {
+      console.error('Failed to fetch transactions history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const handlePayment = async () => {
     const numAmount = parseFloat(amount);
@@ -179,6 +204,49 @@ export default function Wallet() {
           <AlertCircle className="w-4 h-4 text-primary" />
           Нажимая кнопку, вы подтверждаете условия оферты
         </p>
+      </div>
+
+      <div className="space-y-4 pt-8">
+        <h2 className="text-xl font-bold tracking-tight">История операций</h2>
+        {loadingHistory ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          </div>
+        ) : transactions.length > 0 ? (
+          <div className="space-y-3">
+            {transactions.map((tx) => (
+              <Card key={tx.id} className="glass-card border-primary/10 overflow-hidden">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={`p-2 rounded-xl ${
+                      tx.type === 'deposit' 
+                        ? "bg-green-500/10 text-green-500" 
+                        : "bg-blue-500/10 text-blue-500"
+                    }`}>
+                      {tx.type === 'deposit' ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm">{tx.description || (tx.type === 'deposit' ? 'Пополнение' : 'Списание')}</div>
+                      <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3" />
+                        {new Date(tx.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`text-sm font-mono font-bold ${
+                    tx.type === 'deposit' ? "text-green-400" : "text-blue-400"
+                  }`}>
+                    {tx.type === 'deposit' ? '+' : '-'}{tx.amount} ₽
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 bg-muted/10 rounded-2xl border border-dashed border-border text-muted-foreground italic text-sm">
+            История операций пуста
+          </div>
+        )}
       </div>
     </div>
   );
