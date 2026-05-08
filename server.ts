@@ -1301,6 +1301,54 @@ app.get('/api/admin/users/:userId/transactions', adminOnly, async (req, res) => 
   }
 });
 
+app.get('/api/admin/servers/diag', adminOnly, async (req, res) => {
+  const { data: servers, error } = await supabase.from('vpn_servers').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+
+  const results = [];
+  for (const server of servers) {
+    try {
+      const { instance: xui } = await getXuiForServer(server.id);
+      const inbounds = await xui.getInbounds();
+      const realityInbound = inbounds.find((i: any) => {
+        let ss = i.streamSettings;
+        if (typeof ss === 'string') ss = JSON.parse(ss);
+        return ss.security === 'reality';
+      });
+
+      if (!realityInbound) {
+        results.push({ id: server.id, name: server.name, status: 'warning', message: 'Reality inbound не найден' });
+        continue;
+      }
+
+      let ss = realityInbound.streamSettings;
+      if (typeof ss === 'string') ss = JSON.parse(ss);
+      const rs = ss.realitySettings?.settings || ss.realitySettings || {};
+      
+      const sni = rs.serverNames?.[0] || '';
+      const pbk = rs.publicKey || '';
+      const sid = rs.shortIds?.[0] || '';
+
+      const issues = [];
+      if (!sni) issues.push('SNI (Server Names) пуст');
+      if (!pbk) issues.push('Public Key пуст');
+      if (!sid) issues.push('Short IDs пуст');
+      if (sni && (sni.includes(server.host) || server.host.includes(sni))) issues.push('SNI совпадает с хостом (может вызвать петлю)');
+
+      results.push({
+        id: server.id,
+        name: server.name,
+        status: issues.length > 0 ? 'error' : 'ok',
+        details: { sni, pbk, sid, port: realityInbound.port },
+        issues
+      });
+    } catch (err: any) {
+      results.push({ id: server.id, name: server.name, status: 'offline', message: err.message });
+    }
+  }
+  res.json(results);
+});
+
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   const { userId, newServerId } = req.body;
   if (!userId || !newServerId) return res.status(400).json({ error: 'Missing parameters' });

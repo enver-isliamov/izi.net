@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw } from 'lucide-react';
+import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import axios from 'axios';
@@ -14,6 +14,8 @@ export default function AdminServers() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState<string | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [diagResults, setDiagResults] = useState<any[]>([]);
   const [formData, setFormData] = useState({
     name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
   });
@@ -102,6 +104,22 @@ export default function AdminServers() {
     }
   };
 
+  const runDiagnostic = async () => {
+    try {
+      setIsDiagnosing(true);
+      toast.loading('Запуск диагностики Reality...', { id: 'diag' });
+      const { data } = await axios.get('/api/admin/servers/diag', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      setDiagResults(data);
+      toast.success('Диагностика завершена', { id: 'diag' });
+    } catch (e: any) {
+      toast.error('Ошибка диагностики: ' + (e.response?.data?.error || e.message), { id: 'diag' });
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+
   const startEdit = (server: any) => {
     setEditingId(server.id);
     setFormData({
@@ -151,19 +169,76 @@ export default function AdminServers() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
-        <button
-          onClick={() => {
-            if (isAdding) cancelEdit();
-            else setIsAdding(true);
-          }}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors font-medium text-sm w-full sm:w-auto"
-        >
-          {isAdding ? <XCircle size={18} /> : <Plus size={18} />}
-          {isAdding ? 'Отмена' : 'Добавить сервер'}
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={runDiagnostic}
+            disabled={isDiagnosing}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors font-medium text-sm flex-1 sm:flex-none border border-white/5"
+          >
+            {isDiagnosing ? <RefreshCw size={18} className="animate-spin" /> : <Activity size={18} />}
+            Диагностика Reality
+          </button>
+          <button
+            onClick={() => {
+              if (isAdding) cancelEdit();
+              else setIsAdding(true);
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors font-medium text-sm flex-1 sm:flex-none"
+          >
+            {isAdding ? <XCircle size={18} /> : <Plus size={18} />}
+            {isAdding ? 'Отмена' : 'Добавить'}
+          </button>
+        </div>
       </div>
 
       <AdminNav />
+
+      {diagResults.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-secondary/30 rounded-2xl border border-white/10 overflow-hidden"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-blue-400 flex items-center gap-2">
+              <ShieldCheck size={16} /> Результаты диагностики Reality
+            </h2>
+            <button onClick={() => setDiagResults([])} className="text-xs text-muted-foreground hover:text-white">Скрыть</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {diagResults.map((res: any) => (
+              <div key={res.id} className={`p-4 rounded-xl border ${
+                res.status === 'ok' ? 'bg-green-500/5 border-green-500/20' : 
+                res.status === 'error' ? 'bg-red-500/5 border-red-500/20' : 'bg-white/5 border-white/10'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-sm truncate">{res.name}</span>
+                  {res.status === 'ok' ? <CheckCircle size={14} className="text-green-500" /> : <AlertTriangle size={14} className="text-red-500" />}
+                </div>
+                {res.issues?.length > 0 ? (
+                  <ul className="space-y-1">
+                    {res.issues.map((msg: string, i: number) => (
+                      <li key={i} className="text-[10px] text-red-400 flex items-center gap-1">
+                         <XCircle size={10} /> {msg}
+                      </li>
+                    ))}
+                  </ul>
+                ) : res.message ? (
+                  <p className="text-[10px] text-muted-foreground">{res.message}</p>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-green-500">Конфигруация в норме</p>
+                    <div className="flex flex-col gap-0.5 mt-2 font-mono text-[9px] text-muted-foreground opacity-70">
+                      <span>SNI: {res.details?.sni}</span>
+                      <span>SID: {res.details?.sid}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       <AnimatePresence>
         {isAdding && (
