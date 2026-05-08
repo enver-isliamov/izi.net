@@ -1323,17 +1323,21 @@ app.get('/api/admin/servers/diag', adminOnly, async (req, res) => {
 
       let ss = realityInbound.streamSettings;
       if (typeof ss === 'string') ss = JSON.parse(ss);
-      const rs = ss.realitySettings?.settings || ss.realitySettings || {};
       
-      const sni = rs.serverNames?.[0] || '';
-      const pbk = rs.publicKey || '';
-      const sid = rs.shortIds?.[0] || '';
+      const realitySettings = ss.realitySettings || {};
+      const rs = realitySettings.settings || realitySettings;
+      
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || '';
+      const pbk = rs.publicKey || realitySettings.publicKey || '';
+      const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
 
       const issues = [];
       if (!sni) issues.push('SNI (Server Names) пуст');
       if (!pbk) issues.push('Public Key пуст');
       if (!sid) issues.push('Short IDs пуст');
-      if (sni && (sni.includes(server.host) || server.host.includes(sni))) issues.push('SNI совпадает с хостом (может вызвать петлю)');
+      
+      // Check if SNI is valid (not an IP)
+      if (sni && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(sni)) issues.push('SNI не может быть IP-адресом');
 
       results.push({
         id: server.id,
