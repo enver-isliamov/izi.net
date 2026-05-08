@@ -1138,6 +1138,58 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
   });
 });
 
+
+app.get('/api/admin/payments', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error: any) {
+    console.error('❌ Admin payments fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/payments/confirm', adminOnly, async (req, res) => {
+  const { paymentId } = req.body;
+  
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Missing paymentId' });
+  }
+
+  try {
+    // 1. Fetch payment info
+    const { data: payRow, error: fetchErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+
+    if (fetchErr || !payRow) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    if (payRow.status === 'completed') {
+      return res.status(400).json({ error: 'Payment already completed' });
+    }
+
+    console.log(`👤 Admin ${(req as any).user?.email} is manually confirming payment ${paymentId} for user ${payRow.user_id}`);
+
+    // 2. Process using the same logic as webhook
+    await processSuccessfulPayment(payRow.user_id, parseFloat(payRow.amount), payRow.id, payRow.provider || 'admin_manual');
+    
+    res.json({ success: true, message: 'Payment confirmed manually and balance updated' });
+  } catch (error: any) {
+    console.error('❌ Admin payment confirm error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const { search } = req.query;
   const requestId = Math.random().toString(36).substring(7);
