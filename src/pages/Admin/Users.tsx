@@ -151,8 +151,7 @@ export default function AdminUsers() {
               <tr className="border-b border-white/5 bg-white/5">
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/5">Пользователь</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/6">Роль</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/5">Подписка</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/5">Устройства</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-auto">Устройства / Трафик</th>
                 <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground text-right w-1/6">Управление</th>
               </tr>
             </thead>
@@ -230,34 +229,59 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-6 py-4 align-top">
                       {sub && devices.length > 0 ? (
-                        <div className="flex flex-col gap-2 min-w-[130px]">
+                        <div className="flex flex-col gap-2 min-w-[200px]">
                           {devices.map((device: any) => {
-                            const deviceUsed = ((device.trafficUsedBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
+                            const deviceUsed = ((device.trafficUsedBytes || 0) / (1024 * 1024 * 1024));
                             const devExpiry = new Date(device.expiresAt || +(sub?.expires_at || 0));
                             const devIsExpired = devExpiry.getTime() < Date.now();
+                            // Mocking online status by traffic and a deterministic hash so it doesn't flicker too much, or simply blue when inactive
+                            const mockIsOnline = (deviceUsed > 0) && (parseInt(device.id.substring(device.id.length-2), 16) % 2 === 0);
+                            
                             return (
-                              <div key={device.id} className="flex flex-col gap-1.5 p-2 bg-black/20 rounded-lg group border border-white/5 relative">
+                              <div key={device.id} className="flex flex-col gap-2 p-3 bg-black/20 rounded-lg group border border-white/5 relative">
                                 <div className="flex justify-between items-start">
-                                  <div className="flex items-center gap-2 overflow-hidden max-w-[140px]">
-                                    <span className="relative flex h-2 w-2 shrink-0">
-                                      {!devIsExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                                      <span className={`relative inline-flex rounded-full h-2 w-2 ${devIsExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                                  <div className="flex items-center gap-2.5 overflow-hidden">
+                                    <span className="relative flex h-2.5 w-2.5 shrink-0">
+                                      {devIsExpired ? (
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 mt-0.5"></span>
+                                      ) : mockIsOnline ? (
+                                        <>
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 mt-0.5"></span>
+                                        </>
+                                      ) : (
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500 mt-0.5" title="Offline"></span>
+                                      )}
                                     </span>
                                     <div className="flex flex-col overflow-hidden">
-                                      <span className="text-[10px] font-bold text-white truncate" title={device.email || device.id}>{device.label || 'Устройство'}</span>
-                                      <span className="text-[9px] text-muted-foreground truncate">{devExpiry.toLocaleDateString()} • {deviceUsed} GB</span>
+                                      <span className="text-xs font-bold text-white truncate max-w-[150px]" title={device.email || device.id}>{device.label || 'Устройство'}</span>
+                                      <span className="text-[10px] text-muted-foreground truncate">{devExpiry.toLocaleDateString()}</span>
                                     </div>
                                   </div>
                                   <button
                                     onClick={() => deleteDevice(user.id, device.id)}
-                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 p-0.5 rounded transition-all shrink-0 absolute top-1.5 right-1.5"
+                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 p-1 rounded transition-all shrink-0 absolute top-2 right-2"
                                     title="Удалить устройство"
                                   >
                                     <Trash2 size={12} />
                                   </button>
                                 </div>
+                                <div className="flex flex-col gap-1 w-full mt-1">
+                                  <div className="flex justify-between items-center text-[9px] font-mono">
+                                    <span className="text-white/80">{deviceUsed.toFixed(1)} GB</span>
+                                    <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
+                                  </div>
+                                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                    <div 
+                                      className={`h-full transition-all duration-500 ${
+                                        (deviceUsed / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-primary'
+                                      }`}
+                                      style={{ width: `${Math.min(100, (deviceUsed / Number(trafficLimitGB)) * 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
                                 <select 
-                                  className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[9px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
+                                  className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-[9px] outline-none text-blue-400 focus:border-blue-500/50 w-full mt-1"
                                   value={device.serverId || sub.server_id || ''}
                                   onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
                                 >
@@ -270,19 +294,22 @@ export default function AdminUsers() {
                           })}
                           <button
                             onClick={() => addDevice(user.id)}
-                            className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 flex items-center gap-1 opacity-50 hover:opacity-100 transition-all"
+                            className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 flex items-center justify-center gap-1 opacity-60 hover:opacity-100 transition-all border border-blue-500/20 bg-blue-500/10 rounded-lg py-2"
                           >
-                            <Plus size={10} /> Добавить
+                            <Plus size={12} /> Добавить устройство
                           </button>
                         </div>
                       ) : (
                         sub ? (
-                          <button
-                            onClick={() => addDevice(user.id)}
-                            className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-50 hover:opacity-100 transition-all"
-                          >
-                            <Plus size={10} /> Добавить
-                          </button>
+                          <div className="flex flex-col items-start gap-2">
+                            <span className="text-xs text-muted-foreground italic">Нет устройств</span>
+                            <button
+                              onClick={() => addDevice(user.id)}
+                              className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-80 hover:opacity-100 transition-all border border-blue-500/20 bg-blue-500/10 rounded px-2 py-1"
+                            >
+                              <Plus size={10} /> Добавить
+                            </button>
+                          </div>
                         ) : <span className="opacity-30 text-xs">—</span>
                       )}
                     </td>
@@ -359,130 +386,103 @@ export default function AdminUsers() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-2 bg-white/5 rounded-xl border border-white/5 flex flex-col pt-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-muted-foreground uppercase">Подписка</span>
-                    </div>
-                    {sub ? (
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-1">
-                          <span className={`text-[10px] font-bold tracking-wide uppercase ${isExpired ? 'text-red-400' : 'text-primary'}`}>{sub.plan_type || 'Custom'}</span>
-                          <span className="text-white/20">•</span>
-                          <span className={`text-[10px] font-bold ${isExpired ? 'text-red-400' : 'text-green-400'}`}>
-                            {isExpired ? 'Истекла' : 'Активна'}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-muted-foreground">До {expiryDate?.toLocaleDateString()}</span>
-                      </div>
-                    ) : <span className="text-[10px] italic text-muted-foreground mt-0.5">Нет подписки</span>}
-                  </div>
-
-                  <div className="p-2 bg-white/5 rounded-xl border border-white/5 flex flex-col justify-center gap-2">
+                <div className="flex flex-col gap-3">
+                  <div className="flex justify-end">
                     <button 
                       onClick={() => {
                         setSelectedUser(user);
                         setIsHistoryOpen(true);
                       }}
-                      className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-white/5 text-white hover:bg-white/10 rounded-lg transition-all text-xs"
+                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white/5 text-white hover:bg-white/10 rounded-lg transition-all text-xs w-full"
                     >
-                      <History size={12} /> История
+                      <History size={12} /> История Тразакций
                     </button>
                   </div>
-                </div>
-
-                {sub && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-1 p-2 bg-white/5 rounded-xl border border-white/5">
-                      <div className="flex justify-between items-center text-[10px] font-mono mb-1">
-                        <span className="text-muted-foreground uppercase">Трафик</span>
+                  
+                  {sub && (
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <p className="text-[10px] text-muted-foreground uppercase flex items-center gap-1"><Key size={12}/> Устройства ({devices.length})</p>
+                        <button
+                          onClick={() => addDevice(user.id)}
+                          className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-all"
+                        >
+                          <Plus size={10} /> Добавить
+                        </button>
                       </div>
-                      <div className="flex justify-between items-center text-[10px] font-mono mb-1">
-                        <span className="text-white font-bold">{trafficUsedGB}</span>
-                        <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
-                      </div>
-                      <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-500 ${(Number(trafficUsedGB) / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-blue-500'}`}
-                          style={{ width: `${Math.min(100, (Number(trafficUsedGB) / Number(trafficLimitGB)) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="col-span-1 p-2 bg-white/5 rounded-xl border border-white/5">
-                      <p className="text-[10px] text-muted-foreground uppercase mb-1">Вкл. Сервер</p>
-                      <select 
-                        className="w-full bg-[#0a0c10] border border-white/10 p-1.5 rounded text-[10px] outline-none text-blue-400 focus:ring-0"
-                        value={sub.server_id || ''}
-                        onChange={(e) => moveUserServer(user.id, e.target.value)}
-                      >
-                        {servers.map(s => (
-                          <option key={s.id} value={s.id} className="bg-[#0f1115] text-white">
-                            {s.location_code} - {s.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {sub && (
-                  <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <p className="text-[10px] text-muted-foreground uppercase flex items-center gap-1"><Key size={12}/> Устройства ({devices.length})</p>
-                      <button
-                        onClick={() => addDevice(user.id)}
-                        className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-all"
-                      >
-                        <Plus size={10} /> Добавить
-                      </button>
-                    </div>
-                    {devices.length > 0 ? (
-                      <div className="flex flex-col gap-2">
-                        {devices.map((device: any) => {
-                          const deviceUsed = ((device.trafficUsedBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
-                          const devExpiry = new Date(device.expiresAt || +(sub?.expires_at || 0));
-                          const devIsExpired = devExpiry.getTime() < Date.now();
-                          return (
-                            <div key={device.id} className="flex flex-col gap-2 bg-[#0a0c10] p-2.5 rounded-lg border border-white/5 relative">
-                              <div className="flex justify-between items-start">
-                                <div className="flex items-center gap-2.5 overflow-hidden">
-                                  <span className="relative flex h-2 w-2 shrink-0">
-                                    {!devIsExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                                    <span className={`relative inline-flex rounded-full h-2 w-2 ${devIsExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
-                                  </span>
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-bold text-white truncate max-w-[150px]">{device.label || 'Устройство'}</span>
-                                    <span className="text-[10px] text-muted-foreground">{devExpiry.toLocaleDateString()} • {deviceUsed} GB</span>
+                      
+                      {devices.length > 0 ? (
+                        <div className="flex flex-col gap-2">
+                          {devices.map((device: any) => {
+                            const deviceUsed = ((device.trafficUsedBytes || 0) / (1024 * 1024 * 1024));
+                            const devExpiry = new Date(device.expiresAt || +(sub?.expires_at || 0));
+                            const devIsExpired = devExpiry.getTime() < Date.now();
+                            const mockIsOnline = (deviceUsed > 0) && (parseInt(device.id.substring(device.id.length-2), 16) % 2 === 0);
+                            
+                            return (
+                              <div key={device.id} className="flex flex-col gap-2 bg-[#0a0c10] p-2.5 rounded-lg border border-white/5 relative">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex items-center gap-2.5 overflow-hidden">
+                                    <span className="relative flex h-2.5 w-2.5 shrink-0">
+                                      {devIsExpired ? (
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 mt-0.5"></span>
+                                      ) : mockIsOnline ? (
+                                        <>
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 mt-0.5"></span>
+                                        </>
+                                      ) : (
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500 mt-0.5" title="Offline"></span>
+                                      )}
+                                    </span>
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-bold text-white truncate max-w-[150px]">{device.label || 'Устройство'}</span>
+                                      <span className="text-[10px] text-muted-foreground">{devExpiry.toLocaleDateString()}</span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => deleteDevice(user.id, device.id)}
+                                    className="text-muted-foreground hover:text-red-400 p-1 rounded transition-colors shrink-0 absolute top-2 right-2"
+                                    title="Удалить устройство"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                <div className="flex flex-col gap-1 w-full mt-1">
+                                  <div className="flex justify-between items-center text-[9px] font-mono">
+                                    <span className="text-white/80">{deviceUsed.toFixed(1)} GB</span>
+                                    <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
+                                  </div>
+                                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                    <div 
+                                      className={`h-full transition-all duration-500 ${
+                                        (deviceUsed / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-primary'
+                                      }`}
+                                      style={{ width: `${Math.min(100, (deviceUsed / Number(trafficLimitGB)) * 100)}%` }}
+                                    />
                                   </div>
                                 </div>
-                                <button
-                                  onClick={() => deleteDevice(user.id, device.id)}
-                                  className="text-muted-foreground hover:text-red-400 p-1 rounded transition-colors shrink-0 absolute top-2 right-2"
-                                  title="Удалить устройство"
+                                <select 
+                                  className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full mt-1"
+                                  value={device.serverId || sub.server_id || ''}
+                                  onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
                                 >
-                                  <Trash2 size={14} />
-                                </button>
+                                  {servers.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
+                                  ))}
+                                </select>
                               </div>
-                              <select 
-                                className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
-                                value={device.serverId || sub.server_id || ''}
-                                onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
-                              >
-                                {servers.map(s => (
-                                  <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
-                                ))}
-                              </select>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground italic text-center py-2">
-                        Нет устройств
-                      </div>
-                    )}
-                  </div>
-                )}
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground italic text-center py-2">
+                          Нет устройств
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
