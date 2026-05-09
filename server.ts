@@ -2365,61 +2365,67 @@ app.post('/api/subscription/buy', async (req, res) => {
     let targetDevice: VpnDevice | undefined;
 
     if (forceNew || existingDevices.length === 0) {
-      // 3A. CREATE NEW DEVICE
-      if (existingDevices.length >= 2) {
-        return res.status(400).json({ error: 'Превышен лимит: можно добавить только 1 дополнительное устройство.' });
-      }
-
-      const randomSuffix = Math.random().toString(36).substring(2, 6);
-      const email = `user_${userId.slice(0, 8)}_${randomSuffix}`;
-      const uuid = crypto.randomUUID();
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + durationDays);
-
-      console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
-      const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+      // 3A. CREATE NEW DEVICE(S)
+      const devicesToCreate = forceNew ? 1 : (deviceLimit || 1);
       
-      // VPN-02: Safety check for config before saving to DB
-      if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
-        console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
-        throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+      if (existingDevices.length + devicesToCreate > 2) {
+        return res.status(400).json({ error: 'Превышен лимит: можно иметь не более 2-х устройств.' });
       }
 
-      const newDevice: VpnDevice = {
-        id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
-        label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
-        config: rawConfig,
-        email: email,
-        uuid: uuid,
-        expiresAt: expiresAt.toISOString(),
-        serverType: serverType || 'LTE',
-        trafficUsedBytes: 0
-      };
-      existingDevices.push(newDevice);
-      targetDevice = newDevice;
+      for (let i = 0; i < devicesToCreate; i++) {
+        const randomSuffix = Math.random().toString(36).substring(2, 6);
+        const email = `user_${userId.slice(0, 8)}_${randomSuffix}_${i}`;
+        const uuid = crypto.randomUUID();
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + durationDays);
+
+        console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
+        const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+        
+        // VPN-02: Safety check for config before saving to DB
+        if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+          console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
+          throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+        }
+
+        const devLabelBase = deviceName || (existingDevices.length === 0 && i === 0 ? 'Основное' : 'Доп. устройство');
+        const finalLabel = devicesToCreate > 1 ? `${devLabelBase} ${i + 1}` : devLabelBase;
+
+        const newDevice: VpnDevice = {
+          id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
+          label: finalLabel,
+          config: rawConfig,
+          email: email,
+          uuid: uuid,
+          expiresAt: expiresAt.toISOString(),
+          serverType: serverType || 'LTE',
+          trafficUsedBytes: 0
+        };
+        existingDevices.push(newDevice);
+        targetDevice = newDevice;
+      }
 
     } else {
-      // 3B. RENEW SPECIFIC OR PRIMARY DEVICE
-      const idToRenew = targetDeviceId || existingDevices[0].id;
-      targetDevice = existingDevices.find(d => d.id === idToRenew);
+      // 3B. RENEW SPECIFIC OR MULTIPLE DEVICES
+      const devicesToRenew = targetDeviceId 
+        ? existingDevices.filter(d => d.id === targetDeviceId)
+        : existingDevices.slice(0, deviceLimit || 1);
       
-      if (!targetDevice) {
+      if (devicesToRenew.length === 0) {
         return res.status(404).json({ error: 'Устройство для продления не найдено.' });
       }
 
-      const currentExpiry = new Date(targetDevice.expiresAt);
-      const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
-      newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
-      
-      targetDevice.expiresAt = newExpiresAt.toISOString();
-      targetDevice.serverType = serverType || targetDevice.serverType;
-      
-      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email} on server ${serverId || 'default'}`);
-      await xuiInstance.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
-      
-      // BUG-02: DO NOT overwrite config with broken link during RENEW. 
-      // The Reality link is immutable and already correct.
-      // targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
+      for (const tDevice of devicesToRenew) {
+        const currentExpiry = new Date(tDevice.expiresAt);
+        const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
+        newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
+        
+        tDevice.expiresAt = newExpiresAt.toISOString();
+        tDevice.serverType = serverType || tDevice.serverType;
+        
+        console.log(`♻️ Syncing expiration for specific device ${tDevice.email} on server ${serverId || 'default'}`);
+        await xuiInstance.updateClient(tDevice.email, tDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      }
     }
 
     // Determine absolute max expiry for the subscription row

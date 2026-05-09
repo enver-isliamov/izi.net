@@ -43,17 +43,23 @@ const serverTypes = [
   { id: 'lte', label: 'LTE', description: 'Премиум скорость (150 ₽/мес)', price: 50 },
 ];
 
-export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName, hasActiveSub = false }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string, hasActiveSub?: boolean }) {
+export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName, hasActiveSub = false, existingDeviceCount = 0 }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string, hasActiveSub?: boolean, existingDeviceCount?: number }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedPeriod, setSelectedPeriod] = useState(periods[0]);
   const [selectedServer, setSelectedServer] = useState(serverTypes[0]);
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<any>(null);
-  const [deviceCount, setDeviceCount] = useState(1);
+  const [deviceCount, setDeviceCount] = useState(existingDeviceCount > 0 && !targetDeviceId && !forceNew ? existingDeviceCount : 1);
   const [deviceName, setDeviceName] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    if (existingDeviceCount > 0 && !targetDeviceId && !forceNew) {
+      setDeviceCount(existingDeviceCount);
+    }
+  }, [existingDeviceCount, targetDeviceId, forceNew]);
 
   useEffect(() => {
     const fetchBalance = async () => {
@@ -83,8 +89,8 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
   const hasEnoughFunds = balance !== null && balance >= totalPrice;
 
   const nextStep = () => {
-    // If targetDeviceId is present, we skip location and device naming steps usually
-    if (targetDeviceId) {
+    // If targetDeviceId is present, or if extending all existing devices, skip to payment
+    if (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub)) {
       if (step === 2) {
         setStep(5); // Go straight to payment
         return;
@@ -92,24 +98,32 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
     }
     setStep(s => {
       let next = Math.min(s + 1, 5);
-      // Skip Location step ONLY if we are renewing a specific device
-      if (next === 3 && targetDeviceId) {
+      // Skip Location step ONLY if we are renewing a specific device, or extending whole sub
+      if (next === 3 && (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub))) {
         next = 4;
+      }
+      // If we are on step 3 (via normal flow), and we need to skip step 4 (devices) because we are renewing all
+      if (next === 4 && !forceNew && existingDeviceCount > 0 && hasActiveSub) {
+        next = 5;
       }
       return next;
     });
   };
   
   const prevStep = () => {
-    if (targetDeviceId && step === 5) {
+    if ((targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub)) && step === 5) {
       setStep(2);
       return;
     }
     setStep(s => {
       let prev = Math.max(s - 1, 1);
-      // Skip Location step back ONLY if we are renewing a specific device
-      if (prev === 3 && targetDeviceId) {
+      // Skip Location step back ONLY if we are renewing a specific device or extending whole sub
+      if (prev === 3 && (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub))) {
         prev = 2;
+      }
+      // If we are on step 5, and need to skip step 4 back to 3
+      if (prev === 4 && !forceNew && existingDeviceCount > 0 && hasActiveSub) {
+        prev = 3;
       }
       return prev;
     });
@@ -420,6 +434,12 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
                   <div className="flex justify-between text-sm py-1 border-t border-border/50">
                     <span className="text-muted-foreground italic">Операция</span>
                     <span className="font-medium text-primary">Продление устройства</span>
+                  </div>
+                )}
+                {!targetDeviceId && !forceNew && existingDeviceCount > 0 && hasActiveSub && (
+                  <div className="flex justify-between text-sm py-1 border-t border-border/50">
+                    <span className="text-muted-foreground italic">Операция</span>
+                    <span className="font-medium text-primary">Продление подписки ({deviceCount} шт.)</span>
                   </div>
                 )}
                 <div className="pt-3 border-t border-primary/20 flex justify-between items-center">
