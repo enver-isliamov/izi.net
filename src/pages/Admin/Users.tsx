@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -91,6 +91,23 @@ export default function AdminUsers() {
       fetchData();
     } catch (e: any) {
       toast.error(e.response?.data?.error || 'Ошибка удаления устройства');
+    }
+  };
+
+  const addDevice = async (userId: string) => {
+    const label = window.prompt('Введите название для нового устройства (допускается пустое):');
+    if (label === null) return; // cancelled
+    try {
+      const loadingToast = toast.loading('Добавление устройства...');
+      await axios.post(`/api/admin/users/${userId}/devices`, { label }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.dismiss(loadingToast);
+      toast.success('Устройство успешно добавлено');
+      fetchData();
+    } catch (e: any) {
+      toast.dismiss();
+      toast.error(e.response?.data?.error || 'Ошибка добавления устройства');
     }
   };
 
@@ -217,8 +234,23 @@ export default function AdminUsers() {
                               </button>
                             </div>
                           ))}
+                          <button
+                            onClick={() => addDevice(user.id)}
+                            className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 flex items-center gap-1 opacity-50 hover:opacity-100 transition-all"
+                          >
+                            <Plus size={10} /> Добавить
+                          </button>
                         </div>
-                      ) : <span className="text-xs text-muted-foreground italic">Нет устройств</span>}
+                      ) : (
+                        sub ? (
+                          <button
+                            onClick={() => addDevice(user.id)}
+                            className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-50 hover:opacity-100 transition-all"
+                          >
+                            <Plus size={10} /> Добавить
+                          </button>
+                        ) : <span className="opacity-30 text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 border-l border-white/5 align-top">
                       <div className="flex flex-col items-end justify-start gap-2 h-full">
@@ -359,32 +391,46 @@ export default function AdminUsers() {
                   </div>
                 )}
 
-                {devices.length > 0 && (
+                {sub && (
                   <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
-                    <p className="text-[10px] text-muted-foreground uppercase flex items-center gap-1"><Key size={12}/> Устройства ({devices.length})</p>
-                    <div className="flex flex-col gap-2">
-                      {devices.map((device: any) => (
-                        <div key={device.id} className="flex justify-between items-center bg-[#0a0c10] p-2 rounded-lg border border-white/5">
-                          <div className="flex items-center gap-2 overflow-hidden mr-2">
-                            <span className="relative flex h-2 w-2 shrink-0">
-                              {!isExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                              <span className={`relative inline-flex rounded-full h-2 w-2 ${isExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
-                            </span>
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-white truncate max-w-[120px]">{device.label || 'Устройство'}</span>
-                              <span className="text-[10px] font-mono text-muted-foreground truncate">{device.email || device.id}</span>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => deleteDevice(user.id, device.id)}
-                            className="text-muted-foreground hover:text-red-400 p-1.5 rounded transition-colors flex-shrink-0"
-                            title="Удалить устройство"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      ))}
+                    <div className="flex justify-between items-center">
+                      <p className="text-[10px] text-muted-foreground uppercase flex items-center gap-1"><Key size={12}/> Устройства ({devices.length})</p>
+                      <button
+                        onClick={() => addDevice(user.id)}
+                        className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-all"
+                      >
+                        <Plus size={10} /> Добавить
+                      </button>
                     </div>
+                    {devices.length > 0 ? (
+                      <div className="flex flex-col gap-2">
+                        {devices.map((device: any) => (
+                          <div key={device.id} className="flex justify-between items-center bg-[#0a0c10] p-2 rounded-lg border border-white/5">
+                            <div className="flex items-center gap-2 overflow-hidden mr-2">
+                              <span className="relative flex h-2 w-2 shrink-0">
+                                {!isExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
+                                <span className={`relative inline-flex rounded-full h-2 w-2 ${isExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                              </span>
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-white truncate max-w-[120px]">{device.label || 'Устройство'}</span>
+                                <span className="text-[10px] font-mono text-muted-foreground truncate">{device.email || device.id}</span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => deleteDevice(user.id, device.id)}
+                              className="text-muted-foreground hover:text-red-400 p-1.5 rounded transition-colors flex-shrink-0"
+                              title="Удалить устройство"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground italic text-center py-2">
+                        Нет устройств
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

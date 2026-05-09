@@ -1528,6 +1528,69 @@ app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, 
   }
 });
 
+app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const { label } = req.body;
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Активная подписка не найдена' });
+    if (!sub.server_id) return res.status(400).json({ error: 'Сервер для подписки не назначен' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    if (devices.length >= 5) {
+      return res.status(400).json({ error: 'Достигнут лимит устройств (5) для пользователя' });
+    }
+
+    const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    const email = `user_${userId.slice(0, 8)}_${randomSuffix}_${devices.length}`;
+    const uuid = crypto.randomUUID();
+    const expiresAtMs = new Date(sub.expires_at).getTime();
+
+    const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+    
+    if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+      throw new Error(`Не удалось сгенерировать конфиг на сервере XUI`);
+    }
+
+    const newDevice: VpnDevice = {
+      id: `device_${uuid.slice(0,8)}`,
+      label: label || `Доп. устройство ${devices.length + 1}`,
+      config: rawConfig,
+      email: email,
+      uuid: uuid,
+      expiresAt: sub.expires_at,
+      serverType: sub.server_type,
+      trafficUsedBytes: 0
+    };
+
+    devices.push(newDevice);
+    
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      device_limit: devices.length,
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство добавлено', device: newDevice });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
   const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
