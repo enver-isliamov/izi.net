@@ -117,11 +117,11 @@ export default function AdminUsers() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/5">
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Пользователь</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Роль</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Подписка / Трафик</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Устройства</th>
-                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground text-right">Действия</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/5">Пользователь</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/6">Роль</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/5">Подписка</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground w-1/5">Устройства</th>
+                <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-muted-foreground text-right w-1/6">Управление</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -142,33 +142,46 @@ export default function AdminUsers() {
 
                 return (
                   <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="px-6 py-4 text-nowrap">
+                    <td className="px-6 py-4 text-nowrap align-top">
                       <div className="flex flex-col">
                         <span className="font-medium text-white/90">{user.name || 'Без имени'}</span>
                         <span className="text-[10px] text-muted-foreground font-mono">{user.email}</span>
                         <span className="font-mono text-xs text-blue-400 font-bold mt-1">Баланс: {user.balance || 0} ₽</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                        user.role === 'superadmin' ? 'bg-red-500/10 text-red-500' : 
-                        user.role === 'admin' ? 'bg-blue-500/10 text-blue-500' : 'bg-white/10 text-muted-foreground'
-                      }`}>
-                        {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
-                      </span>
+                    <td className="px-6 py-4 align-top">
+                      <div className="flex flex-col items-start gap-1.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          user.role === 'superadmin' ? 'bg-red-500/10 text-red-500' : 
+                          user.role === 'admin' ? 'bg-blue-500/10 text-blue-500' : 'bg-white/10 text-muted-foreground'
+                        }`}>
+                          {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
+                        </span>
+                        {user.role !== 'admin' && user.role !== 'superadmin' ? (
+                          <button onClick={() => updateUserRole(user.id, 'admin')} className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors">Дать админа</button>
+                        ) : user.role === 'admin' ? (
+                          <button onClick={() => updateUserRole(user.id, 'user')} className="text-[10px] text-yellow-500 hover:text-yellow-400 transition-colors">Снять админа</button>
+                        ) : null}
+                      </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 align-top">
                       {sub ? (
                         <div className="flex flex-col min-w-[120px] space-y-2">
-                           <div className="flex justify-between items-center text-xs">
-                             <span className={`font-bold ${isExpired ? 'text-red-400' : 'text-green-400'}`}>
-                               {isExpired ? 'Истекла' : 'Активна'}
-                             </span>
-                             <span className="text-[10px] text-muted-foreground">{expiryDate?.toLocaleDateString()}</span>
+                           <div className="flex flex-col text-xs">
+                             <div className="flex items-center gap-1.5 font-bold uppercase tracking-wide text-[10px] mb-1">
+                               <span className={isExpired ? 'text-red-400' : 'text-primary'}>
+                                 {sub.plan_type || 'Custom'}
+                               </span>
+                               <span className="text-white/20">•</span>
+                               <span className={isExpired ? 'text-red-400' : 'text-green-400'}>
+                                 {isExpired ? 'Истекла' : 'Активна'}
+                               </span>
+                             </div>
+                             <span className="text-[10px] text-muted-foreground">До {expiryDate?.toLocaleDateString()}</span>
                            </div>
-                           <div className="flex flex-col min-w-[100px]">
+                           <div className="flex flex-col min-w-[100px] pt-1">
                             <div className="flex justify-between items-center text-[10px] font-mono mb-1">
-                              <span>{trafficUsedGB} GB</span>
+                              <span>{trafficUsedGB}</span>
                               <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
                             </div>
                             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
@@ -180,71 +193,57 @@ export default function AdminUsers() {
                                />
                             </div>
                           </div>
-                          <select 
-                            className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
-                            value={sub.server_id || ''}
-                            onChange={(e) => moveUserServer(user.id, e.target.value)}
-                          >
-                            {servers.map(s => (
-                              <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
-                            ))}
-                          </select>
                         </div>
                       ) : <span className="opacity-30 text-xs">—</span>}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 align-top">
                       {sub && devices.length > 0 ? (
-                        <div className="flex flex-col gap-1.5 min-w-[140px]">
-                          <span className="text-[10px] text-muted-foreground mb-1">Всего: {devices.length}</span>
+                        <div className="flex flex-col gap-2 min-w-[130px]">
                           {devices.map((device: any) => (
-                            <div key={device.id} className="flex flex-col bg-white/5 p-2 rounded-lg border border-white/5">
-                              <div className="flex justify-between items-start">
-                                <span className="text-[10px] font-bold text-white max-w-[80px] truncate" title={device.label || '-'}>
-                                  {device.label || 'Устройство'}
+                            <div key={device.id} className="flex justify-between items-center group">
+                              <div className="flex items-center gap-2 overflow-hidden max-w-[110px]">
+                                <span className="relative flex h-2 w-2 shrink-0">
+                                  {!isExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
+                                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
                                 </span>
-                                <button
-                                  onClick={() => deleteDevice(user.id, device.id)}
-                                  className="text-muted-foreground hover:text-red-400 p-0.5 rounded transition-colors"
-                                  title="Удалить устройство"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
+                                <span className="text-[10px] font-medium text-white truncate" title={device.email || device.id}>{device.label || 'Устройство'}</span>
                               </div>
-                              <span className="text-[9px] font-mono text-muted-foreground mt-0.5 truncate" title={device.email}>{device.email || device.id}</span>
+                              <button
+                                onClick={() => deleteDevice(user.id, device.id)}
+                                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 p-0.5 rounded transition-all shrink-0"
+                                title="Удалить устройство"
+                              >
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           ))}
                         </div>
                       ) : <span className="text-xs text-muted-foreground italic">Нет устройств</span>}
                     </td>
-                    <td className="px-6 py-4 border-l border-white/5">
-                      <div className="flex flex-col items-end justify-center gap-2">
+                    <td className="px-6 py-4 border-l border-white/5 align-top">
+                      <div className="flex flex-col items-end justify-start gap-2 h-full">
                          <button 
                            onClick={() => {
                              setSelectedUser(user);
                              setIsHistoryOpen(true);
                            }}
-                           className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white rounded-lg transition-all text-xs"
+                           className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white rounded-lg transition-all text-[10px]"
                            title="История транзакций"
                          >
-                           <History size={14} /> История
+                           <History size={12} /> История
                          </button>
-                         {user.role !== 'admin' && user.role !== 'superadmin' ? (
-                           <button 
-                             onClick={() => updateUserRole(user.id, 'admin')}
-                             className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 rounded-lg transition-all text-xs"
-                             title="Сделать админом"
+                         {sub && (
+                           <select 
+                             className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
+                             value={sub.server_id || ''}
+                             onChange={(e) => moveUserServer(user.id, e.target.value)}
                            >
-                             <Shield size={14} /> Админ
-                           </button>
-                         ) : user.role === 'admin' ? (
-                           <button 
-                             onClick={() => updateUserRole(user.id, 'user')}
-                             className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 rounded-lg transition-all text-xs"
-                             title="Снять права админа"
-                           >
-                             <ShieldAlert size={14} /> Снять
-                           </button>
-                         ) : null}
+                             <option value="" disabled>Сервер не выбран</option>
+                             {servers.map(s => (
+                               <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
+                             ))}
+                           </select>
+                         )}
                       </div>
                     </td>
                   </tr>
@@ -277,36 +276,76 @@ export default function AdminUsers() {
                   <div className="flex flex-col">
                     <span className="font-bold text-white text-base">{user.name || 'Без имени'}</span>
                     <span className="text-xs text-muted-foreground font-mono">{user.email}</span>
+                    <span className="font-mono text-xs text-blue-400 font-bold mt-1">Баланс: {user.balance || 0} ₽</span>
                   </div>
-                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                    user.role === 'superadmin' ? 'bg-red-500/10 text-red-500' : 
-                    user.role === 'admin' ? 'bg-blue-500/10 text-blue-500' : 'bg-white/10 text-muted-foreground'
-                  }`}>
-                    {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
-                  </span>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
+                      user.role === 'superadmin' ? 'bg-red-500/10 text-red-500' : 
+                      user.role === 'admin' ? 'bg-blue-500/10 text-blue-500' : 'bg-white/10 text-muted-foreground'
+                    }`}>
+                      {user.role === 'superadmin' ? 'Superadmin' : user.role === 'admin' ? 'Admin' : 'User'}
+                    </span>
+                    {user.role !== 'admin' && user.role !== 'superadmin' ? (
+                      <button onClick={() => updateUserRole(user.id, 'admin')} className="text-[10px] text-blue-400 hover:text-blue-300">Дать админа</button>
+                    ) : user.role === 'admin' ? (
+                      <button onClick={() => updateUserRole(user.id, 'user')} className="text-[10px] text-yellow-500 hover:text-yellow-400">Снять админа</button>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-2 bg-white/5 rounded-xl border border-white/5">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Баланс</p>
-                    <span className="text-xs font-bold text-blue-400 font-mono">{user.balance || 0} ₽</span>
-                  </div>
-                  <div className="p-2 bg-white/5 rounded-xl border border-white/5">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Подписка</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-2 bg-white/5 rounded-xl border border-white/5 flex flex-col pt-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-muted-foreground uppercase">Подписка</span>
+                    </div>
                     {sub ? (
-                      <div className="flex flex-col">
-                        <span className={`text-xs font-bold ${isExpired ? 'text-red-400' : 'text-green-400'}`}>
-                          {isExpired ? 'Истекла' : 'Активна'}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">до {expiryDate?.toLocaleDateString()}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1">
+                          <span className={`text-[10px] font-bold tracking-wide uppercase ${isExpired ? 'text-red-400' : 'text-primary'}`}>{sub.plan_type || 'Custom'}</span>
+                          <span className="text-white/20">•</span>
+                          <span className={`text-[10px] font-bold ${isExpired ? 'text-red-400' : 'text-green-400'}`}>
+                            {isExpired ? 'Истекла' : 'Активна'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">До {expiryDate?.toLocaleDateString()}</span>
                       </div>
-                    ) : <span className="text-xs italic text-muted-foreground">Нет</span>}
+                    ) : <span className="text-[10px] italic text-muted-foreground mt-0.5">Нет подписки</span>}
                   </div>
-                  <div className="p-2 bg-white/5 rounded-xl border border-white/5 col-span-2">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Включённый Сервер</p>
-                    {sub ? (
+
+                  <div className="p-2 bg-white/5 rounded-xl border border-white/5 flex flex-col justify-center gap-2">
+                    <button 
+                      onClick={() => {
+                        setSelectedUser(user);
+                        setIsHistoryOpen(true);
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-white/5 text-white hover:bg-white/10 rounded-lg transition-all text-xs"
+                    >
+                      <History size={12} /> История
+                    </button>
+                  </div>
+                </div>
+
+                {sub && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-1 p-2 bg-white/5 rounded-xl border border-white/5">
+                      <div className="flex justify-between items-center text-[10px] font-mono mb-1">
+                        <span className="text-muted-foreground uppercase">Трафик</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] font-mono mb-1">
+                        <span className="text-white font-bold">{trafficUsedGB}</span>
+                        <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
+                      </div>
+                      <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-500 ${(Number(trafficUsedGB) / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-blue-500'}`}
+                          style={{ width: `${Math.min(100, (Number(trafficUsedGB) / Number(trafficLimitGB)) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-1 p-2 bg-white/5 rounded-xl border border-white/5">
+                      <p className="text-[10px] text-muted-foreground uppercase mb-1">Вкл. Сервер</p>
                       <select 
-                        className="w-full bg-[#0a0c10] border border-white/10 p-2 rounded text-xs outline-none text-blue-400 focus:ring-0"
+                        className="w-full bg-[#0a0c10] border border-white/10 p-1.5 rounded text-[10px] outline-none text-blue-400 focus:ring-0"
                         value={sub.server_id || ''}
                         onChange={(e) => moveUserServer(user.id, e.target.value)}
                       >
@@ -316,23 +355,6 @@ export default function AdminUsers() {
                           </option>
                         ))}
                       </select>
-                    ) : <span className="text-xs text-muted-foreground">-</span>}
-                  </div>
-                </div>
-
-                {sub && (
-                  <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                    <div className="flex justify-between items-center text-[10px] font-mono mb-2">
-                      <span className="text-muted-foreground uppercase">Трафик</span>
-                      <span className="text-white font-bold">{trafficUsedGB} <span className="text-muted-foreground">/ {trafficLimitGB} GB</span></span>
-                    </div>
-                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                       <div 
-                         className={`h-full transition-all duration-500 ${
-                           (Number(trafficUsedGB) / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-blue-500'
-                         }`}
-                         style={{ width: `${Math.min(100, (Number(trafficUsedGB) / Number(trafficLimitGB)) * 100)}%` }}
-                       />
                     </div>
                   </div>
                 )}
@@ -343,13 +365,19 @@ export default function AdminUsers() {
                     <div className="flex flex-col gap-2">
                       {devices.map((device: any) => (
                         <div key={device.id} className="flex justify-between items-center bg-[#0a0c10] p-2 rounded-lg border border-white/5">
-                          <div className="flex flex-col overflow-hidden mr-2">
-                            <span className="text-xs font-bold text-white truncate">{device.label || 'Устройство'}</span>
-                            <span className="text-[10px] font-mono text-muted-foreground truncate">{device.email || device.id}</span>
+                          <div className="flex items-center gap-2 overflow-hidden mr-2">
+                            <span className="relative flex h-2 w-2 shrink-0">
+                              {!isExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
+                              <span className={`relative inline-flex rounded-full h-2 w-2 ${isExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                            </span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-white truncate max-w-[120px]">{device.label || 'Устройство'}</span>
+                              <span className="text-[10px] font-mono text-muted-foreground truncate">{device.email || device.id}</span>
+                            </div>
                           </div>
                           <button
                             onClick={() => deleteDevice(user.id, device.id)}
-                            className="bg-red-500/10 text-red-400 hover:bg-red-500/20 p-1.5 rounded transition-colors flex-shrink-0"
+                            className="text-muted-foreground hover:text-red-400 p-1.5 rounded transition-colors flex-shrink-0"
                             title="Удалить устройство"
                           >
                             <Trash2 size={14} />
@@ -359,33 +387,6 @@ export default function AdminUsers() {
                     </div>
                   </div>
                 )}
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-white/5 flex-wrap">
-                   <button 
-                     onClick={() => {
-                        setSelectedUser(user);
-                        setIsHistoryOpen(true);
-                     }}
-                     className="flex items-center gap-2 px-3 py-1.5 bg-white/5 text-muted-foreground rounded-lg text-xs font-medium grow justify-center"
-                   >
-                     <History size={14} /> История
-                   </button>
-                   {user.role !== 'admin' && user.role !== 'superadmin' ? (
-                     <button 
-                       onClick={() => updateUserRole(user.id, 'admin')}
-                       className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 text-blue-500 rounded-lg text-xs font-medium grow justify-center"
-                     >
-                       <Shield size={14} /> Админ
-                     </button>
-                   ) : user.role === 'admin' ? (
-                     <button 
-                       onClick={() => updateUserRole(user.id, 'user')}
-                       className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 text-yellow-500 rounded-lg text-xs font-medium grow justify-center"
-                     >
-                       <ShieldAlert size={14} /> Снять
-                     </button>
-                   ) : null}
-                </div>
               </div>
             );
           })}
