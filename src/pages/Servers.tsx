@@ -13,8 +13,7 @@ export default function Servers() {
   useEffect(() => {
     const fetchServers = async () => {
       try {
-        const { data } = await axios.get('/api/admin/servers'); // Using public logic or user logic
-        // Filter active servers for users
+        const { data } = await axios.get('/api/servers/status');
         setServers(data.filter((s: any) => s.is_active));
       } catch (e) {
         console.error('Failed to fetch servers');
@@ -37,7 +36,9 @@ export default function Servers() {
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {servers.map((server, i) => {
+        {loading ? (
+          <div className="col-span-full py-10 text-center text-muted-foreground">Загрузка состояния сети...</div>
+        ) : servers.map((server, i) => {
           const isConnected = server.id === currentServerId;
           
           return (
@@ -78,15 +79,15 @@ export default function Servers() {
                   <div className="grid grid-cols-2 gap-4 py-4 border-y border-white/5">
                     <div className="space-y-1">
                       <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Пинг</span>
-                      <div className="flex items-center gap-1.5 text-green-400">
+                      <div className={`flex items-center gap-1.5 ${server.ping > 200 ? 'text-yellow-400' : server.ping === 999 ? 'text-red-400' : 'text-green-400'}`}>
                         <Signal size={14} />
-                        <span className="font-mono text-sm font-bold">~{Math.floor(Math.random() * 40) + 20}ms</span>
+                        <span className="font-mono text-sm font-bold">{server.ping === 999 ? 'Error' : `~${server.ping}ms`}</span>
                       </div>
                     </div>
                     <div className="space-y-1 text-right">
                       <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Нагрузка</span>
-                      <div className="text-white font-mono text-sm font-bold">
-                        {Math.floor(Math.random() * 30) + 10}%
+                      <div className={`font-mono text-sm font-bold ${server.load > 80 ? 'text-red-400' : 'text-white'}`}>
+                        {server.load}%
                       </div>
                     </div>
                   </div>

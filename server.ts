@@ -1486,6 +1486,48 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   }
 });
 
+app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, res) => {
+  const { userId, deviceId } = req.params;
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const target = devices[targetIdx];
+    try {
+      const { instance } = await getXuiForServer(sub.server_id);
+      await instance.deleteClient(target.email, parseInt(process.env.XUI_INBOUND_ID || '1'));
+    } catch (err: any) {
+      console.error(`[AdminAPI] Failed to delete client ${target.email} from XUI:`, err.message);
+    }
+
+    devices.splice(targetIdx, 1);
+    
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      device_limit: Math.max(1, devices.length),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство удалено' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
   const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
@@ -2188,6 +2230,51 @@ app.get('/api/config', (req, res) => {
   res.json({
     telegramBotName: process.env.VITE_TELEGRAM_BOT_NAME || process.env.TELEGRAM_BOT_NAME || 'izinet_bot'
   });
+});
+
+app.get('/api/servers/status', async (req, res) => {
+  try {
+    const { data: servers, error } = await supabase
+      .from('vpn_servers')
+      .select('id, name, location_code, domain, ip, is_active')
+      .eq('is_active', true);
+    
+    if (error) throw error;
+
+    const statuses = await Promise.all(servers.map(async (server) => {
+      const start = Date.now();
+      let load = 0;
+      let ping = 0;
+      let status = 'offline';
+      
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const onlines = await instance.getOnlines().catch(() => []);
+        const activeCount = onlines?.length || 0;
+        load = Math.min(Math.round((activeCount / 250) * 100), 100);
+        ping = Date.now() - start;
+        status = 'online';
+      } catch (e) {
+        ping = 999;
+      }
+
+      return {
+        id: server.id,
+        name: server.name,
+        location_code: server.location_code,
+        domain: server.domain,
+        ip: server.ip,
+        ping,
+        load,
+        status,
+        is_active: server.is_active
+      };
+    }));
+
+    res.json(statuses);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/locations', async (req, res) => {
