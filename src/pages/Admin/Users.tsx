@@ -81,6 +81,21 @@ export default function AdminUsers() {
     }
   };
 
+  const moveDeviceServer = async (userId: string, deviceId: string, newServerId: string) => {
+    try {
+      const loadingToast = toast.loading('Перенос устройства...');
+      await axios.put(`/api/admin/users/${userId}/devices/${deviceId}/move`, { newServerId }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.dismiss(loadingToast);
+      toast.success('Устройство успешно перенесено');
+      fetchData();
+    } catch (e: any) {
+      toast.dismiss();
+      toast.error(e.response?.data?.error || 'Ошибка переноса устройства');
+    }
+  };
+
   const deleteDevice = async (userId: string, deviceId: string) => {
     if (!window.confirm('Действительно удалить устройство? Пользователь потеряет доступ с него.')) return;
     try {
@@ -216,24 +231,43 @@ export default function AdminUsers() {
                     <td className="px-6 py-4 align-top">
                       {sub && devices.length > 0 ? (
                         <div className="flex flex-col gap-2 min-w-[130px]">
-                          {devices.map((device: any) => (
-                            <div key={device.id} className="flex justify-between items-center group">
-                              <div className="flex items-center gap-2 overflow-hidden max-w-[110px]">
-                                <span className="relative flex h-2 w-2 shrink-0">
-                                  {!isExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
-                                </span>
-                                <span className="text-[10px] font-medium text-white truncate" title={device.email || device.id}>{device.label || 'Устройство'}</span>
+                          {devices.map((device: any) => {
+                            const deviceUsed = ((device.trafficUsedBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
+                            const devExpiry = new Date(device.expiresAt || +(sub?.expires_at || 0));
+                            const devIsExpired = devExpiry.getTime() < Date.now();
+                            return (
+                              <div key={device.id} className="flex flex-col gap-1.5 p-2 bg-black/20 rounded-lg group border border-white/5 relative">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex items-center gap-2 overflow-hidden max-w-[140px]">
+                                    <span className="relative flex h-2 w-2 shrink-0">
+                                      {!devIsExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
+                                      <span className={`relative inline-flex rounded-full h-2 w-2 ${devIsExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                                    </span>
+                                    <div className="flex flex-col overflow-hidden">
+                                      <span className="text-[10px] font-bold text-white truncate" title={device.email || device.id}>{device.label || 'Устройство'}</span>
+                                      <span className="text-[9px] text-muted-foreground truncate">{devExpiry.toLocaleDateString()} • {deviceUsed} GB</span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => deleteDevice(user.id, device.id)}
+                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 p-0.5 rounded transition-all shrink-0 absolute top-1.5 right-1.5"
+                                    title="Удалить устройство"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                                <select 
+                                  className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[9px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
+                                  value={device.serverId || sub.server_id || ''}
+                                  onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
+                                >
+                                  {servers.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
+                                  ))}
+                                </select>
                               </div>
-                              <button
-                                onClick={() => deleteDevice(user.id, device.id)}
-                                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 p-0.5 rounded transition-all shrink-0"
-                                title="Удалить устройство"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          ))}
+                            );
+                          })}
                           <button
                             onClick={() => addDevice(user.id)}
                             className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 flex items-center gap-1 opacity-50 hover:opacity-100 transition-all"
@@ -404,27 +438,43 @@ export default function AdminUsers() {
                     </div>
                     {devices.length > 0 ? (
                       <div className="flex flex-col gap-2">
-                        {devices.map((device: any) => (
-                          <div key={device.id} className="flex justify-between items-center bg-[#0a0c10] p-2 rounded-lg border border-white/5">
-                            <div className="flex items-center gap-2 overflow-hidden mr-2">
-                              <span className="relative flex h-2 w-2 shrink-0">
-                                {!isExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                                <span className={`relative inline-flex rounded-full h-2 w-2 ${isExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
-                              </span>
-                              <div className="flex flex-col">
-                                <span className="text-xs font-bold text-white truncate max-w-[120px]">{device.label || 'Устройство'}</span>
-                                <span className="text-[10px] font-mono text-muted-foreground truncate">{device.email || device.id}</span>
+                        {devices.map((device: any) => {
+                          const deviceUsed = ((device.trafficUsedBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
+                          const devExpiry = new Date(device.expiresAt || +(sub?.expires_at || 0));
+                          const devIsExpired = devExpiry.getTime() < Date.now();
+                          return (
+                            <div key={device.id} className="flex flex-col gap-2 bg-[#0a0c10] p-2.5 rounded-lg border border-white/5 relative">
+                              <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-2.5 overflow-hidden">
+                                  <span className="relative flex h-2 w-2 shrink-0">
+                                    {!devIsExpired && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
+                                    <span className={`relative inline-flex rounded-full h-2 w-2 ${devIsExpired ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                                  </span>
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-white truncate max-w-[150px]">{device.label || 'Устройство'}</span>
+                                    <span className="text-[10px] text-muted-foreground">{devExpiry.toLocaleDateString()} • {deviceUsed} GB</span>
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => deleteDevice(user.id, device.id)}
+                                  className="text-muted-foreground hover:text-red-400 p-1 rounded transition-colors shrink-0 absolute top-2 right-2"
+                                  title="Удалить устройство"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
+                              <select 
+                                className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
+                                value={device.serverId || sub.server_id || ''}
+                                onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
+                              >
+                                {servers.map(s => (
+                                  <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
+                                ))}
+                              </select>
                             </div>
-                            <button
-                              onClick={() => deleteDevice(user.id, device.id)}
-                              className="text-muted-foreground hover:text-red-400 p-1.5 rounded transition-colors flex-shrink-0"
-                              title="Удалить устройство"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="text-xs text-muted-foreground italic text-center py-2">

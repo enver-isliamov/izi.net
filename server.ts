@@ -64,6 +64,7 @@ export interface VpnDevice {
   expiresAt: string;
   serverType: string;
   trafficUsedBytes: number;
+  serverId?: string;
 }
 
 // Support function to migrate legacy v2ray_config text to JSON
@@ -1486,6 +1487,72 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   }
 });
 
+app.put('/api/admin/users/:userId/devices/:deviceId/move', adminOnly, async (req, res) => {
+  const { userId, deviceId } = req.params;
+  const { newServerId } = req.body;
+
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const device = devices[targetIdx];
+    const currentServerId = device.serverId || sub.server_id;
+    
+    if (currentServerId === newServerId) {
+      return res.status(400).json({ error: 'Device is already on this server' });
+    }
+
+    // 1. Delete from old server
+    try {
+      if (currentServerId) {
+         const { instance: oldInstance } = await getXuiForServer(currentServerId);
+         await oldInstance.deleteClient(device.email, parseInt(process.env.XUI_INBOUND_ID || '1'));
+      }
+    } catch (e: any) {
+      console.warn(`Failed to delete client ${device.email} from old server, might not exist:`, e.message);
+    }
+
+    // 2. Add to new server
+    const { instance: newInstance } = await getXuiForServer(newServerId);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+    const expiresAtMs = new Date(device.expiresAt).getTime();
+    
+    const rawConfig = await newInstance.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
+    
+    if (!rawConfig) {
+      throw new Error('Failed to generate new config on new server');
+    }
+
+    // 3. Update device
+    device.config = rawConfig;
+    device.serverId = newServerId;
+    devices[targetIdx] = device;
+
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство перенесено', device });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, res) => {
   const { userId, deviceId } = req.params;
   try {
@@ -1507,9 +1574,12 @@ app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, 
     if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
 
     const target = devices[targetIdx];
+    const targetServerId = target.serverId || sub.server_id;
     try {
-      const { instance } = await getXuiForServer(sub.server_id);
-      await instance.deleteClient(target.email, parseInt(process.env.XUI_INBOUND_ID || '1'));
+      if (targetServerId) {
+        const { instance } = await getXuiForServer(targetServerId);
+        await instance.deleteClient(target.email, parseInt(process.env.XUI_INBOUND_ID || '1'));
+      }
     } catch (err: any) {
       console.error(`[AdminAPI] Failed to delete client ${target.email} from XUI:`, err.message);
     }
@@ -2847,7 +2917,11 @@ async function syncUserTraffic(userId: string) {
   // 3. Fetch stats for all devices
   for (const device of devices) {
     try {
-      const stats = await xuiInstance.getClientTraffic(device.email);
+      const targetServerId = device.serverId || sub.server_id;
+      if (!targetServerId) continue;
+      
+      const { instance } = await getXuiForServer(targetServerId);
+      const stats = await instance.getClientTraffic(device.email);
       if (stats) {
         device.trafficUsedBytes = stats.used;
         totalUsedBytes += stats.used;
