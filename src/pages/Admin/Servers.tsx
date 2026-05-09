@@ -7,7 +7,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
 
-export default function AdminServers() {
+export function AdminServersList() {
   const { session } = useAuth();
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -168,7 +168,9 @@ export default function AdminServers() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
+        <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
+          <Server size={20} className="text-blue-400" /> Управление серверами
+        </h2>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
             onClick={runDiagnostic}
@@ -190,8 +192,6 @@ export default function AdminServers() {
           </button>
         </div>
       </div>
-
-      <AdminNav />
 
       {diagResults.length > 0 && (
         <motion.div 

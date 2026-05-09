@@ -23,7 +23,6 @@ import PrivacyPolicy from '@/pages/PrivacyPolicy';
 
 // Admin Pages
 import AdminDashboard from '@/pages/Admin/Dashboard';
-import AdminServers from '@/pages/Admin/Servers';
 import AdminUsers from '@/pages/Admin/Users';
 import AdminSettings from '@/pages/Admin/Settings';
 import AdminPayments from '@/pages/Admin/Payments';
@@ -88,7 +87,6 @@ export default function App() {
                   <PageContainer>
                     <Routes>
                       <Route path="/" element={<AdminDashboard />} />
-                      <Route path="/servers" element={<AdminServers />} />
                       <Route path="/users" element={<AdminUsers />} />
                       <Route path="/payments" element={<AdminPayments />} />
                       <Route path="/settings" element={<AdminSettings />} />

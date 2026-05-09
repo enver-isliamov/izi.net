@@ -196,38 +196,6 @@ export default function AdminUsers() {
                       </div>
                     </td>
                     <td className="px-6 py-4 align-top">
-                      {sub ? (
-                        <div className="flex flex-col min-w-[120px] space-y-2">
-                           <div className="flex flex-col text-xs">
-                             <div className="flex items-center gap-1.5 font-bold uppercase tracking-wide text-[10px] mb-1">
-                               <span className={isExpired ? 'text-red-400' : 'text-primary'}>
-                                 {sub.plan_type || 'Custom'}
-                               </span>
-                               <span className="text-white/20">•</span>
-                               <span className={isExpired ? 'text-red-400' : 'text-green-400'}>
-                                 {isExpired ? 'Истекла' : 'Активна'}
-                               </span>
-                             </div>
-                             <span className="text-[10px] text-muted-foreground">До {expiryDate?.toLocaleDateString()}</span>
-                           </div>
-                           <div className="flex flex-col min-w-[100px] pt-1">
-                            <div className="flex justify-between items-center text-[10px] font-mono mb-1">
-                              <span>{trafficUsedGB}</span>
-                              <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
-                            </div>
-                            <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                               <div 
-                                 className={`h-full transition-all duration-500 ${
-                                   (Number(trafficUsedGB) / Number(trafficLimitGB)) > 0.9 ? 'bg-red-500' : 'bg-blue-500'
-                                 }`}
-                                 style={{ width: `${Math.min(100, (Number(trafficUsedGB) / Number(trafficLimitGB)) * 100)}%` }}
-                               />
-                            </div>
-                          </div>
-                        </div>
-                      ) : <span className="opacity-30 text-xs">—</span>}
-                    </td>
-                    <td className="px-6 py-4 align-top">
                       {sub && devices.length > 0 ? (
                         <div className="flex flex-col gap-2 min-w-[200px]">
                           {devices.map((device: any) => {
@@ -315,7 +283,7 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-6 py-4 border-l border-white/5 align-top">
                       <div className="flex flex-col items-end justify-start gap-2 h-full">
-                         <button 
+                        <button 
                            onClick={() => {
                              setSelectedUser(user);
                              setIsHistoryOpen(true);
@@ -325,18 +293,6 @@ export default function AdminUsers() {
                          >
                            <History size={12} /> История
                          </button>
-                         {sub && (
-                           <select 
-                             className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full"
-                             value={sub.server_id || ''}
-                             onChange={(e) => moveUserServer(user.id, e.target.value)}
-                           >
-                             <option value="" disabled>Сервер не выбран</option>
-                             {servers.map(s => (
-                               <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
-                             ))}
-                           </select>
-                         )}
                       </div>
                     </td>
                   </tr>
