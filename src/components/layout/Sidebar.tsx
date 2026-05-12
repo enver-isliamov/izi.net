@@ -20,12 +20,11 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Дашборд', path: '/dashboard' },
-  { icon: CreditCard, label: 'Подписка', path: '/subscription' },
-  { icon: Wallet, label: 'Кошелек', path: '/wallet' },
   { icon: Download, label: 'Установка', path: '/installation' },
-  { icon: LifeBuoy, label: 'Поддержка', path: '/support' },
-  { icon: User, label: 'Профиль', path: '/profile' },
+  { icon: Globe, label: 'Серверы', path: '/servers' },
+  { icon: Wallet, label: 'Кошелек', path: '/wallet' },
   { icon: Users, label: 'Рефералы', path: '/referrals' },
+  { icon: LifeBuoy, label: 'Поддержка', path: '/support' },
   { icon: HelpCircle, label: 'FAQ', path: '/faq' },
 ];
 

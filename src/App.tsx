@@ -104,7 +104,7 @@ export default function App() {
                   <PageContainer>
                     <Routes>
                       <Route path="/dashboard" element={<Dashboard />} />
-                      <Route path="/subscription" element={<Subscription />} />
+                      <Route path="/subscription" element={<Navigate to="/dashboard" replace />} />
                       <Route path="/installation" element={<Instructions />} />
                       <Route path="/support" element={<Support />} />
                       <Route path="/profile" element={<Profile />} />
