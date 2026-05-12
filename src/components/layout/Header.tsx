@@ -29,7 +29,6 @@ import { cn } from '@/lib/utils';
 const menuItems = [
   { icon: LayoutDashboard, label: 'Дашборд', path: '/dashboard' },
   { icon: Download, label: 'Установка', path: '/installation' },
-  { icon: Globe, label: 'Серверы', path: '/servers' },
   { icon: WalletIcon, label: 'Кошелек', path: '/wallet' },
   { icon: Users, label: 'Рефералы', path: '/referrals' },
   { icon: LifeBuoy, label: 'Поддержка', path: '/support' },
@@ -144,22 +143,6 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-        <Tooltip>
-          <TooltipTrigger 
-            render={
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="rounded-full text-muted-foreground hover:text-primary"
-                onClick={() => navigate('/servers')}
-              >
-                <Globe className="w-5 h-5" />
-              </Button>
-            } 
-          />
-          <TooltipContent>Статус сети</TooltipContent>
-        </Tooltip>
-
         <DropdownMenu>
           <DropdownMenuTrigger 
             render={
