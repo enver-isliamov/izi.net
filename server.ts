@@ -1020,38 +1020,61 @@ app.post('/api/user/devices/:deviceId/regenerate', authenticateUser, async (req,
     if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
 
     const target = devices[targetIdx];
-    const targetServerId = target.serverId || sub.server_id;
 
-    if (!targetServerId) return res.status(400).json({ error: 'Server not assigned' });
+    const { data: activeServers, error: sErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
 
-    const { instance: xuiInstance } = await getXuiForServer(targetServerId);
+    if (sErr || !activeServers || activeServers.length === 0) {
+      return res.status(400).json({ error: 'No active servers available for regeneration' });
+    }
+
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
 
-    // 1. Delete old client
-    try {
-      if (target.uuid && target.email) {
-        await xuiInstance.deleteClient(target.uuid, target.email);
-      }
-    } catch (e) {
-      console.warn(`[UserRegen] Old client delete fail:`, e);
-    }
-
-    // 2. New client info
+    // New unified credentials
     const randomSuffix = Math.random().toString(36).substring(2, 4);
     const newEmail = `user_${userId.slice(0, 5)}_${randomSuffix}_reg`;
     const newUuid = crypto.randomUUID();
-    const expiresAtMs = new Date(sub.expires_at).getTime();
+    let maxExpiresAt = new Date(target.expiresAt);
+    if(maxExpiresAt < new Date()) maxExpiresAt = new Date(sub.expires_at); // fallback
+    const expiresAtMs = maxExpiresAt.getTime();
 
-    // 3. XUI Add
-    const newRawConfig = await xuiInstance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
-    
-    if (!newRawConfig) throw new Error(`Failed to regenerate config`);
+    let configLines: string[] = [];
+    let isReplacedOnAtLeastOne = false;
+
+    for (const server of activeServers) {
+      try {
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        
+        // 1. Delete old client
+        try {
+          if (target.uuid && target.email) {
+            await xuiInstance.deleteClient(target.uuid, target.email);
+          }
+        } catch (e) {
+          console.warn(`[UserRegen] Old client delete fail on ${server.name}:`, e);
+        }
+
+        // 3. Add new client to XUI
+        const rawConfig = await xuiInstance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
+        if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+          configLines.push(configWithSuffix);
+          isReplacedOnAtLeastOne = true;
+        }
+      } catch(err: any) {
+        console.error(`[UserRegen] Error on server ${server.name}:`, err.message);
+      }
+    }
+
+    if (!isReplacedOnAtLeastOne) throw new Error(`Failed to regenerate config on any server`);
 
     // 4. DB update
     devices[targetIdx] = {
       ...target,
-      config: newRawConfig,
+      config: configLines.join('\n'), // combined configs
       email: newEmail,
       uuid: newUuid,
       updatedAt: new Date().toISOString()
@@ -1438,202 +1461,11 @@ app.get('/api/admin/servers/diag', adminOnly, async (req, res) => {
 });
 
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
-  const { userId, newServerId } = req.body;
-  if (!userId || !newServerId) return res.status(400).json({ error: 'Missing parameters' });
-
-  console.log(`🔄 Moving user ${userId} to server ${newServerId}`);
-
-  try {
-    // 1. Find ANY active or recently expired subscription to move
-    const { data: sub, error: subErr } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('expires_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (subErr || !sub) return res.status(404).json({ error: 'Active subscription not found for this user' });
-    
-    if (sub.server_id === newServerId) {
-      return res.status(400).json({ error: 'Пользователь уже находится на этом сервере' });
-    }
-
-    // 2. Get old and new server instances
-    console.log(`[MoveServer] Step 1: Connecting to servers. Old: ${sub.server_id}, New: ${newServerId}`);
-    const { instance: oldXui } = await getXuiForServer(sub.server_id);
-    const { instance: newXui, server: newServer } = await getXuiForServer(newServerId);
-    
-    // Check connection to NEW server first - if it's down, don't even start
-    try {
-      await Promise.race([
-        newXui.login(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('New server unreachable')), 7000))
-      ]);
-    } catch (e: any) {
-      console.error(`❌ Target server ${newServerId} is unreachable:`, e.message);
-      return res.status(503).json({ error: `Целевой сервер недоступен: ${e.message}` });
-    }
-    
-    // 3. Parse devices
-    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-    
-    // Fetch all inbounds of new server once to match ports
-    const newServerInbounds = await newXui.getInbounds();
-    const defaultVlessInbound = newServerInbounds.find((i: any) => i.protocol === 'vless');
-
-    const expiryTime = new Date(sub.expires_at).getTime();
-    const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
-    
-    // 4. Migrate each device
-    const migratedDevices: VpnDevice[] = [];
-    console.log(`🔄 Starting migration for ${devices.length} devices to server ${newServer?.name || newServerId}`);
-    
-    for (const device of devices) {
-      // Determine which inbound to use based on the port of the device's current config
-      let targetInboundId = defaultVlessInbound?.id || parseInt(process.env.XUI_INBOUND_ID || '1');
-      
-      try {
-        const portMatch = device.config.match(/:(\d+)\?/);
-        if (portMatch) {
-          const currentPort = parseInt(portMatch[1]);
-          const matchingInbound = newServerInbounds.find((i: any) => i.port === currentPort && i.protocol === 'vless');
-          if (matchingInbound) {
-            targetInboundId = matchingInbound.id;
-            console.log(`🎯 Port match found: using inbound ${targetInboundId} (port ${currentPort})`);
-          }
-        }
-      } catch (e) {
-        console.warn(`Could not extract port from config for device ${device.email}`);
-      }
-
-      // Delete from old server (best effort)
-      if (sub.server_id) {
-        console.log(`🗑️ Deleting client ${device.email} from old server...`);
-        try {
-          await oldXui.deleteClient(device.uuid, device.email);
-        } catch (e) {
-          console.warn(`⚠️ Error deleting ${device.email} from old server, proceeding anyway.`);
-        }
-      }
-
-      // Add to new server
-      try {
-        console.log(`➕ Adding client ${device.email} to new server [${newXui.host}] inbound ${targetInboundId}...`);
-        const finalConfig = await newXui.addClient(device.email, device.uuid, targetInboundId, expiryTime, limitBytes);
-        
-        if (!finalConfig || finalConfig.includes('security=none')) {
-          throw new Error(`Получен невалидный или небезопасный конфиг для ${device.email}`);
-        }
-
-        console.log(`✅ Client ${device.email} migrated. New config: ${finalConfig.substring(0, 60)}...`);
-        
-        migratedDevices.push({
-          ...device,
-          config: finalConfig
-        });
-      } catch (addErr: any) {
-        console.error(`❌ Failed to add client ${device.email} to new server:`, addErr.message);
-        // DO NOT push fallbackConfig to migratedDevices to avoid saving broken configs to DB
-        // We skip this device, and sub will not be updated if ALL devices fail
-      }
-    }
-
-    if (migratedDevices.length === 0) {
-      return res.status(500).json({ error: 'Миграция провалилась: не удалось создать валидные конфиги на новом сервере.' });
-    }
-
-    // 5. Update DB
-    console.log(`💾 Saving new config for user ${userId} to Supabase...`);
-    const configToSave = JSON.stringify(migratedDevices);
-    console.log(`📊 Final v2ray_config size: ${configToSave.length} bytes. Sample: ${configToSave.substring(0, 100)}...`);
-
-    const { data: updatedSub, error: updateErr } = await supabase
-      .from('subscriptions')
-      .update({
-        server_id: newServerId,
-        v2ray_config: configToSave,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', sub.id)
-      .select()
-      .single();
-
-    if (updateErr) throw updateErr;
-
-    console.log(`✅ User ${userId} successfully moved to server ${newServerId}`);
-    res.json({ success: true, subscription: updatedSub });
-  } catch (err: any) {
-    console.error('❌ Server migration error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  return res.status(400).json({ error: 'Функция перенос сервера отключена: используется единая бесшовная сеть.' });
 });
 
 app.put('/api/admin/users/:userId/devices/:deviceId/move', adminOnly, async (req, res) => {
-  const { userId, deviceId } = req.params;
-  const { newServerId } = req.body;
-
-  try {
-    const { data: sub, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) throw error;
-    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
-
-    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-    const targetIdx = devices.findIndex(d => d.id === deviceId);
-    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
-
-    const device = devices[targetIdx];
-    const currentServerId = device.serverId || sub.server_id;
-    
-    if (currentServerId === newServerId) {
-      return res.status(400).json({ error: 'Device is already on this server' });
-    }
-
-    // 1. Delete from old server
-    try {
-      if (currentServerId) {
-         const { instance: oldInstance } = await getXuiForServer(currentServerId);
-         await oldInstance.deleteClient(device.uuid, device.email);
-      }
-    } catch (e: any) {
-      console.warn(`Failed to delete client ${device.email} from old server, might not exist:`, e.message);
-    }
-
-    // 2. Add to new server
-    const { instance: newInstance } = await getXuiForServer(newServerId);
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
-    const expiresAtMs = new Date(device.expiresAt).getTime();
-    
-    const rawConfig = await newInstance.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
-    
-    if (!rawConfig) {
-      throw new Error('Failed to generate new config on new server');
-    }
-
-    // 3. Update device
-    device.config = rawConfig;
-    device.serverId = newServerId;
-    devices[targetIdx] = device;
-
-    await supabase.from('subscriptions').update({ 
-      v2ray_config: JSON.stringify(devices),
-      updated_at: new Date().toISOString()
-    }).eq('id', sub.id);
-
-    res.json({ success: true, message: 'Устройство перенесено', device });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+  return res.status(400).json({ error: 'Функция перенос сервера отключена: используется единая бесшовная сеть.' });
 });
 
 app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, res) => {
@@ -1657,14 +1489,26 @@ app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, 
     if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
 
     const target = devices[targetIdx];
-    const targetServerId = target.serverId || sub.server_id;
+    
+    // Fetch all active servers to ensure we delete from everywhere
+    const { data: activeServers } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+
     try {
-      if (targetServerId) {
-        const { instance } = await getXuiForServer(targetServerId);
-        await instance.deleteClient(target.uuid, target.email);
+      if (activeServers && activeServers.length > 0) {
+        for (const server of activeServers) {
+          try {
+            const { instance } = await getXuiForServer(server.id);
+            await instance.deleteClient(target.uuid, target.email);
+          } catch (e: any) {
+            console.warn(`[AdminAPI] Failed to delete client ${target.email} from XUI on ${server.name}:`, e.message);
+          }
+        }
       }
     } catch (err: any) {
-      console.error(`[AdminAPI] Failed to delete client ${target.email} from XUI:`, err.message);
+      console.error(`[AdminAPI] Outer error while deleting client ${target.email}:`, err.message);
     }
 
     devices.splice(targetIdx, 1);
@@ -1703,38 +1547,58 @@ app.post('/api/admin/users/:userId/devices/:deviceId/regenerate', adminOnly, asy
     if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
 
     const target = devices[targetIdx];
-    const targetServerId = target.serverId || sub.server_id;
 
-    if (!targetServerId) return res.status(400).json({ error: 'Server not assigned' });
+    const { data: activeServers, error: sErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
 
-    const { instance: xuiInstance } = await getXuiForServer(targetServerId);
+    if (sErr || !activeServers || activeServers.length === 0) {
+      return res.status(400).json({ error: 'No active servers available for regeneration' });
+    }
+
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
 
-    // 1. Delete old client from XUI
-    try {
-      await xuiInstance.deleteClient(target.uuid, target.email);
-    } catch (e) {
-      console.warn(`[Regen] Failed to delete old client:`, e);
-    }
-
-    // 2. Create new client data
     const randomSuffix = Math.random().toString(36).substring(2, 6);
     const newEmail = `user_${userId.slice(0, 8)}_${randomSuffix}_reg`;
     const newUuid = crypto.randomUUID();
-    const expiresAtMs = new Date(sub.expires_at).getTime();
+    let maxExpiresAt = new Date(target.expiresAt);
+    if(maxExpiresAt < new Date()) maxExpiresAt = new Date(sub.expires_at);
+    const expiresAtMs = maxExpiresAt.getTime();
 
-    // 3. Add new client to XUI
-    const newRawConfig = await xuiInstance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
-    
-    if (!newRawConfig || newRawConfig.trim() === '') {
-      throw new Error(`Failed to regenerate config on XUI server`);
+    let configLines: string[] = [];
+    let isReplacedOnAtLeastOne = false;
+
+    for (const server of activeServers) {
+      try {
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        
+        try {
+          if (target.uuid && target.email) {
+            await xuiInstance.deleteClient(target.uuid, target.email);
+          }
+        } catch (e) {
+          console.warn(`[Regen] Failed to delete old client on ${server.name}:`, e);
+        }
+
+        const rawConfig = await xuiInstance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
+        if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+          configLines.push(configWithSuffix);
+          isReplacedOnAtLeastOne = true;
+        }
+      } catch(err: any) {
+        console.error(`[Regen] Error on server ${server.name}:`, err.message);
+      }
     }
+
+    if (!isReplacedOnAtLeastOne) throw new Error(`Failed to regenerate config on any server`);
 
     // 4. Update device in array
     devices[targetIdx] = {
       ...target,
-      config: newRawConfig,
+      config: configLines.join('\n'),
       email: newEmail,
       uuid: newUuid,
       updatedAt: new Date().toISOString()
@@ -1767,7 +1631,7 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
 
     if (error) throw error;
     if (!sub) return res.status(404).json({ error: 'Активная подписка не найдена' });
-    if (!sub.server_id) return res.status(400).json({ error: 'Сервер для подписки не назначен' });
+    // if (!sub.server_id) return res.status(400).json({ error: 'Сервер для подписки не назначен' });
 
     let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
     
@@ -1775,7 +1639,15 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Достигнут лимит устройств (5) для пользователя' });
     }
 
-    const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+    const { data: activeServers, error: sErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+
+    if (sErr || !activeServers || activeServers.length === 0) {
+      return res.status(400).json({ error: 'No active servers available for addClient' });
+    }
+
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
 
@@ -1784,21 +1656,37 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
     const uuid = crypto.randomUUID();
     const expiresAtMs = new Date(sub.expires_at).getTime();
 
-    const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
-    
-    if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
-      throw new Error(`Не удалось сгенерировать конфиг на сервере XUI`);
+    let configLines: string[] = [];
+    let isCreatedOnAtLeastOne = false;
+
+    for (const server of activeServers) {
+      try {
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+        if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+          configLines.push(configWithSuffix);
+          isCreatedOnAtLeastOne = true;
+        }
+      } catch (err: any) {
+        console.error(`[AdminAddClient] Error on server ${server.name}:`, err.message);
+      }
+    }
+
+    if (!isCreatedOnAtLeastOne) {
+       throw new Error(`Не удалось сгенерировать конфиг на сервере XUI`);
     }
 
     const newDevice: VpnDevice = {
       id: `device_${uuid.slice(0,8)}`,
       label: label || `Доп. устройство ${devices.length + 1}`,
-      config: rawConfig,
+      config: configLines.join('\n'),
       email: email,
       uuid: uuid,
       expiresAt: sub.expires_at,
       serverType: sub.server_type,
-      trafficUsedBytes: 0
+      trafficUsedBytes: 0,
+      serverId: activeServers[0].id
     };
 
     devices.push(newDevice);
@@ -2662,8 +2550,21 @@ app.post('/api/subscription/device/delete', async (req, res) => {
       return res.status(400).json({ error: 'Primary device cannot be deleted' });
     }
 
-    const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
-    await xuiInstance.deleteClient(target.uuid, target.email);
+    const { data: activeServers } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+
+    if (activeServers && activeServers.length > 0) {
+      for (const server of activeServers) {
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          await instance.deleteClient(target.uuid, target.email);
+        } catch (e: any) {
+          console.warn(`[UserAPI] Failed to delete client ${target.email} from XUI on ${server.name}:`, e.message);
+        }
+      }
+    }
 
     const nextDevices = devices.filter((device) => device.id !== deviceId);
     const maxExpiryDate = nextDevices.reduce((max, device) => {
@@ -2761,103 +2662,127 @@ app.post('/api/subscription/buy', async (req, res) => {
       lastSub?.server_type
     );
 
-  // Pick server: use user-selected server, existing server if renewing, otherwise find a default or least loaded one
-  let serverId = reqServerId || lastSub?.server_id;
-  if (!serverId) {
-    // 2B. Pick the active server with the fewest active subscriptions.
-    // The production vpn_servers schema does not include an is_default column.
-    const { data: servers, error: sErr } = await supabase
-      .from('vpn_servers')
-      .select(`
-        id,
-        subscriptions!server_id (count)
-      `)
-      .eq('is_active', true);
-    
-    if (sErr || !servers || servers.length === 0) {
-      serverId = null;
-    } else {
-      const sorted = servers.sort((a: any, b: any) => {
-        const countA = a.subscriptions?.[0]?.count || 0;
-        const countB = b.subscriptions?.[0]?.count || 0;
-        return countA - countB;
-      });
-      serverId = sorted[0].id;
-    }
+  // Instead of picking a single server, we fetch ALL active servers to mirror clients
+  const { data: activeServers, error: serversErr } = await supabase
+    .from('vpn_servers')
+    .select('*')
+    .eq('is_active', true);
+
+  if (serversErr || !activeServers || activeServers.length === 0) {
+    throw new Error('No active VPN servers available for provisioning.');
   }
 
-    const { instance: xuiInstance, server } = await getXuiForServer(serverId);
-    const domain = server?.domain;
+  const serverId = reqServerId || lastSub?.server_id || activeServers[0].id;
 
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-    const trafficLimitMb = 100 * 1024; // 100 GB default limit per device logic (you can tune this)
-    const limitBytes = trafficLimitMb * 1024 * 1024;
+  // We still need an inboundId, assuming same across servers for now
+  const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+  const trafficLimitMb = 100 * 1024; // 100 GB default limit per device
+  const limitBytes = trafficLimitMb * 1024 * 1024;
 
-    let targetDevice: VpnDevice | undefined;
+  let targetDevice: VpnDevice | undefined;
 
-    if (forceNew || existingDevices.length === 0) {
-      // 3A. CREATE NEW DEVICE(S)
-      const devicesToCreate = forceNew ? 1 : (deviceLimit || 1);
-      
-      if (existingDevices.length + devicesToCreate > globalDeviceLimit) {
-        return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${globalDeviceLimit}-х устройств.` });
-      }
+  if (forceNew || existingDevices.length === 0) {
+    // 3A. CREATE NEW DEVICE(S)
+    const devicesToCreate = forceNew ? 1 : (deviceLimit || 1);
+    
+    if (existingDevices.length + devicesToCreate > globalDeviceLimit) {
+      return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${globalDeviceLimit}-х устройств.` });
+    }
 
-      for (let i = 0; i < devicesToCreate; i++) {
-        const randomSuffix = Math.random().toString(36).substring(2, 6);
-        const email = `user_${userId.slice(0, 8)}_${randomSuffix}_${i}`;
-        const uuid = crypto.randomUUID();
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + durationDays);
+    for (let i = 0; i < devicesToCreate; i++) {
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const email = `user_${userId.slice(0, 8)}_${randomSuffix}_${i}`;
+      const uuid = crypto.randomUUID();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-        console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
-        const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
-        
-        // VPN-02: Safety check for config before saving to DB
-        if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
-          console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
-          throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+      let configLines: string[] = [];
+      let isFirstNodeValid = false;
+
+      // Mirror client creation across ALL active servers
+      for (const server of activeServers) {
+        try {
+          console.log(`🆕 Creating VPN client ${email} on server [${server.name}]...`);
+          const { instance: xuiInstance } = await getXuiForServer(server.id);
+          const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+          
+          if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+            console.error(`[VPN-02] Invalid config received for ${email} on ${server.name}`);
+            continue;
+          }
+          
+          // Append server name to remarks
+          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+          configLines.push(configWithSuffix);
+          isFirstNodeValid = true;
+        } catch (e: any) {
+          console.error(`❌ Failed to propagate ${email} to server ${server.name}:`, e.message);
         }
-
-        const devLabelBase = deviceName || (existingDevices.length === 0 && i === 0 ? 'Основное' : 'Доп. устройство');
-        const finalLabel = devicesToCreate > 1 ? `${devLabelBase} ${i + 1}` : devLabelBase;
-
-        const newDevice: VpnDevice = {
-          id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
-          label: finalLabel,
-          config: rawConfig,
-          email: email,
-          uuid: uuid,
-          expiresAt: expiresAt.toISOString(),
-          serverType: serverType || 'LTE',
-          trafficUsedBytes: 0
-        };
-        existingDevices.push(newDevice);
-        targetDevice = newDevice;
       }
 
-    } else {
-      // 3B. RENEW SPECIFIC OR MULTIPLE DEVICES
-      const devicesToRenew = targetDeviceId 
-        ? existingDevices.filter(d => d.id === targetDeviceId)
-        : existingDevices.slice(0, deviceLimit || 1);
+      if (!isFirstNodeValid) {
+        throw new Error(`Не удалось получить валидный VPN конфиг ни с одного сервера. Обратитесь в поддержку.`);
+      }
+
+      const devLabelBase = deviceName || (existingDevices.length === 0 && i === 0 ? 'Основное' : 'Доп. устройство');
+      const finalLabel = devicesToCreate > 1 ? `${devLabelBase} ${i + 1}` : devLabelBase;
+
+      const newDevice: VpnDevice = {
+        id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
+        label: finalLabel,
+        config: configLines.join('\n'), // Combined Multi-Server config
+        email: email,
+        uuid: uuid,
+        expiresAt: expiresAt.toISOString(),
+        serverType: serverType || 'LTE',
+        trafficUsedBytes: 0,
+        serverId: activeServers[0].id // Keep first ID just for backward compatibility
+      };
+      existingDevices.push(newDevice);
+      targetDevice = newDevice;
+    }
+
+  } else {
+    // 3B. RENEW SPECIFIC OR MULTIPLE DEVICES
+    const devicesToRenew = targetDeviceId 
+      ? existingDevices.filter(d => d.id === targetDeviceId)
+      : existingDevices.slice(0, deviceLimit || 1);
+    
+    if (devicesToRenew.length === 0) {
+      return res.status(404).json({ error: 'Устройство для продления не найдено.' });
+    }
+
+    for (const tDevice of devicesToRenew) {
+      const currentExpiry = new Date(tDevice.expiresAt);
+      const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
+      newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
       
-      if (devicesToRenew.length === 0) {
-        return res.status(404).json({ error: 'Устройство для продления не найдено.' });
+      tDevice.expiresAt = newExpiresAt.toISOString();
+      tDevice.serverType = serverType || tDevice.serverType;
+      
+      let configLines: string[] = [];
+
+      // Mirror renewal across ALL active servers
+      for (const server of activeServers) {
+        try {
+          console.log(`♻️ Syncing expiration for device ${tDevice.email} on server [${server.name}]`);
+          const { instance: xuiInstance } = await getXuiForServer(server.id);
+          const rawConfig = await xuiInstance.updateClient(tDevice.email, tDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+          
+          if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+            const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+            configLines.push(configWithSuffix);
+          }
+        } catch (e: any) {
+          console.error(`❌ Failed to sync expiration for ${tDevice.email} on server ${server.name}:`, e.message);
+        }
       }
 
-      for (const tDevice of devicesToRenew) {
-        const currentExpiry = new Date(tDevice.expiresAt);
-        const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
-        newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
-        
-        tDevice.expiresAt = newExpiresAt.toISOString();
-        tDevice.serverType = serverType || tDevice.serverType;
-        
-        console.log(`♻️ Syncing expiration for specific device ${tDevice.email} on server ${serverId || 'default'}`);
-        await xuiInstance.updateClient(tDevice.email, tDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      if (configLines.length > 0) {
+        tDevice.config = configLines.join('\n'); // Update to latest unified config
       }
     }
+  }
 
     // Determine absolute max expiry for the subscription row
     const maxExpiryDate = existingDevices.reduce((max, d) => {
@@ -3064,17 +2989,26 @@ function setupRealtimeListener() {
           newData.traffic_limit_mb !== oldData.traffic_limit_mb
         ) {
           console.log(`🔔 Manual DB update detected for sub ${newData.id}. Syncing to 3x-ui...`);
-          const { instance: xuiInstance } = await getXuiForServer(newData.server_id);
-          
-          const vpnEmail = `user_${newData.user_id.slice(0, 8)}`;
-          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-          const expiryTimestamp = new Date(newData.expires_at).getTime();
-          const trafficLimitMb = newData.traffic_limit_mb || 102400;
-          const limitBytes = trafficLimitMb * 1024 * 1024;
-          const uuidMatch = newData.v2ray_config.match(/vless:\/\/([^@]+)@/);
-          if (uuidMatch) {
-            const uuid = uuidMatch[1];
-            await xuiInstance.updateClient(vpnEmail, uuid, inboundId, expiryTimestamp, limitBytes);
+          const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+          if (activeServers && activeServers.length > 0) {
+            let devices = parseVpnDevices(newData.v2ray_config, newData.expires_at, newData.server_type);
+            const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+            const expiryTimestamp = new Date(newData.expires_at).getTime();
+            const trafficLimitMb = newData.traffic_limit_mb || 102400;
+            const limitBytes = trafficLimitMb * 1024 * 1024;
+            
+            for (const server of activeServers) {
+              try {
+                const { instance: xuiInstance } = await getXuiForServer(server.id);
+                for (const device of devices) {
+                  if (device.uuid && device.email) {
+                    await xuiInstance.updateClient(device.email, device.uuid, inboundId, expiryTimestamp, limitBytes);
+                  }
+                }
+              } catch (e: any) {
+                console.error(`❌ Failed to sync DB manual update to ${server.name}:`, e.message);
+              }
+            }
           }
         }
       }
@@ -3110,14 +3044,13 @@ async function syncUserTraffic(userId: string) {
 
   if (!sub) return null;
 
-  // BUG-07: Handle server_id = null (legacy subscriptions or direct DB entries)
-  if (!sub.server_id && !process.env.XUI_HOST) {
-    console.debug(`[Sync] Skipping traffic sync for ${userId}: no server_id and no default XUI_HOST`);
-    return sub;
-  }
+  // Fetch all active servers
+  const { data: activeServers } = await supabase
+    .from('vpn_servers')
+    .select('*')
+    .eq('is_active', true);
 
-  // Get correct XUI instance
-  const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+  if (!activeServers || activeServers.length === 0) return sub;
 
   // 2. Identify all devices by parsing VpnDevice JSON
   const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
@@ -3125,22 +3058,25 @@ async function syncUserTraffic(userId: string) {
   let totalUsedBytes = 0;
   let maxLimitBytes = 0;
 
-  // 3. Fetch stats for all devices
+  // 3. Fetch stats for all devices across all servers
   for (const device of devices) {
-    try {
-      const targetServerId = device.serverId || sub.server_id;
-      if (!targetServerId) continue;
-      
-      const { instance } = await getXuiForServer(targetServerId);
-      const stats = await instance.getClientTraffic(device.email);
-      if (stats) {
-        device.trafficUsedBytes = stats.used;
-        totalUsedBytes += stats.used;
-        maxLimitBytes = Math.max(maxLimitBytes, stats.limit);
+    let deviceUsedBytes = 0;
+    
+    for (const server of activeServers) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const stats = await instance.getClientTraffic(device.email);
+        if (stats) {
+          deviceUsedBytes += stats.used;
+          maxLimitBytes = Math.max(maxLimitBytes, stats.limit);
+        }
+      } catch (e) {
+        // Skip errors silently to not bloat logs
       }
-    } catch (e) {
-      console.warn(`Could not sync traffic for individual device ${device.email}`, e);
     }
+    
+    device.trafficUsedBytes = deviceUsedBytes;
+    totalUsedBytes += deviceUsedBytes;
   }
 
   const trafficUsedMb = Math.round(totalUsedBytes / (1024 * 1024));

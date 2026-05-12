@@ -48,6 +48,7 @@ export default function Dashboard() {
   const [activeServer, setActiveServer] = useState<any>(null);
   const [referrals, setReferrals] = useState<any[]>([]);
   const [subUrl, setSubUrl] = useState<string>('');
+  const [globalDeviceLimit, setGlobalDeviceLimit] = useState(2);
   const [isLoading, setIsLoading] = useState(true);
   const isFetching = React.useRef(false);
   
@@ -76,7 +77,8 @@ export default function Dashboard() {
         { data: userRes },
         balanceResult,
         { data: subRes },
-        { data: refRes }
+        { data: refRes },
+        plansData
       ] = await Promise.all([
         supabase.from('users').select('*').eq('id', user.id).single(),
         supabase.from('balances').select('*').eq('user_id', user.id).maybeSingle(),
@@ -87,7 +89,8 @@ export default function Dashboard() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase.from('referrals').select('commission_earned').eq('referrer_id', user.id)
+        supabase.from('referrals').select('commission_earned').eq('referrer_id', user.id),
+        fetch('/api/subscription/plans').then(res => res.json()).catch(() => ({ deviceLimit: 2 }))
       ]);
 
       const balanceRes = balanceResult.data;
@@ -107,6 +110,7 @@ export default function Dashboard() {
       setSubscription(subRes);
       setReferrals(refRes || []);
       setActiveServer(serverData);
+      setGlobalDeviceLimit(plansData?.deviceLimit || 2);
       
       // BUG-04: Fetch stable sub URL from backend
       if (subRes?.id) {
@@ -346,7 +350,7 @@ export default function Dashboard() {
   }
 
   const activeDeviceCount = vpnDevices.length;
-  const deviceLimit = subscription?.device_limit || 2; // Hardcode to 2 as per requirement or use DB
+  // deviceLimit is now fetched from globalDeviceLimit directly
 
   let daysLeft = 0;
   if (subscription?.expires_at) {
@@ -376,14 +380,13 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2">
+            <Button 
+               className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow font-bold shadow-lg shadow-primary/20"
+               onClick={() => openWizard('extend')}
+            >
+               {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
+            </Button>
           <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-            <DialogTrigger 
-              render={
-                <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow font-bold shadow-lg shadow-primary/20">
-                   {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
-                </Button>
-              }
-            />
             <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
               <DialogHeader>
                 <DialogTitle className="text-xl font-bold">
@@ -443,7 +446,7 @@ export default function Dashboard() {
           <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
             <Smartphone className="w-5 h-5 text-primary" /> Ваши Устройства
           </h2>
-          {vpnDevices.length < deviceLimit && (
+          {vpnDevices.length < globalDeviceLimit && (
             <Button 
               variant="outline" 
               size="sm" 
@@ -653,7 +656,7 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground text-center max-w-xs mt-2">
                 Активируйте подписку, чтобы получить доступ к безопасному интернету.
               </p>
-              <Button onClick={() => openWizard('new')} className="mt-6 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 neon-glow">
+              <Button onClick={() => openWizard('extend')} className="mt-6 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 neon-glow">
                 Активировать прямо сейчас
               </Button>
             </div>
