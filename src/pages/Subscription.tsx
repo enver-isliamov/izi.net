@@ -248,6 +248,7 @@ export default function Subscription() {
               targetDeviceId={targetDevice}
               targetDeviceName={targetDeviceName}
               hasActiveSub={!!mainSub}
+              existingDeviceCount={vpnKeys.length}
             />
           </DialogContent>
         </Dialog>

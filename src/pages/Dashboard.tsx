@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Wallet, 
   Users, 
@@ -11,22 +12,36 @@ import {
   LifeBuoy,
   Loader2,
   Plus,
-  Copy
+  Copy,
+  Trash2,
+  QrCode,
+  RefreshCw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn, copyToClipboard } from '@/lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogTrigger 
+} from '@/components/ui/dialog';
+import { SubscriptionWizard } from '@/components/subscription/SubscriptionWizard';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [userData, setUserData] = useState<any>(null);
   const [balance, setBalance] = useState<any>(null);
   const [subscription, setSubscription] = useState<any>(null);
@@ -35,6 +50,17 @@ export default function Dashboard() {
   const [subUrl, setSubUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const isFetching = React.useRef(false);
+  
+  // Wizard States
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [wizardMode, setWizardMode] = useState<'extend' | 'new'>('extend');
+  const [targetDevice, setTargetDevice] = useState<string | undefined>(undefined);
+  const [targetDeviceName, setTargetDeviceName] = useState<string | undefined>(undefined);
+
+  // QR States
+  const [qrData, setQrData] = useState<{ value: string; key?: string; sub?: string; title: string; subtitle: string } | null>(null);
+  const [qrMode, setQrMode] = useState<'key' | 'sub'>('sub');
+  const [isQrOpen, setIsQrOpen] = useState(false);
 
   const fetchDashboardData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
@@ -86,10 +112,8 @@ export default function Dashboard() {
       if (subRes?.id) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
-          // Используем axios.defaults.baseURL как основной источник правды
-          const apiBase = axios.defaults.baseURL || '';
           
-          const subUrlRes = await fetch(`${apiBase}/api/sub-url/${subRes.id}`, {
+          const subUrlRes = await fetch(`/api/sub-url/${subRes.id}`, {
             headers: { 'Authorization': `Bearer ${session?.access_token}` }
           });
           
@@ -97,12 +121,11 @@ export default function Dashboard() {
             const { url } = await subUrlRes.json();
             setSubUrl(url);
           } else {
-            setSubUrl(`${apiBase || window.location.origin}/api/sub/${subRes.id}`);
+            setSubUrl(`/api/sub/${subRes.id}`);
           }
         } catch (err) {
           console.debug('Failed to fetch stable sub URL, using fallback:', err);
-          const apiBase = axios.defaults.baseURL || '';
-          setSubUrl(`${apiBase || window.location.origin}/api/sub/${subRes.id}`);
+          setSubUrl(`/api/sub/${subRes.id}`);
         }
       }
       
@@ -119,6 +142,80 @@ export default function Dashboard() {
       fetchDashboardData(true);
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    // Check URL params for auto-open wizard
+    const action = searchParams.get('action');
+    const target = searchParams.get('targetDeviceId');
+    
+    if (action === 'new-device') {
+      openWizard('new');
+      setSearchParams({}, { replace: true });
+    } else if (target) {
+      setTargetDevice(target);
+      openWizard('extend');
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const openWizard = (mode: 'extend' | 'new') => {
+    setWizardMode(mode);
+    if (mode === 'new') setTargetDevice(undefined);
+    setIsWizardOpen(true);
+  };
+
+  const handleDeleteDevice = async (deviceId: string, isPrimary: boolean) => {
+    if (isPrimary) {
+      toast.error('Невозможно удалить основное устройство.');
+      return;
+    }
+    if (!window.confirm('Удалить это устройство?')) return;
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/subscription/device/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ userId: user?.id, deviceId })
+      });
+
+      if (!response.ok) throw new Error('Не удалось удалить устройство');
+
+      toast.success('Устройство удалено');
+      fetchDashboardData();
+    } catch (err: any) {
+      toast.error(err.message || 'Ошибка удаления');
+    }
+  };
+
+  const handleRegenerateDevice = async (deviceId: string) => {
+    if (!window.confirm('Вы уверены, что хотите перегенерировать ключ? Старый ключ перестанет работать.')) return;
+    
+    setIsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`/api/user/devices/${deviceId}/regenerate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`
+        }
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Ошибка регенерации');
+      
+      toast.success("Ключ успешно перегенерирован");
+      await fetchDashboardData(true);
+    } catch (err: any) {
+      console.error('Regeneration error:', err);
+      toast.error(err.message || 'Ошибка регенерации');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Traffic sync on mount
   useEffect(() => {
@@ -149,8 +246,63 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="space-y-8 animate-in fade-in duration-500">
+        {/* Header Stats Skeletons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i} className="glass-card border-white/5">
+              <CardContent className="p-6 space-y-3">
+                <Skeleton className="h-4 w-24 bg-white/5" />
+                <Skeleton className="h-8 w-32 bg-white/10" />
+                <Skeleton className="h-3 w-full bg-white/5" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Main Content Skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <Card className="lg:col-span-2 glass-card border-white/5 h-64">
+            <CardContent className="p-8 space-y-6">
+              <div className="flex justify-between">
+                <div className="space-y-2">
+                  <Skeleton className="h-6 w-48 bg-white/10" />
+                  <Skeleton className="h-4 w-32 bg-white/5" />
+                </div>
+                <Skeleton className="h-10 w-32 bg-white/10 rounded-xl" />
+              </div>
+              <Skeleton className="h-4 w-full bg-white/5" />
+              <div className="grid grid-cols-3 gap-4">
+                <Skeleton className="h-16 w-full bg-white/5 rounded-xl" />
+                <Skeleton className="h-16 w-full bg-white/5 rounded-xl" />
+                <Skeleton className="h-16 w-full bg-white/5 rounded-xl" />
+              </div>
+            </CardContent>
+          </Card>
+          <Skeleton className="hidden lg:block h-64 w-full rounded-2xl bg-white/5" />
+        </div>
+
+        {/* Devices Section Skeleton */}
+        <div className="space-y-4">
+          <Skeleton className="h-6 w-48 bg-white/5 ml-2" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[1, 2].map((i) => (
+              <Card key={i} className="glass-card border-white/5 h-48">
+                <CardContent className="p-6 space-y-4">
+                  <div className="flex justify-between">
+                    <Skeleton className="h-10 w-10 rounded-full bg-white/10" />
+                    <div className="flex gap-2">
+                      <Skeleton className="h-8 w-8 rounded-lg bg-white/5" />
+                      <Skeleton className="h-8 w-24 rounded-lg bg-white/5" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-4 w-32 bg-white/10" />
+                  <Skeleton className="h-2 w-full bg-white/5" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -206,310 +358,411 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Welcome Section */}
+      {/* Simplified Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Добро пожаловать, {userData?.name || user?.email?.split('@')?.[0] || 'User'}!
+          <h1 className="text-2xl font-bold tracking-tight">
+             Привет, {userData?.name || user?.email?.split('@')?.[0]}!
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Аккаунт: <span className="text-primary">{user?.email}</span>
-            <Badge variant="outline" className="ml-2 border-primary text-primary neon-text">
-              {subscription ? '★ Активна' : 'Неактивна'}
-            </Badge>
+          <p className="text-xs text-muted-foreground mt-1">
+            {subscription ? (
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="w-3 h-3 text-primary" />
+                Активный план: <span className="text-foreground font-bold">{planName}</span>
+              </span>
+            ) : (
+              'У вас пока нет активной подписки'
+            )}
           </p>
         </div>
-        <Button onClick={() => navigate('/subscription')} className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow">
-          {subscription ? 'Продлить подписку' : 'Купить подписку'} <ArrowRight className="ml-2 w-4 h-4" />
-        </Button>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="glass-card border-primary/20">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">Баланс</CardTitle>
-            <Wallet className="w-4 h-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{Number(currentBalance).toFixed(2)} {currency === 'RUB' ? '₽' : currency}</div>
-            <p className="text-xs text-muted-foreground mt-1">Доступно для оплаты</p>
-            <Button 
-              variant="secondary" 
-              className="w-full mt-4 rounded-xl bg-muted/50 hover:bg-muted"
-              onClick={() => navigate('/wallet')}
-            >
-              Пополнить баланс
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">Рефералы</CardTitle>
-            <Users className="w-4 h-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{refCount}</div>
-            <p className="text-xs text-muted-foreground mt-1">+{refEarned.toFixed(2)} ₽ заработано</p>
-            <Button onClick={() => navigate('/referrals')} variant="secondary" className="w-full mt-4 rounded-xl bg-muted/50 hover:bg-muted">
-              Пригласить друзей
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">Трафик</CardTitle>
-            <Zap className="w-4 h-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{trafficUsedGB.toFixed(1)} GB / {trafficLimitGB.toFixed(1)} GB</div>
-            <Progress value={trafficPercent} className="h-2 mt-3 bg-muted" />
-            <p className="text-xs text-muted-foreground mt-2">
-              {subscription ? `Обновится через ${daysLeft} дней` : 'Нет активной подписки'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Main Subscription Card */}
-      <Card className="glass-card overflow-hidden border-primary/30 relative">
-        <div className="absolute top-0 right-0 p-4 z-10">
-          <Badge className={subscription ? "bg-primary/20 text-primary border-primary/50 uppercase" : "bg-muted text-muted-foreground uppercase"}>
-            {subscription ? `● ${subscription.server_type?.toUpperCase()}` : 'ОТКЛЮЧЕНО'}
-          </Badge>
+        <div className="flex gap-2">
+          <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
+            <DialogTrigger 
+              render={
+                <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow font-bold shadow-lg shadow-primary/20">
+                   {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
+                </Button>
+              }
+            />
+            <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-bold">
+                  {wizardMode === 'new' ? 'Добавление устройства' : 'Оформление подписки'}
+                </DialogTitle>
+              </DialogHeader>
+              <SubscriptionWizard 
+                onClose={() => {
+                  setIsWizardOpen(false);
+                  fetchDashboardData();
+                }} 
+                forceNew={wizardMode === 'new'}
+                targetDeviceId={targetDevice}
+                targetDeviceName={targetDeviceName}
+                hasActiveSub={!!subscription}
+                existingDeviceCount={vpnDevices.length}
+              />
+            </DialogContent>
+          </Dialog>
         </div>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldCheck className="w-6 h-6 text-primary" />
-            Текущая подписка
-          </CardTitle>
-          <CardDescription>Управление вашим активным тарифом</CardDescription>
-        </CardHeader>
-        <CardContent className="p-6 space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-            {/* Left Column: Plan & Usage */}
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-primary" /> Тариф и Лимиты
-                </h3>
+      </div>
+
+      {/* Stats Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { icon: Wallet, label: 'Баланс', value: `${Number(currentBalance).toFixed(0)}`, sub: '₽', onClick: () => navigate('/wallet') },
+          { icon: Users, label: 'Рефералы', value: refCount, onClick: () => navigate('/referrals') },
+          { icon: Clock, label: 'Осталось', value: subscription ? `${daysLeft}д.` : '—', color: daysLeft <= 3 ? "text-red-400" : "text-foreground" },
+          { icon: Zap, label: 'Трафик', value: trafficUsedGB.toFixed(1), sub: `/ ${trafficLimitGB} GB` }
+        ].map((stat, i) => (
+          <motion.div
+            key={i}
+            whileHover={stat.onClick ? { scale: 1.02 } : {}}
+            whileTap={stat.onClick ? { scale: 0.98 } : {}}
+          >
+            <Card 
+              className={cn(
+                "glass-card p-4 flex flex-col justify-between h-24 hover:border-primary/30 transition-colors",
+                stat.onClick && "cursor-pointer"
+              )} 
+              onClick={stat.onClick}
+            >
+              <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest flex items-center gap-2">
+                <stat.icon className="w-3 h-3 text-primary" /> {stat.label}
               </div>
-
-              <div className="p-6 rounded-3xl bg-muted/40 border border-border/50 space-y-6 shadow-inner">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Активный тариф</div>
-                    <div className="text-3xl font-black mt-1 text-foreground flex items-center gap-2">
-                       {planName}
-                    </div>
-                  </div>
-                  {subscription && (
-                    <div className="text-right">
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Осталось</div>
-                      <div className={cn(
-                        "text-2xl font-black flex items-center justify-end gap-1",
-                        daysLeft <= 0 ? "text-red-400" : "text-primary"
-                      )}>
-                        <Clock className="w-5 h-5" /> {daysLeft <= 0 ? 'Истекла' : `${daysLeft}д.`}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-4 border-t border-border/30 space-y-3">
-                  <div className="flex justify-between items-end">
-                    <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Трафик использовано</div>
-                    <div className="text-sm font-bold">{trafficUsedGB.toFixed(1)} GB / {trafficLimitGB.toFixed(1)} GB</div>
-                  </div>
-                  <Progress value={trafficPercent} className="h-2.5 bg-muted rounded-full" />
-                  <div className="flex justify-between text-[9px] text-muted-foreground font-mono">
-                    <span>0%</span>
-                    <span>50%</span>
-                    <span>100%</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                   <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
-                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Локация</div>
-                      <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
-                        <Globe className="w-3.5 h-3.5 text-primary" /> {activeServer?.name || 'Загрузка...'}
-                      </div>
-                   </div>
-                   <div className="bg-background/40 p-3 rounded-2xl border border-border/30">
-                      <div className="text-[9px] text-muted-foreground uppercase font-bold">Протокол</div>
-                      <div className="text-sm font-bold flex items-center gap-1 mt-0.5">
-                        <ShieldCheck className="w-3.5 h-3.5 text-primary" /> VLESS
-                      </div>
-                   </div>
-                </div>
+              <div className={cn("text-xl font-black mt-auto flex items-baseline gap-1", stat.color)}>
+                {stat.value} {stat.sub && <span className="text-xs font-bold text-muted-foreground">{stat.sub}</span>}
               </div>
-            </div>
+            </Card>
+          </motion.div>
+        ))}
+      </div>
 
-            {/* Right Column: Connected Devices */}
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-primary" /> Ваши Устройства
-                </h3>
-                {activeDeviceCount < deviceLimit && (
+      {/* Device Management Section (Main UI) */}
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
+            <Smartphone className="w-5 h-5 text-primary" /> Ваши Устройства
+          </h2>
+          {vpnDevices.length < deviceLimit && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="rounded-xl border-primary/30 text-primary hover:bg-primary/5 h-8 gap-1.5"
+              onClick={() => openWizard('new')}
+            >
+              <Plus className="w-4 h-4" /> Добавить
+            </Button>
+          )}
+        </div>
+
+        {subscription && (
+           <div className="mb-6 bg-primary/5 border border-primary/20 rounded-2xl p-4 overflow-hidden relative group">
+             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Globe className="w-12 h-12 text-primary" />
+             </div>
+             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+               <div className="space-y-1">
+                 <h3 className="text-[10px] font-bold uppercase tracking-widest text-primary">Универсальная подписка (v2ray)</h3>
+                 <p className="text-xs text-muted-foreground max-w-sm">
+                   Используйте одну ссылку для всех ваших устройств в Hiddify или V2Box.
+                 </p>
+               </div>
+                <div className="flex items-center gap-2 w-full md:w-auto text-xs">
+                  <div className="flex-1 md:w-64 bg-black/40 border border-white/10 rounded-xl px-3 py-2 font-mono truncate">
+                    {subUrl}
+                  </div>
                   <Button 
-                    size="sm" 
-                    variant="ghost"
-                    className="h-8 px-3 text-[10px] rounded-xl text-primary hover:text-primary hover:bg-primary/10 transition-all"
-                    onClick={() => navigate('/subscription?action=new-device')}
+                    size="icon" 
+                    variant="secondary" 
+                    className="rounded-xl bg-primary/10 text-primary hover:bg-primary/20 shrink-0"
+                    onClick={() => {
+                      setQrData({
+                        value: subUrl,
+                        sub: subUrl,
+                        title: 'Универсальная подписка',
+                        subtitle: 'Автоматическое обновление серверов'
+                      });
+                      setQrMode('sub');
+                      setIsQrOpen(true);
+                    }}
                   >
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Добавить еще
+                    <QrCode className="w-4 h-4" />
                   </Button>
-                )}
-              </div>
+                  <Button 
+                   size="icon" 
+                   variant="secondary" 
+                   className="rounded-xl bg-primary/10 text-primary hover:bg-primary/20 shrink-0"
+                   onClick={async () => {
+                      const success = await copyToClipboard(subUrl);
+                      if (success) toast.success("Ссылка скопирована");
+                   }}
+                 >
+                   <Copy className="w-4 h-4" />
+                 </Button>
+               </div>
+             </div>
+           </div>
+        )}
 
-              <div className="space-y-3 overflow-y-auto max-h-[400px] pr-1 custom-scrollbar">
-                {subscription && (
-                  <div className="mb-4 p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] uppercase font-bold text-primary tracking-wider">Универсальная подписка (Рекомендуется)</span>
-                      <Badge variant="outline" className="text-[9px] h-4 border-primary/30 text-primary">Auto-Sync</Badge>
-                    </div>
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <input 
-                          readOnly 
-                          value={subUrl}
-                          className="w-full bg-background/50 border border-border/50 rounded-xl px-3 py-2 text-[10px] font-mono focus:outline-none"
-                        />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+          {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
+            const devExpiry = new Date(device.expiresAt);
+            const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+            const devTrafficMB = device.trafficUsedBytes ? device.trafficUsedBytes / (1024 * 1024) : 0;
+            const devTrafficGB = devTrafficMB / 1024;
+            const totalTrafficLimit = trafficLimitGB || 100;
+            const devTrafficPercent = Math.min(100, Math.round((devTrafficGB / totalTrafficLimit) * 100));
+            
+            // Online status: heuristic based on record update time or existence of bytes
+            const isOnline = device.trafficUsedBytes > 0;
+            const isExpired = devDaysLeft <= 0;
+
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1 }}
+                whileHover={{ scale: 1.01 }}
+                className="h-full"
+              >
+                <Card className={cn(
+                  "glass-card overflow-hidden group hover:border-primary/40 transition-all duration-300 h-full",
+                  isExpired && "border-red-500/30"
+                )}>
+                <CardContent className="p-0">
+                  <div className="p-5 flex items-start justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+                        isExpired 
+                          ? "bg-red-500/10 text-red-500" 
+                          : isOnline 
+                            ? "bg-primary/10 text-primary shadow-[0_0_15px_rgba(0,255,136,0.2)]" 
+                            : "bg-blue-500/10 text-blue-400"
+                      )}>
+                        <Smartphone className="w-6 h-6" />
                       </div>
-                      <Button 
-                        size="sm" 
-                        variant="secondary"
-                        className="rounded-xl px-3 bg-primary/10 hover:bg-primary/20 text-primary" 
-                        onClick={async () => {
-                          const success = await copyToClipboard(subUrl);
-                          if (success) {
-                            toast.success("Ссылка для подписки скопирована");
-                          } else {
-                            toast.error("Не удалось скопировать. Попробуйте выделить текст вручную.");
-                          }
+                      <div>
+                        <div className="font-bold flex items-center gap-2">
+                          {device.label || `Device ${i + 1}`}
+                          {isOnline && !isExpired && <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />}
+                          {!isOnline && !isExpired && <span className="w-2 h-2 rounded-full bg-blue-400 opacity-50" />}
+                          {isExpired && <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_5px_red]" />}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">
+                          {device.serverType || 'WI-FI СТАНДАРТ'} • {activeServer?.location_code || 'WW'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                       <div className={cn("text-xs font-black", devDaysLeft <= 3 ? "text-red-400" : "text-primary")}>
+                         {isExpired ? 'ИСТЕКЛА' : `${devDaysLeft}д.`}
+                       </div>
+                    </div>
+                  </div>
+
+                  <div className="px-5 pb-5 space-y-4">
+                    <div className="space-y-1.5">
+                       <div className="flex justify-between text-[10px] font-mono">
+                          <span className="text-muted-foreground">ИСПОЛЬЗОВАНО ТРАФИКА</span>
+                          <span className="text-foreground">{devTrafficGB.toFixed(2)} / {totalTrafficLimit} GB</span>
+                       </div>
+                       <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                          <div 
+                            className={cn(
+                              "h-full transition-all duration-1000",
+                              isExpired ? "bg-red-500" : "bg-primary shadow-[0_0_8px_rgba(0,255,136,0.5)]"
+                            )}
+                            style={{ width: `${devTrafficPercent}%` }}
+                          />
+                       </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                       <Button 
+                        size="icon" 
+                        variant="secondary" 
+                        className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl h-9 w-9 shrink-0"
+                        onClick={() => {
+                          const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
+                          setQrData({
+                            value: deviceSubUrl,
+                            key: device.config,
+                            sub: deviceSubUrl,
+                            title: 'Подключение устройства',
+                            subtitle: device.label || 'Устройство'
+                          });
+                          setQrMode('sub');
+                          setIsQrOpen(true);
                         }}
                       >
-                        <Copy className="w-3.5 h-3.5" />
+                        <QrCode className="w-4 h-4 text-primary" />
+                      </Button>
+
+                      <Button 
+                        size="icon" 
+                        variant="secondary" 
+                        className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl h-9 w-9 shrink-0"
+                        title="Перегенерировать ключ"
+                        onClick={() => handleRegenerateDevice(device.id)}
+                      >
+                        <RefreshCw className="w-4 h-4 text-green-400" />
+                      </Button>
+
+                      <Button 
+                        size="sm" 
+                        variant="secondary" 
+                        className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl text-[11px] h-9"
+                        onClick={async () => {
+                          const success = await copyToClipboard(device.config);
+                          if (success) toast.success(`Ключ скопирован (${device.label})`);
+                        }}
+                      >
+                        <Copy className="w-3.5 h-3.5 mr-2 opacity-50" /> Ключ
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="secondary" 
+                        className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl text-[11px] h-9 text-blue-400"
+                        onClick={() => {
+                           setTargetDevice(device.id);
+                           setTargetDeviceName(device.label);
+                           openWizard('extend');
+                        }}
+                      >
+                         Продлить
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        className="shrink-0 w-9 bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/10 rounded-xl h-9"
+                        onClick={() => handleDeleteDevice(device.id, i === 0)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                     </div>
-                    <p className="text-[9px] text-muted-foreground leading-tight px-1">
-                      Используйте эту ссылку в Hiddify или V2Box для автоматического переключения серверов
-                    </p>
                   </div>
-                )}
-
-                {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
-                  const devExpiry = new Date(device.expiresAt);
-                  const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
-                  const devTrafficGB = (device.trafficUsedBytes || 0) / (1024 * 1024 * 1024);
-
-                  return (
-                    <div key={i} className="group p-4 bg-muted/20 hover:bg-muted/30 rounded-2xl border border-border/40 transition-all duration-300">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-4">
-                           <div className="w-10 h-10 rounded-xl bg-background flex items-center justify-center border border-border/30 shadow-sm group-hover:scale-105 transition-transform">
-                              <Smartphone className="w-5 h-5 text-primary" />
-                           </div>
-                           <div>
-                              <div className="font-bold text-sm tracking-tight">{device.label || `Device ${i + 1}`}</div>
-                              <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-0.5">
-                                <span className="flex items-center gap-1">🌐 {device.serverType || 'Wi-Fi'}</span>
-                                <span className="flex items-center gap-1">↓ {devTrafficGB.toFixed(2)} GB</span>
-                              </div>
-                           </div>
-                        </div>
-                        <div className="text-right">
-                           <Badge variant="outline" className={`text-[10px] h-6 px-3 rounded-full ${devDaysLeft > 0 ? 'border-primary/30 text-primary bg-primary/5' : 'border-destructive/30 text-destructive bg-destructive/5'}`}>
-                              {devDaysLeft > 0 ? `${devDaysLeft}д` : 'Истек'}
-                           </Badge>
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-2 mt-4 opacity-70 group-hover:opacity-100 transition-opacity">
-                        <Button 
-                          size="sm" 
-                          variant="secondary" 
-                          className="flex-1 text-[11px] h-9 rounded-xl font-medium"
-                          onClick={async () => {
-                            const success = await copyToClipboard(device.config);
-                            if (success) {
-                              toast.success(`Ключ скопирован (${device.label})`);
-                            } else {
-                              toast.error("Ошибка копирования");
-                            }
-                          }}
-                        >
-                          Копировать
-                        </Button>
-                        <Button 
-                          size="sm"
-                          className="flex-none text-[11px] h-9 px-4 rounded-xl bg-primary text-black hover:bg-primary/90 font-bold"
-                          onClick={() => navigate(`/subscription?targetDeviceId=${device.id}`)}
-                        >
-                          Продлить
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                }) : (
-                  <div className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-border/20 rounded-3xl bg-muted/10 opacity-60">
-                    <Smartphone className="w-8 h-8 text-muted-foreground mb-2" />
-                    <p className="text-xs font-medium">Устройства не найдены</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-8 border-t border-border/30 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex gap-3">
-              <Button onClick={() => navigate('/subscription')} className="bg-primary text-black hover:bg-primary/90 rounded-2xl px-6 font-bold shadow-lg shadow-primary/20">
-                Подробнее о подписке
-              </Button>
-              <Button onClick={() => navigate('/installation')} variant="outline" className="rounded-2xl border-border hover:bg-muted/50 px-6">
-                Инструкции
+                </CardContent>
+              </Card>
+            </motion.div>
+          );
+        }) : (
+            <div className="md:col-span-2 flex flex-col items-center justify-center p-12 border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
+              <Smartphone className="w-12 h-12 text-muted-foreground mb-4 opacity-20" />
+              <h3 className="font-bold text-lg">Нет активных устройств</h3>
+              <p className="text-sm text-muted-foreground text-center max-w-xs mt-2">
+                Активируйте подписку, чтобы получить доступ к безопасному интернету.
+              </p>
+              <Button onClick={() => openWizard('new')} className="mt-6 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 neon-glow">
+                Активировать прямо сейчас
               </Button>
             </div>
-            <div className="text-[10px] text-muted-foreground italic font-medium">
-              * Синхронизация данных происходит автоматически каждые 15 минут
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      
+          )}
+        </div>
+      </div>
+
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card onClick={() => navigate('/installation')} className="glass-card hover:border-primary/50 transition-all cursor-pointer group hover:scale-[1.01] active:scale-[0.99]">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-              <Smartphone className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-bold">Инструкции по установке</h3>
-              <p className="text-sm text-muted-foreground">Как подключить VPN на ваш девайс</p>
-            </div>
-            <ArrowRight className="ml-auto w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-          </CardContent>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card onClick={() => navigate('/installation')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 h-20">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
+            <Smartphone className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm">Инструкции</h3>
+            <p className="text-[10px] text-muted-foreground">Настройка VPN на вашем устройстве</p>
+          </div>
+          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1" />
         </Card>
         
-        <Card onClick={() => navigate('/support')} className="glass-card hover:border-primary/50 transition-all cursor-pointer group hover:scale-[1.01] active:scale-[0.99]">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-              <LifeBuoy className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-bold">Нужна помощь?</h3>
-              <p className="text-sm text-muted-foreground">Свяжитесь с нашей поддержкой</p>
-            </div>
-            <ArrowRight className="ml-auto w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-          </CardContent>
+        <Card onClick={() => navigate('/support')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 h-20">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
+            <LifeBuoy className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm">Поддержка</h3>
+            <p className="text-[10px] text-muted-foreground">Свяжитесь с нами в любое время</p>
+          </div>
+          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1" />
         </Card>
       </div>
+      {/* QR Code Dialog */}
+      <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
+        <DialogContent className="sm:max-w-[400px] bg-card border-border flex flex-col items-center p-8">
+           <DialogHeader className="w-full text-center mb-4">
+              <DialogTitle className="text-xl font-bold">{qrData?.title || 'QR-код подключения'}</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                {qrMode === 'sub' 
+                  ? 'Универсальная ссылка (Hiddify / V2Box)' 
+                  : 'Прямой ключ VLESS (Shadowrocket / Nekobox)'}
+              </p>
+           </DialogHeader>
+
+           {qrData?.key && qrData?.sub && (
+             <div className="flex p-1 bg-muted/50 rounded-xl mb-6 w-full max-w-[280px]">
+               <button
+                 onClick={() => setQrMode('sub')}
+                 className={cn(
+                   "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                   qrMode === 'sub' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
+                 )}
+               >
+                 Подписка
+               </button>
+               <button
+                 onClick={() => setQrMode('key')}
+                 className={cn(
+                   "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                   qrMode === 'key' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
+                 )}
+               >
+                 Ключ
+               </button>
+             </div>
+           )}
+           
+           <div className="bg-white p-6 rounded-3xl shadow-2xl shadow-primary/20">
+              <QRCodeSVG 
+                value={qrMode === 'sub' ? (qrData?.sub || qrData?.value || '') : (qrData?.key || qrData?.value || '')} 
+                size={240}
+                level="M"
+                includeMargin={false}
+                bgColor="#FFFFFF"
+                fgColor="#000000"
+              />
+           </div>
+           
+           <div className="mt-8 w-full space-y-3">
+              <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center group relative overflow-hidden">
+                 <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-1">
+                   {qrMode === 'sub' ? 'Universal Link' : 'VLESS Config'}
+                 </div>
+                 <div className="font-mono text-[10px] break-all line-clamp-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                   {qrMode === 'sub' ? (qrData?.sub || qrData?.value) : (qrData?.key || qrData?.value)}
+                 </div>
+                 <Button 
+                   variant="ghost" 
+                   size="sm" 
+                   className="mt-2 h-7 text-[10px] text-primary"
+                   onClick={async () => {
+                     const val = qrMode === 'sub' ? (qrData?.sub || qrData?.value) : (qrData?.key || qrData?.value);
+                     if (val) {
+                       const success = await copyToClipboard(val);
+                       if (success) toast.success("Скопировано");
+                     }
+                   }}
+                 >
+                   <Copy className="w-3 h-3 mr-1" /> Копировать
+                 </Button>
+              </div>
+              <Button 
+                className="w-full h-12 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl shadow-lg shadow-primary/20"
+                onClick={() => setIsQrOpen(false)}
+              >
+                Закрыть
+              </Button>
+           </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

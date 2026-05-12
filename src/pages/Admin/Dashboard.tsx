@@ -3,8 +3,10 @@ import { motion } from 'motion/react';
 import { Users, Server, DollarSign, Activity, Zap, ShieldAlert, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
+import { Skeleton } from '@/components/ui/skeleton';
 import { AdminNav } from '@/components/admin/AdminNav';
 import { toast } from 'sonner';
+import { AdminServersList } from './Servers';
 
 export default function AdminDashboard() {
   const { session } = useAuth();
@@ -43,6 +45,32 @@ export default function AdminDashboard() {
     { title: 'Сейчас онлайн', value: stats?.totalOnline || 0, icon: Zap, color: 'text-yellow-400' },
   ];
 
+  if (loading && !stats) {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
+        <AdminNav />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="p-6 bg-secondary/30 rounded-2xl border border-white/5 space-y-4">
+              <div className="flex items-center gap-4">
+                <Skeleton className="w-12 h-12 rounded-xl bg-white/5" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32 bg-white/5" />
+                  <Skeleton className="h-8 w-24 bg-white/10" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Skeleton className="h-64 w-full rounded-2xl bg-white/5" />
+          <Skeleton className="h-64 w-full rounded-2xl bg-white/5" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -58,7 +86,8 @@ export default function AdminDashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
-            className="p-6 bg-secondary/30 rounded-2xl border border-white/5"
+            whileHover={{ y: -5, borderColor: 'rgba(59, 130, 246, 0.3)' }}
+            className="p-6 bg-secondary/30 rounded-2xl border border-white/5 transition-colors"
           >
             <div className="flex items-center gap-4">
               <div className={`p-3 rounded-xl bg-white/5 ${card.color}`}>
@@ -163,13 +192,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">
-        <h2 className="text-lg font-semibold mb-4 text-blue-400">Добро пожаловать в админ-панель izinet</h2>
-        <p className="text-muted-foreground leading-relaxed">
-          Здесь вы можете управлять VPN-серверами, пользователями и следить за статистикой сервиса. 
-          Выберите нужный раздел в боковом меню или кнопках управления.
-        </p>
-      </div>
+      <AdminServersList />
 
       {/* Debug Section for Superadmins */}
       {diag?.role === 'superadmin' && (

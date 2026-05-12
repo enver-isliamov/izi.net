@@ -64,6 +64,7 @@ export interface VpnDevice {
   expiresAt: string;
   serverType: string;
   trafficUsedBytes: number;
+  serverId?: string;
 }
 
 // Support function to migrate legacy v2ray_config text to JSON
@@ -985,6 +986,89 @@ async function adminOnly(req: any, res: any, next: any) {
   next();
 }
 
+async function authenticateUser(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Auth required' });
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ error: 'Unauthorized' });
+  req.user = user;
+  next();
+}
+
+// User Device Regeneration
+app.post('/api/user/devices/:deviceId/regenerate', authenticateUser, async (req, res) => {
+  const { deviceId } = req.params;
+  const userId = req.user.id;
+  
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const target = devices[targetIdx];
+    const targetServerId = target.serverId || sub.server_id;
+
+    if (!targetServerId) return res.status(400).json({ error: 'Server not assigned' });
+
+    const { instance: xuiInstance } = await getXuiForServer(targetServerId);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+
+    // 1. Delete old client
+    try {
+      if (target.uuid && target.email) {
+        await xuiInstance.deleteClient(target.uuid, target.email);
+      }
+    } catch (e) {
+      console.warn(`[UserRegen] Old client delete fail:`, e);
+    }
+
+    // 2. New client info
+    const randomSuffix = Math.random().toString(36).substring(2, 4);
+    const newEmail = `user_${userId.slice(0, 5)}_${randomSuffix}_reg`;
+    const newUuid = crypto.randomUUID();
+    const expiresAtMs = new Date(sub.expires_at).getTime();
+
+    // 3. XUI Add
+    const newRawConfig = await xuiInstance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
+    
+    if (!newRawConfig) throw new Error(`Failed to regenerate config`);
+
+    // 4. DB update
+    devices[targetIdx] = {
+      ...target,
+      config: newRawConfig,
+      email: newEmail,
+      uuid: newUuid,
+      updatedAt: new Date().toISOString()
+    };
+
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Ключ успешно перегенерирован', device: devices[targetIdx] });
+  } catch (err: any) {
+    console.error(`[UserRegen] Error:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Helper to get settings from DB with ENV fallback
 async function getSystemSetting(key: string, fallback: string = ''): Promise<string> {
   try {
@@ -1301,6 +1385,58 @@ app.get('/api/admin/users/:userId/transactions', adminOnly, async (req, res) => 
   }
 });
 
+app.get('/api/admin/servers/diag', adminOnly, async (req, res) => {
+  const { data: servers, error } = await supabase.from('vpn_servers').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+
+  const results = [];
+  for (const server of servers) {
+    try {
+      const { instance: xui } = await getXuiForServer(server.id);
+      const inbounds = await xui.getInbounds();
+      const realityInbound = inbounds.find((i: any) => {
+        let ss = i.streamSettings;
+        if (typeof ss === 'string') ss = JSON.parse(ss);
+        return ss.security === 'reality';
+      });
+
+      if (!realityInbound) {
+        results.push({ id: server.id, name: server.name, status: 'warning', message: 'Reality inbound не найден' });
+        continue;
+      }
+
+      let ss = realityInbound.streamSettings;
+      if (typeof ss === 'string') ss = JSON.parse(ss);
+      
+      const realitySettings = ss.realitySettings || {};
+      const rs = realitySettings.settings || realitySettings;
+      
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || '';
+      const pbk = rs.publicKey || realitySettings.publicKey || '';
+      const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
+
+      const issues = [];
+      if (!sni) issues.push('SNI (Server Names) пуст');
+      if (!pbk) issues.push('Public Key пуст');
+      if (!sid) issues.push('Short IDs пуст');
+      
+      // Check if SNI is valid (not an IP)
+      if (sni && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(sni)) issues.push('SNI не может быть IP-адресом');
+
+      results.push({
+        id: server.id,
+        name: server.name,
+        status: issues.length > 0 ? 'error' : 'ok',
+        details: { sni, pbk, sid, port: realityInbound.port },
+        issues
+      });
+    } catch (err: any) {
+      results.push({ id: server.id, name: server.name, status: 'offline', message: err.message });
+    }
+  }
+  res.json(results);
+});
+
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   const { userId, newServerId } = req.body;
   if (!userId || !newServerId) return res.status(400).json({ error: 'Missing parameters' });
@@ -1430,6 +1566,251 @@ app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
     res.json({ success: true, subscription: updatedSub });
   } catch (err: any) {
     console.error('❌ Server migration error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/users/:userId/devices/:deviceId/move', adminOnly, async (req, res) => {
+  const { userId, deviceId } = req.params;
+  const { newServerId } = req.body;
+
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const device = devices[targetIdx];
+    const currentServerId = device.serverId || sub.server_id;
+    
+    if (currentServerId === newServerId) {
+      return res.status(400).json({ error: 'Device is already on this server' });
+    }
+
+    // 1. Delete from old server
+    try {
+      if (currentServerId) {
+         const { instance: oldInstance } = await getXuiForServer(currentServerId);
+         await oldInstance.deleteClient(device.uuid, device.email);
+      }
+    } catch (e: any) {
+      console.warn(`Failed to delete client ${device.email} from old server, might not exist:`, e.message);
+    }
+
+    // 2. Add to new server
+    const { instance: newInstance } = await getXuiForServer(newServerId);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+    const expiresAtMs = new Date(device.expiresAt).getTime();
+    
+    const rawConfig = await newInstance.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
+    
+    if (!rawConfig) {
+      throw new Error('Failed to generate new config on new server');
+    }
+
+    // 3. Update device
+    device.config = rawConfig;
+    device.serverId = newServerId;
+    devices[targetIdx] = device;
+
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство перенесено', device });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, res) => {
+  const { userId, deviceId } = req.params;
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const target = devices[targetIdx];
+    const targetServerId = target.serverId || sub.server_id;
+    try {
+      if (targetServerId) {
+        const { instance } = await getXuiForServer(targetServerId);
+        await instance.deleteClient(target.uuid, target.email);
+      }
+    } catch (err: any) {
+      console.error(`[AdminAPI] Failed to delete client ${target.email} from XUI:`, err.message);
+    }
+
+    devices.splice(targetIdx, 1);
+    
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      device_limit: Math.max(1, devices.length),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство удалено' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Device Regeneration (Admin)
+app.post('/api/admin/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req, res) => {
+  const { userId, deviceId } = req.params;
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const target = devices[targetIdx];
+    const targetServerId = target.serverId || sub.server_id;
+
+    if (!targetServerId) return res.status(400).json({ error: 'Server not assigned' });
+
+    const { instance: xuiInstance } = await getXuiForServer(targetServerId);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+
+    // 1. Delete old client from XUI
+    try {
+      await xuiInstance.deleteClient(target.uuid, target.email);
+    } catch (e) {
+      console.warn(`[Regen] Failed to delete old client:`, e);
+    }
+
+    // 2. Create new client data
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    const newEmail = `user_${userId.slice(0, 8)}_${randomSuffix}_reg`;
+    const newUuid = crypto.randomUUID();
+    const expiresAtMs = new Date(sub.expires_at).getTime();
+
+    // 3. Add new client to XUI
+    const newRawConfig = await xuiInstance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
+    
+    if (!newRawConfig || newRawConfig.trim() === '') {
+      throw new Error(`Failed to regenerate config on XUI server`);
+    }
+
+    // 4. Update device in array
+    devices[targetIdx] = {
+      ...target,
+      config: newRawConfig,
+      email: newEmail,
+      uuid: newUuid,
+      updatedAt: new Date().toISOString()
+    };
+
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Ключ успешно обновлен', device: devices[targetIdx] });
+  } catch (err: any) {
+    console.error(`[AdminRegen] Error:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const { label } = req.body;
+  try {
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'Активная подписка не найдена' });
+    if (!sub.server_id) return res.status(400).json({ error: 'Сервер для подписки не назначен' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    
+    if (devices.length >= 5) {
+      return res.status(400).json({ error: 'Достигнут лимит устройств (5) для пользователя' });
+    }
+
+    const { instance: xuiInstance } = await getXuiForServer(sub.server_id);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    const email = `user_${userId.slice(0, 8)}_${randomSuffix}_${devices.length}`;
+    const uuid = crypto.randomUUID();
+    const expiresAtMs = new Date(sub.expires_at).getTime();
+
+    const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+    
+    if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+      throw new Error(`Не удалось сгенерировать конфиг на сервере XUI`);
+    }
+
+    const newDevice: VpnDevice = {
+      id: `device_${uuid.slice(0,8)}`,
+      label: label || `Доп. устройство ${devices.length + 1}`,
+      config: rawConfig,
+      email: email,
+      uuid: uuid,
+      expiresAt: sub.expires_at,
+      serverType: sub.server_type,
+      trafficUsedBytes: 0
+    };
+
+    devices.push(newDevice);
+    
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      device_limit: devices.length,
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство добавлено', device: newDevice });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -1664,10 +2045,11 @@ app.get('/api/sub-url/:id', async (req, res) => {
 
 app.get('/api/sub/:id', async (req, res) => {
   const { id } = req.params;
+  const { deviceId } = req.query;
   const userAgent = req.headers['user-agent'] || '';
   
   const requestId = Math.random().toString(36).substring(7);
-  console.log(`[SubAPI][${requestId}] Request for ID: ${id}, UA: ${userAgent}`);
+  console.log(`[SubAPI][${requestId}] Request for ID: ${id}, Device: ${deviceId}, UA: ${userAgent}`);
   
   const { data: sub, error } = await supabase
     .from('subscriptions')
@@ -1691,7 +2073,13 @@ app.get('/api/sub/:id', async (req, res) => {
   try {
     if (sub.v2ray_config) {
       if (sub.v2ray_config.trim().startsWith('[')) {
-        const devices = JSON.parse(sub.v2ray_config);
+        let devices = JSON.parse(sub.v2ray_config);
+        
+        // Filter by deviceId if provided
+        if (deviceId && Array.isArray(devices)) {
+          devices = devices.filter((d: any) => d.id === deviceId);
+        }
+        
         configText = devices.map((d: any) => d.config).join('\n');
       } else {
         configText = sub.v2ray_config;
@@ -2138,6 +2526,51 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+app.get('/api/servers/status', async (req, res) => {
+  try {
+    const { data: servers, error } = await supabase
+      .from('vpn_servers')
+      .select('id, name, location_code, domain, ip, is_active')
+      .eq('is_active', true);
+    
+    if (error) throw error;
+
+    const statuses = await Promise.all(servers.map(async (server) => {
+      const start = Date.now();
+      let load = 0;
+      let ping = 0;
+      let status = 'offline';
+      
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const onlines = await instance.getOnlines().catch(() => []);
+        const activeCount = onlines?.length || 0;
+        load = Math.min(Math.round((activeCount / 250) * 100), 100);
+        ping = Date.now() - start;
+        status = 'online';
+      } catch (e) {
+        ping = 999;
+      }
+
+      return {
+        id: server.id,
+        name: server.name,
+        location_code: server.location_code,
+        domain: server.domain,
+        ip: server.ip,
+        ping,
+        load,
+        status,
+        is_active: server.is_active
+      };
+    }));
+
+    res.json(statuses);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/locations', async (req, res) => {
   try {
     const { data: servers, error } = await supabase
@@ -2164,6 +2597,33 @@ app.get('/api/health', (req, res) => {
 });
 
 // --- Subscription Routes ---
+app.get('/api/subscription/plans', async (req, res) => {
+  try {
+    const plansJson = await getSystemSetting('SUBSCRIPTION_PLANS', '');
+    if (!plansJson) {
+      // Return default hardcoded if not set in DB
+      return res.json({
+        periods: [
+          { id: '1m', label: '1 месяц', price: 100, days: 30 },
+          { id: '2m', label: '2 месяца', price: 190, days: 60, discount: '5%' },
+          { id: '6m', label: '6 месяцев', price: 500, days: 180, discount: '17%' },
+          { id: '12m', label: '12 месяцев', price: 900, days: 365, discount: '25%' },
+        ],
+        serverTypes: [
+          { id: 'wifi', label: 'Wi-Fi', price: 0 },
+          { id: 'lte', label: 'LTE', price: 50 },
+        ],
+        deviceLimit: 2
+      });
+    }
+    const plans = JSON.parse(plansJson);
+    const deviceLimit = await getSystemSetting('DEVICE_LIMIT', '2');
+    res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/subscription/device/delete', async (req, res) => {
   const authHeader = req.headers.authorization;
   const { userId, deviceId } = req.body;
@@ -2253,6 +2713,29 @@ app.post('/api/subscription/buy', async (req, res) => {
   }
 
   try {
+    // 0.5. Validate price and device limit against DB
+    const plansJson = await getSystemSetting('SUBSCRIPTION_PLANS', '');
+    const globalDeviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
+    const globalDeviceLimit = parseInt(globalDeviceLimitStr);
+    
+    if (plansJson) {
+      try {
+        const dbPlans = JSON.parse(plansJson);
+        const period = dbPlans.periods.find((p: any) => p.id === planId);
+        const sType = dbPlans.serverTypes.find((s: any) => s.id === (serverType?.toLowerCase() || 'wifi'));
+        
+        if (period && sType) {
+          const expectedPrice = (period.price + sType.price) * (forceNew || targetDeviceId ? 1 : (deviceLimit || 1));
+          if (Math.abs(price - expectedPrice) > 1) { // Allow small rounding diffs
+            console.warn(`[BUY] Price mismatch for user ${userId}: client sent ${price}, DB calculated ${expectedPrice}`);
+            return res.status(400).json({ error: 'Mismatched price. Please refresh the page.' });
+          }
+        }
+      } catch (e) {
+        console.error('[BUY] Failed to parse subscription plans from DB:', e);
+      }
+    }
+
     // 1. Get current balance
     const { data: balanceData, error: balanceErr } = await supabase
       .from('balances')
@@ -2313,61 +2796,67 @@ app.post('/api/subscription/buy', async (req, res) => {
     let targetDevice: VpnDevice | undefined;
 
     if (forceNew || existingDevices.length === 0) {
-      // 3A. CREATE NEW DEVICE
-      if (existingDevices.length >= 2) {
-        return res.status(400).json({ error: 'Превышен лимит: можно добавить только 1 дополнительное устройство.' });
-      }
-
-      const randomSuffix = Math.random().toString(36).substring(2, 6);
-      const email = `user_${userId.slice(0, 8)}_${randomSuffix}`;
-      const uuid = crypto.randomUUID();
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + durationDays);
-
-      console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
-      const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+      // 3A. CREATE NEW DEVICE(S)
+      const devicesToCreate = forceNew ? 1 : (deviceLimit || 1);
       
-      // VPN-02: Safety check for config before saving to DB
-      if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
-        console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
-        throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+      if (existingDevices.length + devicesToCreate > globalDeviceLimit) {
+        return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${globalDeviceLimit}-х устройств.` });
       }
 
-      const newDevice: VpnDevice = {
-        id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
-        label: deviceName || (existingDevices.length === 0 ? 'Основное' : 'Доп. устройство'),
-        config: rawConfig,
-        email: email,
-        uuid: uuid,
-        expiresAt: expiresAt.toISOString(),
-        serverType: serverType || 'LTE',
-        trafficUsedBytes: 0
-      };
-      existingDevices.push(newDevice);
-      targetDevice = newDevice;
+      for (let i = 0; i < devicesToCreate; i++) {
+        const randomSuffix = Math.random().toString(36).substring(2, 6);
+        const email = `user_${userId.slice(0, 8)}_${randomSuffix}_${i}`;
+        const uuid = crypto.randomUUID();
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + durationDays);
+
+        console.log(`🆕 Creating VPN client ${email} on server ${serverId || 'default'}...`);
+        const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+        
+        // VPN-02: Safety check for config before saving to DB
+        if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+          console.error(`[VPN-02] Invalid config received for ${email}:`, rawConfig);
+          throw new Error(`Не удалось получить валидный VPN конфиг с сервера. Пожалуйста, обратитесь в поддержку.`);
+        }
+
+        const devLabelBase = deviceName || (existingDevices.length === 0 && i === 0 ? 'Основное' : 'Доп. устройство');
+        const finalLabel = devicesToCreate > 1 ? `${devLabelBase} ${i + 1}` : devLabelBase;
+
+        const newDevice: VpnDevice = {
+          id: existingDevices.length === 0 ? 'primary' : `device_${uuid.slice(0,8)}`,
+          label: finalLabel,
+          config: rawConfig,
+          email: email,
+          uuid: uuid,
+          expiresAt: expiresAt.toISOString(),
+          serverType: serverType || 'LTE',
+          trafficUsedBytes: 0
+        };
+        existingDevices.push(newDevice);
+        targetDevice = newDevice;
+      }
 
     } else {
-      // 3B. RENEW SPECIFIC OR PRIMARY DEVICE
-      const idToRenew = targetDeviceId || existingDevices[0].id;
-      targetDevice = existingDevices.find(d => d.id === idToRenew);
+      // 3B. RENEW SPECIFIC OR MULTIPLE DEVICES
+      const devicesToRenew = targetDeviceId 
+        ? existingDevices.filter(d => d.id === targetDeviceId)
+        : existingDevices.slice(0, deviceLimit || 1);
       
-      if (!targetDevice) {
+      if (devicesToRenew.length === 0) {
         return res.status(404).json({ error: 'Устройство для продления не найдено.' });
       }
 
-      const currentExpiry = new Date(targetDevice.expiresAt);
-      const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
-      newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
-      
-      targetDevice.expiresAt = newExpiresAt.toISOString();
-      targetDevice.serverType = serverType || targetDevice.serverType;
-      
-      console.log(`♻️ Syncing expiration for specific device ${targetDevice.email} on server ${serverId || 'default'}`);
-      await xuiInstance.updateClient(targetDevice.email, targetDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
-      
-      // BUG-02: DO NOT overwrite config with broken link during RENEW. 
-      // The Reality link is immutable and already correct.
-      // targetDevice.config = xuiInstance.generateVlessLink(targetDevice.uuid, targetDevice.email, domain);
+      for (const tDevice of devicesToRenew) {
+        const currentExpiry = new Date(tDevice.expiresAt);
+        const newExpiresAt = currentExpiry > new Date() ? new Date(currentExpiry) : new Date();
+        newExpiresAt.setDate(newExpiresAt.getDate() + durationDays);
+        
+        tDevice.expiresAt = newExpiresAt.toISOString();
+        tDevice.serverType = serverType || tDevice.serverType;
+        
+        console.log(`♻️ Syncing expiration for specific device ${tDevice.email} on server ${serverId || 'default'}`);
+        await xuiInstance.updateClient(tDevice.email, tDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
+      }
     }
 
     // Determine absolute max expiry for the subscription row
@@ -2639,7 +3128,11 @@ async function syncUserTraffic(userId: string) {
   // 3. Fetch stats for all devices
   for (const device of devices) {
     try {
-      const stats = await xuiInstance.getClientTraffic(device.email);
+      const targetServerId = device.serverId || sub.server_id;
+      if (!targetServerId) continue;
+      
+      const { instance } = await getXuiForServer(targetServerId);
+      const stats = await instance.getClientTraffic(device.email);
       if (stats) {
         device.trafficUsedBytes = stats.used;
         totalUsedBytes += stats.used;

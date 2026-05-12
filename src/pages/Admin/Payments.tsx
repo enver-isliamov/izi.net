@@ -109,7 +109,7 @@ export default function AdminPayments() {
       </div>
 
       <div className="bg-secondary/30 rounded-2xl border border-white/5 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-white/5 bg-white/5">
@@ -195,6 +195,60 @@ export default function AdminPayments() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="md:hidden divide-y divide-white/5">
+          {loading ? (
+             Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="animate-pulse p-4 h-24 bg-white/5"></div>
+             ))
+          ) : filtered.length === 0 ? (
+             <div className="p-12 text-center text-muted-foreground text-sm">
+                Платежи не найдены
+             </div>
+          ) : (
+             filtered.map((p) => (
+               <div key={p.id} className="p-4 space-y-3">
+                 <div className="flex justify-between items-start">
+                   <div className="flex flex-col">
+                     <span className="text-xs font-mono text-blue-300">{p.id.substring(0, 13)}...</span>
+                     <span className="text-[10px] text-muted-foreground">{p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy, HH:mm', { locale: ru }) : '---'}</span>
+                   </div>
+                   <div className="text-right">
+                     <span className="text-sm font-bold text-white">{p.amount} ₽</span>
+                   </div>
+                 </div>
+                 
+                 <div className="flex justify-between items-center text-xs">
+                   <span className="font-mono text-muted-foreground opacity-60 truncate max-w-[150px]">{p.user_id}</span>
+                   {p.status === 'completed' ? (
+                     <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-green-400 bg-green-400/10 px-2 py-0.5 rounded-md">
+                       <CheckCircle2 size={10} /> Готово
+                     </span>
+                   ) : p.status === 'pending' ? (
+                     <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-md">
+                       <Clock size={10} /> Ожидает
+                     </span>
+                   ) : (
+                     <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-md">
+                       <XCircle size={10} /> Ошибка
+                     </span>
+                   )}
+                 </div>
+
+                 {p.status === 'pending' && (
+                   <button
+                     onClick={() => handleConfirm(p.id)}
+                     disabled={confirmingId === p.id}
+                     className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-bold transition-all rounded-lg"
+                   >
+                     {confirmingId === p.id ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                     Подтвердить платеж
+                   </button>
+                 )}
+               </div>
+             ))
+          )}
         </div>
       </div>
       

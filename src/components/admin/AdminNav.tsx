@@ -7,8 +7,7 @@ export function AdminNav() {
   const location = useLocation();
 
   const navItems = [
-    { name: 'Статистика', path: '/admin', icon: LayoutDashboard },
-    { name: 'Серверы', path: '/admin/servers', icon: Server },
+    { name: 'Обзор / Серверы', path: '/admin', icon: LayoutDashboard },
     { name: 'Пользователи', path: '/admin/users', icon: Users },
     { name: 'Платежи', path: '/admin/payments', icon: DollarSign },
     { name: 'Настройки', path: '/admin/settings', icon: Settings },

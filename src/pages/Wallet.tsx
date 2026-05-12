@@ -9,9 +9,18 @@ import {
   AlertCircle,
   ArrowUpRight,
   ArrowDownLeft,
-  Clock
+  Clock,
+  History
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { 
+  Sheet, 
+  SheetContent, 
+  SheetHeader, 
+  SheetTitle, 
+  SheetTrigger 
+} from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
@@ -39,6 +48,7 @@ export default function Wallet() {
     try {
       setLoadingHistory(true);
       const { data: { session } } = await supabase.auth.getSession();
+      
       const res = await axios.get('/api/transactions', {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
@@ -59,11 +69,9 @@ export default function Wallet() {
 
     setIsProcessing(true);
     try {
-      const envUrl = import.meta.env.VITE_API_URL;
-      const apiUrl = (envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : window.location.origin;
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await fetch(`${apiUrl}/api/pay/create`, {
+      const response = await fetch('/api/pay/create', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -103,16 +111,63 @@ export default function Wallet() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4">
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          onClick={() => navigate(-1)}
-          className="rounded-full hover:bg-primary/10"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <h1 className="text-3xl font-bold tracking-tight">Пополнение баланса</h1>
+      <div className="flex items-center justify-end mb-4">
+        <Sheet>
+          <SheetTrigger render={
+            <Button variant="ghost" size="sm" className="rounded-xl border border-white/5 hover:bg-white/5 gap-2 text-muted-foreground">
+              <History className="w-4 h-4" />
+              <span>История</span>
+            </Button>
+          } />
+          <SheetContent className="w-full sm:max-w-md bg-card border-l border-white/5 p-0">
+            <SheetHeader className="p-6 border-b border-white/5">
+              <SheetTitle className="text-xl font-bold">История операций</SheetTitle>
+            </SheetHeader>
+            <div className="overflow-y-auto h-[full-100px] p-6">
+              {loadingHistory ? (
+                <div className="space-y-4">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-20 w-full rounded-2xl bg-white/5" />
+                  ))}
+                </div>
+              ) : transactions.length > 0 ? (
+                <div className="space-y-3">
+                  {transactions.map((tx) => (
+                    <div key={tx.id} className="group p-4 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-2xl transition-all duration-300">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className={`p-2 rounded-xl ${
+                            tx.type === 'deposit' 
+                              ? "bg-green-500/10 text-green-500" 
+                              : "bg-blue-500/10 text-blue-500"
+                          }`}>
+                            {tx.type === 'deposit' ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
+                          </div>
+                          <div>
+                            <div className="font-bold text-sm">{tx.description || (tx.type === 'deposit' ? 'Пополнение' : 'Списание')}</div>
+                            <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5 font-mono">
+                              <Clock className="w-3 h-3" />
+                              {new Date(tx.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                        <div className={`text-sm font-mono font-bold ${
+                          tx.type === 'deposit' ? "text-green-400" : "text-blue-400"
+                        }`}>
+                          {tx.type === 'deposit' ? '+' : '-'}{Number(tx.amount).toFixed(0)} ₽
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-20 text-muted-foreground italic text-sm">
+                  История операций пуста
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -204,49 +259,6 @@ export default function Wallet() {
           <AlertCircle className="w-4 h-4 text-primary" />
           Нажимая кнопку, вы подтверждаете условия оферты
         </p>
-      </div>
-
-      <div className="space-y-4 pt-8">
-        <h2 className="text-xl font-bold tracking-tight">История операций</h2>
-        {loadingHistory ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-primary" />
-          </div>
-        ) : transactions.length > 0 ? (
-          <div className="space-y-3">
-            {transactions.map((tx) => (
-              <Card key={tx.id} className="glass-card border-primary/10 overflow-hidden">
-                <CardContent className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className={`p-2 rounded-xl ${
-                      tx.type === 'deposit' 
-                        ? "bg-green-500/10 text-green-500" 
-                        : "bg-blue-500/10 text-blue-500"
-                    }`}>
-                      {tx.type === 'deposit' ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
-                    </div>
-                    <div>
-                      <div className="font-bold text-sm">{tx.description || (tx.type === 'deposit' ? 'Пополнение' : 'Списание')}</div>
-                      <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3" />
-                        {new Date(tx.created_at).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                  <div className={`text-sm font-mono font-bold ${
-                    tx.type === 'deposit' ? "text-green-400" : "text-blue-400"
-                  }`}>
-                    {tx.type === 'deposit' ? '+' : '-'}{tx.amount} ₽
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-12 bg-muted/10 rounded-2xl border border-dashed border-border text-muted-foreground italic text-sm">
-            История операций пуста
-          </div>
-        )}
       </div>
     </div>
   );
