@@ -48,6 +48,7 @@ export default function Dashboard() {
   const [activeServer, setActiveServer] = useState<any>(null);
   const [referrals, setReferrals] = useState<any[]>([]);
   const [subUrl, setSubUrl] = useState<string>('');
+  const [globalDeviceLimit, setGlobalDeviceLimit] = useState(2);
   const [isLoading, setIsLoading] = useState(true);
   const isFetching = React.useRef(false);
   
@@ -76,7 +77,8 @@ export default function Dashboard() {
         { data: userRes },
         balanceResult,
         { data: subRes },
-        { data: refRes }
+        { data: refRes },
+        plansData
       ] = await Promise.all([
         supabase.from('users').select('*').eq('id', user.id).single(),
         supabase.from('balances').select('*').eq('user_id', user.id).maybeSingle(),
@@ -87,7 +89,8 @@ export default function Dashboard() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase.from('referrals').select('commission_earned').eq('referrer_id', user.id)
+        supabase.from('referrals').select('commission_earned').eq('referrer_id', user.id),
+        fetch('/api/subscription/plans').then(res => res.json()).catch(() => ({ deviceLimit: 2 }))
       ]);
 
       const balanceRes = balanceResult.data;
@@ -107,6 +110,7 @@ export default function Dashboard() {
       setSubscription(subRes);
       setReferrals(refRes || []);
       setActiveServer(serverData);
+      setGlobalDeviceLimit(plansData?.deviceLimit || 2);
       
       // BUG-04: Fetch stable sub URL from backend
       if (subRes?.id) {
@@ -309,10 +313,6 @@ export default function Dashboard() {
 
   const currentBalance = balance?.amount || 0;
   const currency = balance?.currency || 'RUB';
-  const planName = subscription ? 
-    (subscription.plan_type === 'trial' ? 'Пробный' : 
-    (subscription.server_type?.toUpperCase() === 'LTE' ? 'LTE Премиум' : 'Wi-Fi Стандарт')) 
-    : 'Нет активной подписки';
   
   // Convert MB to GB for display
   const trafficUsedGB = (subscription?.traffic_used_mb || 0) / 1024;
@@ -346,7 +346,7 @@ export default function Dashboard() {
   }
 
   const activeDeviceCount = vpnDevices.length;
-  const deviceLimit = subscription?.device_limit || 2; // Hardcode to 2 as per requirement or use DB
+  // deviceLimit is now fetched from globalDeviceLimit directly
 
   let daysLeft = 0;
   if (subscription?.expires_at) {
@@ -365,25 +365,24 @@ export default function Dashboard() {
              Привет, {userData?.name || user?.email?.split('@')?.[0]}!
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            {subscription ? (
+            {activeDeviceCount > 0 ? (
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="w-3 h-3 text-primary" />
-                Активный план: <span className="text-foreground font-bold">{planName}</span>
+                <span>Защита активна (Устройств: {activeDeviceCount})</span>
               </span>
             ) : (
-              'У вас пока нет активной подписки'
+              'У вас пока нет активных устройств'
             )}
           </p>
         </div>
         <div className="flex gap-2">
+            <Button 
+               className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow font-bold shadow-lg shadow-primary/20"
+               onClick={() => openWizard('extend')}
+            >
+               {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
+            </Button>
           <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-            <DialogTrigger 
-              render={
-                <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow font-bold shadow-lg shadow-primary/20">
-                   {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
-                </Button>
-              }
-            />
             <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
               <DialogHeader>
                 <DialogTitle className="text-xl font-bold">
@@ -412,7 +411,7 @@ export default function Dashboard() {
           { icon: Wallet, label: 'Баланс', value: `${Number(currentBalance).toFixed(0)}`, sub: '₽', onClick: () => navigate('/wallet') },
           { icon: Users, label: 'Рефералы', value: refCount, onClick: () => navigate('/referrals') },
           { icon: Clock, label: 'Осталось', value: subscription ? `${daysLeft}д.` : '—', color: daysLeft <= 3 ? "text-red-400" : "text-foreground" },
-          { icon: Zap, label: 'Трафик', value: trafficUsedGB.toFixed(1), sub: `/ ${trafficLimitGB} GB` }
+          { icon: Smartphone, label: 'Устройства', value: String(activeDeviceCount), sub: `из ${globalDeviceLimit}` }
         ].map((stat, i) => (
           <motion.div
             key={i}
@@ -443,7 +442,7 @@ export default function Dashboard() {
           <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
             <Smartphone className="w-5 h-5 text-primary" /> Ваши Устройства
           </h2>
-          {vpnDevices.length < deviceLimit && (
+          {vpnDevices.length < globalDeviceLimit && (
             <Button 
               variant="outline" 
               size="sm" 
@@ -653,7 +652,7 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground text-center max-w-xs mt-2">
                 Активируйте подписку, чтобы получить доступ к безопасному интернету.
               </p>
-              <Button onClick={() => openWizard('new')} className="mt-6 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 neon-glow">
+              <Button onClick={() => openWizard('extend')} className="mt-6 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 neon-glow">
                 Активировать прямо сейчас
               </Button>
             </div>
@@ -663,26 +662,26 @@ export default function Dashboard() {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card onClick={() => navigate('/installation')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 h-20">
+        <Card onClick={() => navigate('/installation')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 min-h-[5rem]">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
             <Smartphone className="w-5 h-5 text-primary" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-bold text-sm">Инструкции</h3>
-            <p className="text-[10px] text-muted-foreground">Настройка VPN на вашем устройстве</p>
+            <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">Настройка VPN на вашем устройстве</p>
           </div>
-          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1" />
+          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1 shrink-0" />
         </Card>
         
-        <Card onClick={() => navigate('/support')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 h-20">
+        <Card onClick={() => navigate('/support')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 min-h-[5rem]">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
             <LifeBuoy className="w-5 h-5 text-primary" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-bold text-sm">Поддержка</h3>
-            <p className="text-[10px] text-muted-foreground">Свяжитесь с нами в любое время</p>
+            <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">Свяжитесь с нами в любое время</p>
           </div>
-          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1" />
+          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1 shrink-0" />
         </Card>
       </div>
       {/* QR Code Dialog */}

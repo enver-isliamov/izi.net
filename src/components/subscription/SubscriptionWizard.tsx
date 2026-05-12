@@ -4,15 +4,11 @@ import {
   ChevronRight, 
   ChevronLeft, 
   CreditCard, 
-  Server, 
   Smartphone, 
   ShieldCheck,
   AlertCircle,
-  Clock,
   Loader2,
-  Globe,
-  Zap,
-  CheckCircle2
+  Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,9 +23,8 @@ import { toast } from 'sonner';
 
 const steps = [
   { id: 1, title: 'Тариф', icon: ShieldCheck },
-  { id: 2, title: 'Локация', icon: Globe },
-  { id: 3, title: 'Устройства', icon: Smartphone },
-  { id: 4, title: 'Оплата', icon: CreditCard },
+  { id: 2, title: 'Устройства', icon: Smartphone },
+  { id: 3, title: 'Оплата', icon: CreditCard },
 ];
 
 export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName, hasActiveSub = false, existingDeviceCount = 0 }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string, hasActiveSub?: boolean, existingDeviceCount?: number }) {
@@ -39,8 +34,6 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
   const [serverTypes, setServerTypes] = useState<any[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<any>(null);
   const [selectedServer, setSelectedServer] = useState<any>(null);
-  const [locations, setLocations] = useState<any[]>([]);
-  const [selectedLocation, setSelectedLocation] = useState<any>(null);
   const [maxDeviceLimit, setMaxDeviceLimit] = useState(2);
   const [deviceCount, setDeviceCount] = useState(existingDeviceCount > 0 && !targetDeviceId && !forceNew ? existingDeviceCount : 1);
   const [deviceName, setDeviceName] = useState('');
@@ -78,20 +71,8 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
       }
     };
 
-    const fetchLocations = async () => {
-      try {
-        const response = await fetch('/api/locations');
-        const data = await response.json();
-        setLocations(data);
-        if (data.length > 0) setSelectedLocation(data[0]);
-      } catch (e) {
-        console.error('Failed to fetch locations');
-      }
-    };
-
     fetchBalance();
     fetchPlans();
-    fetchLocations();
   }, [user]);
 
   // If forceNew is true or targetDeviceId is present, we enforce count = 1 for the transaction
@@ -102,44 +83,21 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
   const hasEnoughFunds = balance !== null && balance >= totalPrice;
 
   const nextStep = () => {
-    // If targetDeviceId is present, or if extending all existing devices, skip to payment
-    if (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub)) {
-      if (step === 1) { // After combined Plan step
-        setStep(4); // Go straight to payment
-        return;
-      }
+    // Skip to payment (step 3) skipping device selection (step 2) if renewing specific or all devices
+    if (step === 1 && (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub))) {
+      setStep(3);
+      return;
     }
-    setStep(s => {
-      let next = Math.min(s + 1, 4);
-      // Skip Location step ONLY if we are renewing a specific device, or extending whole sub
-      if (next === 2 && (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub))) {
-        next = 3;
-      }
-      // If we are on step 2 (via normal flow), and we need to skip step 3 (devices) because we are renewing all
-      if (next === 3 && !forceNew && existingDeviceCount > 0 && hasActiveSub) {
-        next = 4;
-      }
-      return next;
-    });
+    setStep(s => Math.min(s + 1, 3));
   };
   
   const prevStep = () => {
-    if ((targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub)) && step === 4) {
+    // If we are on step 3, and we skipped step 2, go straight back to 1
+    if (step === 3 && (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub))) {
       setStep(1);
       return;
     }
-    setStep(s => {
-      let prev = Math.max(s - 1, 1);
-      // Skip Location step back ONLY if we are renewing a specific device or extending whole sub
-      if (prev === 2 && (targetDeviceId || (!forceNew && existingDeviceCount > 0 && hasActiveSub))) {
-        prev = 1;
-      }
-      // If we are on step 4, and need to skip step 3 back to 2
-      if (prev === 3 && !forceNew && existingDeviceCount > 0 && hasActiveSub) {
-        prev = 2;
-      }
-      return prev;
-    });
+    setStep(s => Math.max(s - 1, 1));
   };
 
   const handlePayment = async () => {
@@ -172,8 +130,7 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
           deviceLimit: effectiveDeviceCount,
           forceNew: forceNew,
           targetDeviceId: targetDeviceId,
-          deviceName: deviceName,
-          serverId: targetDeviceId ? undefined : selectedLocation?.id
+          deviceName: deviceName
         }),
       });
 
@@ -208,10 +165,10 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
       {/* Progress */}
       <div className="space-y-4">
         <div className="flex justify-between text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <span>Шаг {step} из 4</span>
+          <span>Шаг {step} из 3</span>
           <span>{steps[step - 1].title}</span>
         </div>
-        <Progress value={(step / 4) * 100} className="h-1.5 bg-muted" />
+        <Progress value={(step / 3) * 100} className="h-1.5 bg-muted" />
       </div>
 
       <div className="min-h-[300px]">
@@ -309,56 +266,10 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
               )}
             </motion.div>
           )}
-          
+
           {step === 2 && (
             <motion.div
               key="step2"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-4"
-            >
-              <h3 className="text-lg font-bold">Выберите локацию сервера</h3>
-              <div className="grid grid-cols-1 gap-3">
-                {locations.length > 0 ? (
-                  locations.map((loc) => (
-                    <Card 
-                      key={loc.id}
-                      className={cn(
-                        "cursor-pointer transition-all border-2 relative overflow-hidden",
-                        selectedLocation?.id === loc.id 
-                          ? "border-primary bg-primary/5 shadow-lg shadow-primary/20 ring-1 ring-primary/50" 
-                          : "border-white/5 bg-white/5 hover:border-primary/40 hover:bg-white/10"
-                      )}
-                      onClick={() => {
-                        console.log('📍 Selected Location:', loc.name, loc.id);
-                        setSelectedLocation(loc);
-                      }}
-                    >
-                      <CardContent className="p-4 flex items-center justify-between relative z-10">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center font-bold text-xs uppercase text-primary">
-                            {loc.location_code}
-                          </div>
-                          <span className="font-medium">{loc.name}</span>
-                        </div>
-                        {selectedLocation?.id === loc.id && <CheckCircle2 size={18} className="text-primary" />}
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 opacity-20" />
-                    <p>Загрузка доступных локаций...</p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-
-          {step === 3 && (
-            <motion.div
-              key="step3"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -413,9 +324,9 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
             </motion.div>
           )}
 
-          {step === 4 && (
+          {step === 3 && (
             <motion.div
-              key="step4"
+              key="step3"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -427,12 +338,6 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
                   <span className="text-muted-foreground italic">Выбранный тариф</span>
                   <span className="font-black text-primary uppercase">{selectedServer.id === 'lte' ? 'LTE ПРЕМИУМ' : 'WI-FI СТАНДАРТ'}</span>
                 </div>
-                {selectedLocation && (
-                  <div className="flex justify-between text-xs py-1 border-t border-white/5 pt-2">
-                    <span className="text-muted-foreground italic">Локация</span>
-                    <span className="font-bold">{selectedLocation.name}</span>
-                  </div>
-                )}
                 <div className="flex justify-between text-xs py-1 border-t border-white/5 pt-2">
                   <span className="text-muted-foreground italic">Срок подписки</span>
                   <span className="font-bold">{selectedPeriod.label}</span>
@@ -500,19 +405,20 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
         )}
         <Button 
           className="flex-1 bg-primary text-black hover:bg-primary/90 rounded-xl neon-glow font-bold"
-          onClick={step === 4 ? handlePayment : nextStep}
-          disabled={(step === 4 && (!hasEnoughFunds || isProcessing)) || isProcessing}
+          onClick={step === 3 ? handlePayment : nextStep}
+          disabled={(step === 3 && (!hasEnoughFunds || isProcessing)) || isProcessing}
         >
           {isProcessing ? (
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
-          ) : step === 4 ? (
+          ) : step === 3 ? (
             'Оплатить'
           ) : (
             'Далее'
           )} 
-          {step < 4 && <ChevronRight className="ml-2 w-4 h-4" />}
+          {step < 3 && <ChevronRight className="ml-2 w-4 h-4" />}
         </Button>
       </div>
     </div>
   );
 }
+
