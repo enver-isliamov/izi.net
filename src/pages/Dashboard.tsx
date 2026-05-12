@@ -313,10 +313,6 @@ export default function Dashboard() {
 
   const currentBalance = balance?.amount || 0;
   const currency = balance?.currency || 'RUB';
-  const planName = subscription ? 
-    (subscription.plan_type === 'trial' ? 'Пробный' : 
-    (subscription.server_type?.toUpperCase() === 'LTE' ? 'LTE Премиум' : 'Wi-Fi Стандарт')) 
-    : 'Нет активной подписки';
   
   // Convert MB to GB for display
   const trafficUsedGB = (subscription?.traffic_used_mb || 0) / 1024;
@@ -369,13 +365,13 @@ export default function Dashboard() {
              Привет, {userData?.name || user?.email?.split('@')?.[0]}!
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            {subscription ? (
+            {activeDeviceCount > 0 ? (
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="w-3 h-3 text-primary" />
-                Активный план: <span className="text-foreground font-bold">{planName}</span>
+                <span>Защита активна (Устройств: {activeDeviceCount})</span>
               </span>
             ) : (
-              'У вас пока нет активной подписки'
+              'У вас пока нет активных устройств'
             )}
           </p>
         </div>
