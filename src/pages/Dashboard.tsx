@@ -411,7 +411,7 @@ export default function Dashboard() {
           { icon: Wallet, label: 'Баланс', value: `${Number(currentBalance).toFixed(0)}`, sub: '₽', onClick: () => navigate('/wallet') },
           { icon: Users, label: 'Рефералы', value: refCount, onClick: () => navigate('/referrals') },
           { icon: Clock, label: 'Осталось', value: subscription ? `${daysLeft}д.` : '—', color: daysLeft <= 3 ? "text-red-400" : "text-foreground" },
-          { icon: Zap, label: 'Трафик', value: trafficUsedGB.toFixed(1), sub: `/ ${trafficLimitGB} GB` }
+          { icon: Smartphone, label: 'Устройства', value: String(activeDeviceCount), sub: `из ${globalDeviceLimit}` }
         ].map((stat, i) => (
           <motion.div
             key={i}
@@ -662,26 +662,26 @@ export default function Dashboard() {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card onClick={() => navigate('/installation')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 h-20">
+        <Card onClick={() => navigate('/installation')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 min-h-[5rem]">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
             <Smartphone className="w-5 h-5 text-primary" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-bold text-sm">Инструкции</h3>
-            <p className="text-[10px] text-muted-foreground">Настройка VPN на вашем устройстве</p>
+            <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">Настройка VPN на вашем устройстве</p>
           </div>
-          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1" />
+          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1 shrink-0" />
         </Card>
         
-        <Card onClick={() => navigate('/support')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 h-20">
+        <Card onClick={() => navigate('/support')} className="glass-card p-4 hover:border-primary/50 transition-all cursor-pointer group flex items-center gap-4 min-h-[5rem]">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
             <LifeBuoy className="w-5 h-5 text-primary" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-bold text-sm">Поддержка</h3>
-            <p className="text-[10px] text-muted-foreground">Свяжитесь с нами в любое время</p>
+            <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">Свяжитесь с нами в любое время</p>
           </div>
-          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1" />
+          <ArrowRight className="ml-auto w-4 h-4 text-muted-foreground group-hover:text-primary transition-all group-hover:translate-x-1 shrink-0" />
         </Card>
       </div>
       {/* QR Code Dialog */}
