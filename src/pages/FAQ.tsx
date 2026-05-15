@@ -65,27 +65,6 @@ export default function FAQ() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="text-center max-w-2xl mx-auto space-y-4">
         <h1 className="text-4xl font-bold tracking-tight">База знаний</h1>
-        <p className="text-muted-foreground">Найдите ответы на популярные вопросы или свяжитесь с нами напрямую</p>
-        <div className="relative max-w-md mx-auto mt-6">
-          <Search className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
-          <Input placeholder="Поиск по вопросам..." className="pl-10 h-12 bg-card border-border rounded-2xl focus:ring-primary/50" />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {categories.map((cat, i) => (
-          <Card key={i} className="glass-card hover:border-primary/50 transition-colors cursor-pointer group">
-            <CardContent className="p-6 flex flex-col items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                <cat.icon className="w-6 h-6 text-primary" />
-              </div>
-              <div className="text-center">
-                <div className="font-bold text-sm">{cat.name}</div>
-                <div className="text-[10px] text-muted-foreground">{cat.count} статей</div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
       </div>
 
       <div className="max-w-3xl mx-auto">
