@@ -1751,11 +1751,16 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
 
       for (let i = 0; i < devices.length; i++) {
         const device = devices[i];
-        const currentLinksCount = device.config.split('\n').filter(l => l.startsWith('v')).length;
+        const links = device.config.split('\n').filter(l => l.startsWith('v'));
+        
+        // Check if all current active suffixes are present
+        const hasAllActiveServers = activeServers.every((s: any) => 
+          links.some(l => l.endsWith(`#${s.name.replace(/\s+/g,'_')}`))
+        );
 
-        // If the number of links doesn't match the number of active servers, we need to sync!
-        if (currentLinksCount !== activeServers.length) {
-          console.log(`[SyncServers] Syncing device ${device.label} for user ${sub.user_id} (${currentLinksCount} != ${activeServers.length} servers)`);
+        // If the number of links doesn't match the number of active servers, OR we're missing an active server suffix, we need to sync!
+        if (links.length !== activeServers.length || !hasAllActiveServers) {
+          console.log(`[SyncServers] Syncing device ${device.label} for user ${sub.user_id}`);
           let newConfigLines: string[] = [];
           const expiresAtMs = new Date(device.expiresAt).getTime();
 
@@ -2016,10 +2021,12 @@ app.get('/api/sub/:id', async (req, res) => {
     return res.status(403).send('Subscription expired or inactive');
   }
 
-  // Retrieve active servers
-  const { data: activeServers, error: sErr } = await supabase.from('vpn_servers').select('name').eq('is_active', true);
+  // Retrieve all servers to distinguish between active, inactive, and legacy links
+  const { data: allServers, error: sErr } = await supabase.from('vpn_servers').select('name, is_active');
   if (sErr) throw sErr;
-  const activeSuffices = (activeServers || []).map((s: any) => `#${s.name.replace(/\s+/g,'_')}`);
+  
+  const activeSuffices = (allServers || []).filter(s => s.is_active).map((s: any) => `#${s.name.replace(/\s+/g,'_')}`);
+  const inactiveSuffices = (allServers || []).filter(s => !s.is_active).map((s: any) => `#${s.name.replace(/\s+/g,'_')}`);
 
   let configText = "";
   try {
@@ -2046,8 +2053,16 @@ app.get('/api/sub/:id', async (req, res) => {
     .map(l => l.trim())
     .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
     .filter(line => {
-      // Check if it belongs to an active server
-      return activeSuffices.some((suffix: string) => line.endsWith(suffix));
+      // Check if it belongs to an explicitly inactive server
+      const isExplicitlyInactive = inactiveSuffices.some((suffix: string) => line.endsWith(suffix));
+      if (isExplicitlyInactive) return false; // Drop dead links
+
+      // If it belongs to an active server, absolutely keep it
+      const isActive = activeSuffices.some((suffix: string) => line.endsWith(suffix));
+      if (isActive) return true;
+
+      // If it matches neither (meaning it has no #Server_Name suffix), it's a legacy link! Keep it so users don't lose internet.
+      return true;
     })
     .join('\n');
   
@@ -2186,9 +2201,13 @@ app.post('/api/subscription/sync-servers', authenticateUser, async (req, res) =>
 
     for (let i = 0; i < devices.length; i++) {
         const device = devices[i];
-        const currentLinksCount = device.config.split('\n').filter(l => l.startsWith('v')).length;
+        const links = device.config.split('\n').filter(l => l.startsWith('v'));
 
-        if (currentLinksCount !== activeServers.length) {
+        const hasAllActiveServers = activeServers.every((s: any) => 
+          links.some(l => l.endsWith(`#${s.name.replace(/\s+/g,'_')}`))
+        );
+
+        if (links.length !== activeServers.length || !hasAllActiveServers) {
           console.log(`[AutoSync] Healing device ${device.label} for user ${userId}`);
           let newConfigLines: string[] = [];
           const expiresAtMs = new Date(device.expiresAt).getTime();
