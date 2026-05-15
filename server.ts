@@ -1731,6 +1731,67 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
   }
 });
 
+app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
+  try {
+    console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);
+    const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (srvErr) throw srvErr;
+    if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
+
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').eq('status', 'active');
+    if (subErr) throw subErr;
+
+    let updatedUsers = 0;
+    
+    for (const sub of subs || []) {
+      const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+      let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+      let subModified = false;
+
+      for (let i = 0; i < devices.length; i++) {
+        const device = devices[i];
+        const currentLinksCount = device.config.split('\n').filter(l => l.startsWith('v')).length;
+
+        // If the number of links doesn't match the number of active servers, we need to sync!
+        if (currentLinksCount !== activeServers.length) {
+          console.log(`[SyncServers] Syncing device ${device.label} for user ${sub.user_id} (${currentLinksCount} != ${activeServers.length} servers)`);
+          let newConfigLines: string[] = [];
+          const expiresAtMs = new Date(device.expiresAt).getTime();
+
+          for (const server of activeServers) {
+            try {
+              const { instance: xuiInstance } = await getXuiForServer(server.id);
+              // addClient falls back to updateClient if email already exists, and always returns the link
+              const rawConfig = await xuiInstance.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
+              if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+                const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+                newConfigLines.push(configWithSuffix);
+              }
+            } catch (err: any) {
+              console.error(`[SyncServers] Error on server ${server.name} for ${device.email}:`, err.message);
+            }
+          }
+
+          if (newConfigLines.length > 0) {
+            device.config = newConfigLines.join('\n');
+            subModified = true;
+          }
+        }
+      }
+
+      if (subModified) {
+        await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+        updatedUsers++;
+      }
+    }
+
+    res.json({ status: 'ok', updatedUsers });
+  } catch (err: any) {
+    console.error('❌ Global server sync error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 app.post('/api/admin/sync-all', adminOnly, async (req, res) => {
   try {
     console.log(`[API] Manual traffic sync triggered`);
@@ -1955,6 +2016,11 @@ app.get('/api/sub/:id', async (req, res) => {
     return res.status(403).send('Subscription expired or inactive');
   }
 
+  // Retrieve active servers
+  const { data: activeServers, error: sErr } = await supabase.from('vpn_servers').select('name').eq('is_active', true);
+  if (sErr) throw sErr;
+  const activeSuffices = (activeServers || []).map((s: any) => `#${s.name.replace(/\s+/g,'_')}`);
+
   let configText = "";
   try {
     if (sub.v2ray_config) {
@@ -1979,6 +2045,10 @@ app.get('/api/sub/:id', async (req, res) => {
   const configLines = configText.split('\n')
     .map(l => l.trim())
     .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
+    .filter(line => {
+      // Check if it belongs to an active server
+      return activeSuffices.some((suffix: string) => line.endsWith(suffix));
+    })
     .join('\n');
   
   if (!configLines) {
@@ -2091,6 +2161,69 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
+app.post('/api/subscription/sync-servers', authenticateUser, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (srvErr) throw srvErr;
+    if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok' });
+
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subErr || !sub) return res.json({ status: 'ok' });
+
+    const limitBytes = sub.traffic_limit_mb * 1024 * 1024;
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    let subModified = false;
+
+    for (let i = 0; i < devices.length; i++) {
+        const device = devices[i];
+        const currentLinksCount = device.config.split('\n').filter(l => l.startsWith('v')).length;
+
+        if (currentLinksCount !== activeServers.length) {
+          console.log(`[AutoSync] Healing device ${device.label} for user ${userId}`);
+          let newConfigLines: string[] = [];
+          const expiresAtMs = new Date(device.expiresAt).getTime();
+
+          for (const server of activeServers) {
+            try {
+              const { instance: xuiInstance } = await getXuiForServer(server.id);
+              const rawConfig = await xuiInstance.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
+              if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+                const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+                newConfigLines.push(configWithSuffix);
+              }
+            } catch (err: any) {
+              console.error(`[AutoSync] Error on server ${server.name}:`, err.message);
+            }
+          }
+
+          if (newConfigLines.length > 0) {
+            device.config = newConfigLines.join('\n');
+            subModified = true;
+          }
+        }
+    }
+
+    if (subModified) {
+      await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices) }).eq('id', sub.id);
+      return res.json({ status: 'synced' });
+    }
+
+    res.json({ status: 'ok' });
+  } catch (err: any) {
+    console.error('❌ Auto server sync error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 app.post('/api/subscription/sync-traffic', async (req, res) => {
   const authHeader = req.headers.authorization;
   const { userId } = req.body;

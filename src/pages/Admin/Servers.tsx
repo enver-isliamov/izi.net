@@ -173,6 +173,23 @@ export function AdminServersList() {
         </h2>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
+            onClick={async () => {
+              try {
+                toast.loading('Синхронизация...', { id: 'sync' });
+                const { data } = await axios.post('/api/admin/system/sync-servers', {}, {
+                  headers: { Authorization: `Bearer ${session?.access_token}` }
+                });
+                toast.success(`Синхронизировано ${data.updatedUsers} пользователей`, { id: 'sync' });
+              } catch (e: any) {
+                toast.error('Ошибка синхронизации: ' + (e.response?.data?.error || e.message), { id: 'sync' });
+              }
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 rounded-xl transition-colors font-medium text-sm flex-1 sm:flex-none border border-purple-500/20"
+          >
+            <RefreshCw size={18} />
+            Синхронизировать юзеров
+          </button>
+          <button
             onClick={runDiagnostic}
             disabled={isDiagnosing}
             className="flex items-center justify-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors font-medium text-sm flex-1 sm:flex-none border border-white/5"

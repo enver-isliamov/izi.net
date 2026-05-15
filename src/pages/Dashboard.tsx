@@ -221,30 +221,39 @@ export default function Dashboard() {
     }
   };
 
-  // Traffic sync on mount
+  // Traffic and servers sync on mount
   useEffect(() => {
     if (!user?.id) return;
     
-    const syncTraffic = async () => {
+    const syncBackground = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        fetch('/api/subscription/sync-traffic', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`
-          },
-          body: JSON.stringify({ userId: user.id })
-        }).then(() => {
-          // After sync, silently refresh data to show updated traffic
+        
+        Promise.all([
+          fetch('/api/subscription/sync-traffic', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token}`
+            },
+            body: JSON.stringify({ userId: user.id })
+          }),
+          fetch('/api/subscription/sync-servers', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token}`
+            }
+          })
+        ]).then(() => {
           fetchDashboardData(false);
-        }).catch(err => console.debug('Traffic sync silent error:', err));
+        }).catch(err => console.debug('Background sync error:', err));
       } catch (err) {
         console.debug('Session retrieval error:', err);
       }
     };
 
-    const timer = setTimeout(syncTraffic, 1000);
+    const timer = setTimeout(syncBackground, 1000);
     return () => clearTimeout(timer);
   }, [user?.id]);
 
