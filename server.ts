@@ -992,14 +992,14 @@ async function authenticateUser(req: any, res: any, next: any) {
   const token = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) return res.status(401).json({ error: 'Unauthorized' });
-  req.user = user;
+  (req as any).user = user;
   next();
 }
 
 // User Device Regeneration
 app.post('/api/user/devices/:deviceId/regenerate', authenticateUser, async (req, res) => {
   const { deviceId } = req.params;
-  const userId = req.user.id;
+  const userId = (req as any).user.id;
   
   try {
     const { data: sub, error } = await supabase
@@ -1076,8 +1076,7 @@ app.post('/api/user/devices/:deviceId/regenerate', authenticateUser, async (req,
       ...target,
       config: configLines.join('\n'), // combined configs
       email: newEmail,
-      uuid: newUuid,
-      updatedAt: new Date().toISOString()
+      uuid: newUuid
     };
 
     await supabase.from('subscriptions').update({ 
@@ -1600,8 +1599,7 @@ app.post('/api/admin/users/:userId/devices/:deviceId/regenerate', adminOnly, asy
       ...target,
       config: configLines.join('\n'),
       email: newEmail,
-      uuid: newUuid,
-      updatedAt: new Date().toISOString()
+      uuid: newUuid
     };
 
     await supabase.from('subscriptions').update({ 
