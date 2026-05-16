@@ -131,7 +131,8 @@ app.use(cors({
                      origin.includes('run.app') || 
                      origin.includes('localhost') ||
                      origin.includes('127.0.0.1') ||
-                     origin.includes('194.50.94.28'); 
+                     origin.includes('194.50.94.28') ||
+                     origin.includes('izinet.online'); 
 
     if (isAllowed) {
       callback(null, true);
