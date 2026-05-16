@@ -431,14 +431,11 @@ class XUIService {
 
       const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
       const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
-      const spiderX = rs.spiderX || realitySettings.spiderX || '';
+      const spiderX = rs.spiderX || realitySettings.spiderX || '/';
       
       console.log(`[XUI] Generating Reality link for ${email} on ${hostName}:${port}. SNI: ${sni}, SID: ${sid}, SPX: ${spiderX}`);
 
-      let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision`;
-      if (spiderX && spiderX !== '/') {
-        link += `&spx=${encodeURIComponent(spiderX)}`;
-      }
+      let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
       const tlsSettings = streamSettings.tlsSettings || {};
