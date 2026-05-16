@@ -144,6 +144,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
   credentials: true
 }));
+app.set('trust proxy', true); // Required for Cloudflare reverse proxy
 app.use(express.json());
 const PORT = parseInt(process.env.PORT || '3000');
 
