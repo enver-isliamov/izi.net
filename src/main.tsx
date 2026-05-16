@@ -7,13 +7,15 @@ import './index.css';
 const envUrl = import.meta.env.VITE_API_URL;
 const isVercel = window.location.hostname.includes('vercel.app');
 
-// ВАЖНО: На Vercel ВСЕГДА используем относительные пути, чтобы работал прокси vercel.json.
-// Это предотвращает ошибку Mixed Content (HTTPS -> HTTP).
-const apiUrl = (envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : '';
+// ВАЖНО: При запуске на продакшен доменах (включая Vercel и izinet.online) всегда используем относительные пути.
+// Это предотвращает ошибку Mixed Content (HTTPS -> HTTP) и проблемы с CORS.
+const isProdDomain = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('izinet.online');
+const apiUrl = (!isProdDomain && envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : '';
 
 axios.defaults.baseURL = apiUrl;
 console.log('🚀 API Config:', {
-  isVercel,
+  hostname: window.location.hostname,
+  isProdDomain,
   envUrl,
   detectedBaseURL: axios.defaults.baseURL || '(relative)'
 });

@@ -22,6 +22,7 @@
 - [x] **VPN-04: Session Refresher** (`SESSION_TTL` 2м, таймаут логина 10с для стабильности под нагрузкой).
 - [x] **VPN-05: Server Balancer** (Автоматический выбор наименее загруженного активного сервера при продлении старых подписок).
 - [x] **VPN-06: Reality Flow Fallback** (Принудительный XTLS-Vision flow для Reality, предотвращает нерабочие ключи).
+- [x] **VPN-07: SpiderX Parameter Missing** (В генератор ссылок VLESS XTLS-Reality добавлен параметр `spx=%2F`. Без него клиенты NekoBox и Hiddify отбрасывали соединение в таймаут).
 
 ---
 
