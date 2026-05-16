@@ -112,25 +112,8 @@ export default function Dashboard() {
       setActiveServer(serverData);
       setGlobalDeviceLimit(plansData?.deviceLimit || 2);
       
-      // BUG-04: Fetch stable sub URL from backend
       if (subRes?.id) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          const subUrlRes = await fetch(`/api/sub-url/${subRes.id}`, {
-            headers: { 'Authorization': `Bearer ${session?.access_token}` }
-          });
-          
-          if (subUrlRes.ok) {
-            const { url } = await subUrlRes.json();
-            setSubUrl(url);
-          } else {
-            setSubUrl(`/api/sub/${subRes.id}`);
-          }
-        } catch (err) {
-          console.debug('Failed to fetch stable sub URL, using fallback:', err);
-          setSubUrl(`/api/sub/${subRes.id}`);
-        }
+        setSubUrl(`${window.location.origin}/api/sub/${subRes.id}`);
       }
       
     } catch (error) {
