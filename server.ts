@@ -322,7 +322,7 @@ class XUIService {
             id: uuid,
             flow: flow,
             email: email,
-            limitIp: 2, // VPN-01: Allow 2 IPs to prevent timeouts on mobile switching (WiFi <> 4G)
+            limitIp: 0, // VPN-01: Allow unlimited IPs to prevent timeouts on mobile switching (WiFi <> 4G). Limits enforced by traffic quotas.
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -534,7 +534,7 @@ class XUIService {
             id: effectiveUuid,
             flow: flow,
             email: email,
-            limitIp: 2, // VPN-01: Sync limitIp to 2
+            limitIp: 0, // VPN-01: Sync limitIp to 0
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -1736,6 +1736,44 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
     const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
     if (srvErr) throw srvErr;
     if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
+
+    // Fix limitIp to 0 for all inbound clients directly on XUI to prevent timeouts
+    for (const server of activeServers) {
+        try {
+            console.log(`Fixing limitIp=0 on server ${server.name}...`);
+            const { instance } = await getXuiForServer(server.id);
+            if (!instance['sessionCookie']) await instance.login();
+            const listResp = await axios.get(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, { 'Cookie': instance['sessionCookie'] }));
+            
+            const inbounds = listResp.data.obj || [];
+            let inboundsUpdated = 0;
+            for (const inbound of inbounds) {
+              const settings = JSON.parse(inbound.settings || '{}');
+              if (!settings.clients || settings.clients.length === 0) continue;
+              
+              let changed = false;
+              settings.clients = settings.clients.map((c: any) => {
+                if (c.limitIp !== 0) {
+                   changed = true;
+                   return { ...c, limitIp: 0 };
+                }
+                return c;
+              });
+
+              if (changed) {
+                console.log(`Updating limitIp: 0 for inbound ${inbound.id} on ${server.name}`);
+                await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, {
+                  ...inbound,
+                  settings: JSON.stringify(settings)
+                }, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, { 'Cookie': instance['sessionCookie'] }));
+                inboundsUpdated++;
+              }
+            }
+            console.log(`✅ Fixed limitIp on ${inboundsUpdated} inbounds for ${server.name}`);
+        } catch (e: any) {
+            console.error(`Error fixing limitIp on ${server.name}:`, e.message);
+        }
+    }
 
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').eq('status', 'active');
