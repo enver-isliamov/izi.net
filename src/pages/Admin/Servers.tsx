@@ -16,7 +16,7 @@ export function AdminServersList() {
   const [isChecking, setIsChecking] = useState<string | null>(null);
   const [isBackingUp, setIsBackingUp] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState<string | null>(null);
-  const [healthData, setHealthData] = useState<Record<string, boolean>>({});
+  const [healthData, setHealthData] = useState<Record<string, { online: boolean, error?: string }>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
   const [formData, setFormData] = useState({
@@ -46,9 +46,9 @@ export function AdminServersList() {
       const { data } = await axios.get('/api/admin/servers/health', {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
-      const healthMap: Record<string, boolean> = {};
+      const healthMap: Record<string, { online: boolean, error?: string }> = {};
       data.forEach((item: any) => {
-        healthMap[item.id] = item.online;
+        healthMap[item.id] = { online: item.online, error: item.error };
       });
       setHealthData(healthMap);
     } catch (e) {
@@ -412,11 +412,11 @@ export function AdminServersList() {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <div 
-                    title={healthData[server.id] ? "Панель доступна" : "Нет связи с панелью"}
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      healthData[server.id] 
+                    title={healthData[server.id]?.online ? "Панель доступна" : `Нет связи с панелью: ${healthData[server.id]?.error || 'Неизвестная ошибка'}`}
+                    className={`w-2 h-2 rounded-full shrink-0 cursor-help ${
+                      healthData[server.id]?.online 
                         ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' 
-                        : healthData[server.id] === false 
+                        : healthData[server.id]?.online === false 
                           ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' 
                           : 'bg-gray-500'
                     }`} 

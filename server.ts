@@ -309,15 +309,11 @@ class XUIService {
   }
 
   async checkHealth(): Promise<boolean> {
-    try {
-      if (!this.host) return false;
-      await this.login(true);
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-      await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }, 4000));
-      return true;
-    } catch (e) {
-      return false;
-    }
+    if (!this.host) throw new Error('Host is not configured');
+    await this.login(true);
+    const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+    await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }, 8000));
+    return true;
   }
 
   async getInbounds() {
@@ -794,11 +790,11 @@ async function getXuiForServer(serverId?: string | null) {
     // If ipPart contains a port (e.g. 1.2.3.4:443), use it
     if (ipPart.includes(':')) {
        const [ip, port] = ipPart.split(':');
-       const protocol = (port === '443' || parseInt(port) > 10000) ? 'https' : 'http';
+       const protocol = (port === '443' || port === '8443' || port === '2053') ? 'https' : 'http';
        host = `${protocol}://${ip}:${port}${panelPath}`;
     } else {
        const port = server.api_port || 2053;
-       const protocol = (port === 443 || port > 10000) ? 'https' : 'http';
+       const protocol = (port === 443 || port === 8443 || port === 2053) ? 'https' : 'http';
        host = `${protocol}://${ipPart}:${port}${panelPath}`;
     }
   }
@@ -1161,8 +1157,8 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
         const { instance } = await getXuiForServer(s.id);
         const isOnline = await instance.checkHealth();
         return { id: s.id, online: isOnline };
-      } catch (e) {
-        return { id: s.id, online: false };
+      } catch (e: any) {
+        return { id: s.id, online: false, error: e.message };
       }
     }));
     
