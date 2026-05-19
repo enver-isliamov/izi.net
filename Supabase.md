@@ -26,7 +26,10 @@ create table public.vpn_servers (
   ip text not null,
   domain text,
   api_port integer default 2053,
+  api_username text default 'admin',
+  api_password text default 'admin',
   location_code text default 'DE',
+  xui_config_state jsonb default '{}', -- Хранение настроек Inbounds (порты, протоколы)
   is_active boolean default true,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
