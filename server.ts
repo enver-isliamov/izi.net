@@ -147,15 +147,13 @@ app.use(cors({
   credentials: true
 }));
 
-// 🔍 Diagnostic logging for API requests
+// 🔍 Diagnostic logging for API and Page requests
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) {
-    console.log(`[REQ] ${req.method} ${req.path} 
+  if (req.path.startsWith('/api/') || req.path === '/' || req.path === '/health') {
+    console.log(`[REQ] ${new Date().toISOString()} | ${req.method} ${req.path} 
       | Host: ${req.get('host')} 
-      | X-Forwarded-Host: ${req.get('x-forwarded-host') || 'N/A'}
-      | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'} 
-      | CF-Visitor: ${req.get('cf-visitor') || 'N/A'}
-      | Origin: ${req.get('origin') || 'N/A'}`);
+      | Real-IP: ${req.get('x-real-ip') || req.ip}
+      | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'}`);
   }
   next();
 });
