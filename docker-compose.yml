@@ -10,12 +10,37 @@ services:
     container_name: izinet-app
     restart: unless-stopped
     ports:
-      # Открываем порт для всех интерфейсов, чтобы Xray мог достучаться.
       - "3005:3005"
     environment:
       - NODE_ENV=production
+      - XUI_HOST=http://x3-ui:2053
     env_file:
       - .env
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
+    depends_on:
+      - x3-ui
+    networks:
+      - izinet-net
+
+  x3-ui:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: x3-ui
+    restart: unless-stopped
+    ports:
+      - "2053:2053" # Panel port
+      - "443:443"   # Common VPN port
+      - "80:80"     # Common VPN port
+    environment:
+      - XUI_LOG_LEVEL=info
+    volumes:
+      - ./xui-db:/etc/x-ui
+      - ./xui-cert:/root/cert
+    networks:
+      - izinet-net
+
+networks:
+  izinet-net:
+    driver: bridge
+
+volumes:
+  xui-db:
+  xui-cert:

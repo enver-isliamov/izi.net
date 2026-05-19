@@ -2,6 +2,15 @@
 
 React + Vite личный кабинет для VPN-подписок с backend на Express, Supabase, 3x-ui, Telegram bot и Enot.io.
 
+## ⚡️ Быстрый старт (One-line Installation)
+
+Если у вас чистый VPS (Ubuntu/Debian), вы можете развернуть весь стэк (izinet + 3x-ui панель) одной командой:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/enverphoto/izinet/main/install.sh | bash
+```
+*Скрипт установит Docker, клонирует репозиторий и попросит ввести ключи Supabase.*
+
 ## Текущая архитектура
 
 - Frontend: React 19, Vite, Tailwind, shadcn/base-ui style components.

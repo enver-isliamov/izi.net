@@ -1,0 +1,80 @@
+#!/bin/bash
+
+# izinet Installer for VPS (Ubuntu/Debian)
+# Этот скрипт устанавливает Docker, клонирует репозиторий и настраивает проект.
+
+set -e
+
+# Цвета для вывода
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}🚀 Начинаем установку izinet на ваш VPS...${NC}"
+
+# 1. Обновление системы и установка зависимостей
+echo "📦 Обновляем системные пакеты..."
+sudo apt-get update && sudo apt-get install -y curl git jq
+
+# 2. Установка Docker, если он не установлен
+if ! [ -x "$(command -v docker)" ]; then
+    echo "🐳 Устанавливаем Docker..."
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sudo sh get-docker.sh
+    sudo usermod -aG docker $USER
+fi
+
+# Установка Docker Compose, если он не установлен
+if ! [ -x "$(command -v docker-compose)" ]; then
+    echo "🐳 Устанавливаем Docker Compose..."
+    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+fi
+
+# 3. Клонирование репозитория (если мы еще не в нем)
+INSTALL_DIR="/opt/izinet"
+if [ ! -f "docker-compose.yml" ]; then
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "📂 Клонируем репозиторий в $INSTALL_DIR..."
+        sudo mkdir -p $INSTALL_DIR
+        sudo chown $USER:$USER $INSTALL_DIR
+        git clone https://github.com/enverphoto/izinet.git $INSTALL_DIR
+    fi
+    cd $INSTALL_DIR
+fi
+
+# 4. Настройка .env (Интерактивно)
+if [ ! -f .env ]; then
+    echo -e "${GREEN}⚙️ Настройка окружения. Нам нужны ваши ключи Supabase:${NC}"
+    read -p "Supabase URL (например, https://xxx.supabase.co): " SB_URL
+    read -p "Supabase Anon Key: " SB_ANON
+    read -p "Supabase Service Role Key: " SB_SERVICE
+    read -p "Telegram Bot Token: " TG_TOKEN
+    read -p "Telegram Bot Name (без @): " TG_NAME
+
+    cp .env.example .env
+    
+    # Используем '|' как разделитель в sed, чтобы избежать проблем с '/' в URL
+    sed -i "s|VITE_SUPABASE_URL=.*|VITE_SUPABASE_URL=$SB_URL|" .env
+    sed -i "s|VITE_SUPABASE_ANON_KEY=.*|VITE_SUPABASE_ANON_KEY=$SB_ANON|" .env
+    sed -i "s|SUPABASE_SERVICE_ROLE_KEY=.*|SUPABASE_SERVICE_ROLE_KEY=$SB_SERVICE|" .env
+    sed -i "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=$TG_TOKEN|" .env
+    sed -i "s|VITE_TELEGRAM_BOT_NAME=.*|VITE_TELEGRAM_BOT_NAME=$TG_NAME|" .env
+    
+    # Настройки для встроенного 3x-ui
+    sed -i "s|XUI_HOST=.*|XUI_HOST=http://x3-ui:2053|" .env
+    sed -i "s|XUI_USERNAME=.*|XUI_USERNAME=admin|" .env
+    sed -i "s|XUI_PASSWORD=.*|XUI_PASSWORD=admin|" .env
+    
+    # Получаем IP сервера для VITE_API_URL
+    SERVER_IP=$(curl -s https://ifconfig.me)
+    sed -i "s|VITE_API_URL=.*|VITE_API_URL=http://$SERVER_IP:3005|" .env
+fi
+
+# 5. Запуск
+echo -e "${GREEN}🚢 Запускаем контейнеры...${NC}"
+docker-compose up -d --build
+
+echo -e "${GREEN}✅ Готово! izinet запущен.${NC}"
+echo -e "Дашборд доступен по адресу: http://$(curl -s ifconfig.me):3005"
+echo -e "Панель 3x-ui: http://$(curl -s ifconfig.me):2053 (логин/пароль: admin/admin)"
+echo -e "Не забудьте сменить стандартный пароль в панели 3x-ui!"
