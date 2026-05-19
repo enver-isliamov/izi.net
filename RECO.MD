@@ -35,8 +35,8 @@
 ### 3. Формирование ссылки для пользователя
 Формат ссылок уже поддерживается `izinet`. При переходе на дублирование серверов, наша ручка `/api/sub/:id` для одного устройства начнет отдавать список (Base64) такого вида:
 ```text
-vless://uuid@185.72.11.57:443?security=reality&sni=google.com&fp=chrome&pbk=ВАШ_КЛЮЧ&sid=ВАШ_ID#Server_1_Main
-vless://uuid@194.50.94.28:443?security=reality&sni=google.com&fp=chrome&pbk=ВАШ_КЛЮЧ&sid=ВАШ_ID#Server_2_Reserve
+vless://uuid@YOUR_VPS_IP:443?security=reality&sni=google.com&fp=chrome&pbk=ВАШ_КЛЮЧ&sid=ВАШ_ID#Server_1_Main
+vless://uuid@YOUR_BACKUP_IP:443?security=reality&sni=google.com&fp=chrome&pbk=ВАШ_КЛЮЧ&sid=ВАШ_ID#Server_2_Reserve
 ```
 Клиенту останется только включить Auto-Test или Load Balance в своем приложении.
 

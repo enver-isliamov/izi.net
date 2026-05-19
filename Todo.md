@@ -8,7 +8,7 @@ VPN Subscription Service — "izinet"
 Дизайн и функционал заимствованы с izinet 
 
 1.3 Инфраструктура заказчика
-VPN Server IP: 185.72.11.57
+VPN Server IP: YOUR_VPS_IP
 ├── 3x-ui Panel (порты 443, 8443)
 │   ├── VLESS + Reality (443) — основной
 │   └── VLESS + WS + TLS (8443) — VIP

@@ -4,7 +4,7 @@
 
 ## Backend smoke
 
-- [x] `GET http://194.50.94.28:3005/api/locations` возвращает активные серверы.
+- [x] `GET http://YOUR_VPS_IP:3005/api/locations` возвращает активные серверы.
 - [x] `POST /api/pay/create` без `Authorization` возвращает `401`.
 - [ ] После деплоя текущего `server.ts`: `POST /api/subscription/buy` без `Authorization` возвращает `401`.
 - [ ] После деплоя текущего `server.ts`: `POST /api/subscription/sync-traffic` без `Authorization` возвращает `401`.

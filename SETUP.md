@@ -1,6 +1,6 @@
 # 🚀 Руководство по настройке izinet Dashboard
 
-> Актуально на 2026-05-06: Vercel обслуживает frontend и проксирует `/api/*` на VPS backend `194.50.94.28:3005`. Оплата работает через новый ENOT invoice API, а не через старый `enot.io/checkout`. Для точной схемы платежей см. `PAYMENT_SETUP.md`; для открытых проблем см. `fix.md`.
+> Актуально на 2026-05-06: Vercel обслуживает frontend и проксирует `/api/*` на VPS backend `YOUR_VPS_IP:3005`. Оплата работает через новый ENOT invoice API, а не через старый `enot.io/checkout`. Для точной схемы платежей см. `PAYMENT_SETUP.md`; для открытых проблем см. `fix.md`.
 
 ## Шаг 1: Создайте Supabase проект
 
@@ -174,14 +174,14 @@ ENOT_SECRET_KEY2=секрет-2
 
 ## Шаг 6: Подключите VPN сервер
 
-Ваш сервер: `185.72.11.57`
+Ваш сервер: `YOUR_VPS_IP`
 
 Для интеграции с 3x-ui панелью:
 1. Войдите в панель 3x-ui
 2. Создайте API ключ
 3. Добавьте в `.env`:
 ```env
-VITE_VPN_API_URL=http://185.72.11.57:2053
+VITE_VPN_API_URL=http://YOUR_VPS_IP:2053
 VITE_VPN_API_PASSWORD=ваш-3x-ui-пароль
 ```
 

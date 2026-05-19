@@ -193,11 +193,13 @@ class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
+  private csrfToken: string | null = null;
   private readonly SESSION_TTL = 2 * 60 * 1000; // 2 minutes cache for session cookie (VPN-04: Fresher sessions)
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
+
     
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
@@ -249,14 +251,23 @@ class XUIService {
     
     let lastError: any = null;
 
-    const tryLogin = async (path: string) => {
+    const tryLogin = async (path: string, csrfData?: { token: string, cookieStr: string }) => {
       const url = `${this.host}${this.basePath}${path}`;
       const payload = `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
       const jsonPayload = { username: this.username, password: this.password };
 
+      let customHeaders: any = {};
+      if (csrfData) {
+         customHeaders['X-CSRF-Token'] = csrfData.token;
+         if (csrfData.cookieStr) customHeaders['Cookie'] = csrfData.cookieStr;
+      }
+
       try {
         // Try form-urlencoded first (default for most 3x-ui)
-        const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded' }));
+        const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded', ...customHeaders }));
+        if (csrfData && csrfData.cookieStr) {
+           response.headers['x-passed-cookie'] = csrfData.cookieStr;
+        }
         return response;
       } catch (err: any) {
         lastError = err;
@@ -266,7 +277,10 @@ class XUIService {
         
         // Try JSON if not successful
         try {
-          const response = await axios.post(url, jsonPayload, getRequestConfig(url));
+          const response = await axios.post(url, jsonPayload, getRequestConfig(url, customHeaders));
+          if (csrfData && csrfData.cookieStr) {
+             response.headers['x-passed-cookie'] = csrfData.cookieStr;
+          }
           return response;
         } catch (innerErr: any) {
           lastError = innerErr;
@@ -276,10 +290,34 @@ class XUIService {
     };
 
     try {
+      // Step 1: Pre-flight to get potential Session Cookies & CSRF Token
+      let csrfToken = '';
+      let cookies: string[] = [];
+      try {
+        const rootUrl = `${this.host}${this.basePath}/`;
+        const rootRes = await axios.get(rootUrl, getRequestConfig(rootUrl, {}, 5000));
+        if (rootRes.headers['set-cookie']) {
+          cookies = cookies.concat(rootRes.headers['set-cookie']);
+        }
+        const csrfUrl = `${this.host}${this.basePath}/csrf-token`;
+        const csrfRes = await axios.get(csrfUrl, getRequestConfig(csrfUrl, { Cookie: cookies.join(';') }, 5000));
+        if (csrfRes.data && csrfRes.data.success && csrfRes.data.obj) {
+           csrfToken = csrfRes.data.obj;
+        }
+        if (csrfRes.headers['set-cookie']) {
+           cookies = cookies.concat(csrfRes.headers['set-cookie']);
+        }
+      } catch (e) {
+        // CSRF endpoint might not exist on older versions, just ignore
+      }
+
+      const csrfData = csrfToken ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
+
       // 3x-ui almost universally uses /login. Trying others blindly triggers rate limits.
-      let response = await tryLogin('/login');
-      if (!response) response = await tryLogin(''); // Some custom setups might proxy right to root
-      if (!response) response = await tryLogin('/panel/login');
+      let response = await tryLogin('/login', csrfData);
+      if (!response) response = await tryLogin('', csrfData); // Some custom setups might proxy right to root
+      if (!response) response = await tryLogin('/panel/login', csrfData);
+
       
       if (!response) {
         let msg = `Could not find login endpoint at ${this.host}${this.basePath}.`;
@@ -295,9 +333,12 @@ class XUIService {
         throw new Error(response.data.msg || 'Login failed');
       }
 
-      const cookie = response.headers['set-cookie']?.[0];
+      const cookie = response.headers['set-cookie']?.[0] || response.headers['x-passed-cookie'];
       if (!cookie) throw new Error('No cookie received from 3x-ui. Check if host URL is correct and starts with http/https.');
       this.sessionCookie = cookie;
+      if (csrfData && csrfData.token) {
+         this.csrfToken = csrfData.token;
+      }
       this.lastLoginTime = Date.now();
       return cookie;
     } catch (error: any) {
@@ -307,6 +348,13 @@ class XUIService {
       }
       throw error;
     }
+  }
+
+  private authHeaders(extra: any = {}) {
+    const headers: any = { ...extra };
+    if (this.sessionCookie) headers['Cookie'] = this.sessionCookie;
+    if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
+    return headers;
   }
 
   async checkHealth(): Promise<boolean> {
@@ -321,7 +369,7 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
     try {
       const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-      const resp = await axios.get(listUrl, getRequestConfig(listUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
       return resp.data.obj || [];
     } catch (e: any) {
       if (e.response?.status === 401) {
@@ -343,7 +391,7 @@ class XUIService {
     let flow = "";
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success) {
         inbound = resp.data.obj;
         const streamSettings = JSON.parse(inbound.streamSettings);
@@ -379,10 +427,9 @@ class XUIService {
       const response = await axios.post(
         addClientUrl,
         clientData,
-        getRequestConfig(addClientUrl, { 
-          'Cookie': this.sessionCookie,
+        getRequestConfig(addClientUrl, this.authHeaders({ 
           'Content-Type': 'application/json'
-        })
+        }))
       );
 
       if (response.data.success) {
@@ -421,7 +468,7 @@ class XUIService {
     let effectiveInboundId = inboundId;
 
     const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
+    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
     
     if (!resp.data.success || !resp.data.obj) {
       throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
@@ -484,7 +531,7 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success && resp.data.obj) {
         const settings = JSON.parse(resp.data.obj.settings || '{}');
         const clients = settings.clients || [];
@@ -543,7 +590,7 @@ class XUIService {
     let flow = "";
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success && resp.data.obj) {
         const streamSettings = JSON.parse(resp.data.obj.streamSettings || '{}');
         if (streamSettings.security === 'reality') {
@@ -584,10 +631,9 @@ class XUIService {
       const response = await axios.post(
         updateClientUrl,
         clientData,
-        getRequestConfig(updateClientUrl, { 
-          'Cookie': this.sessionCookie,
+        getRequestConfig(updateClientUrl, this.authHeaders({ 
           'Content-Type': 'application/json'
-        })
+        }))
       );
 
       if (response.data.success) {
@@ -621,7 +667,7 @@ class XUIService {
 
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${email}`;
-      const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+      const response = await axios.get(url, getRequestConfig(url, this.authHeaders()));
 
       if (response.data.success && response.data.obj) {
         const stats = response.data.obj;
@@ -666,7 +712,7 @@ class XUIService {
 
     try {
       const deleteUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${effectiveUuid}`;
-      const response = await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': this.sessionCookie }));
+      const response = await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, this.authHeaders()));
       if (response.data.success) {
         console.log(`✅ Deleted client ${email || effectiveUuid} from 3x-ui [${this.host}]`);
         return true;
@@ -693,7 +739,7 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
-      const response = await axios.post(url, {}, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+      const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       if (response.data.success && Array.isArray(response.data.obj)) {
         // Return unique emails to avoid overcounting multiple connections from same user
         const uniqueOnlines = [...new Set(response.data.obj.map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
@@ -773,30 +819,57 @@ async function getXuiForServer(serverId?: string | null) {
 
   // Robust host construction
   let rawIp = (server.ip || '').trim();
+  let domainOrPath = (server.domain || '').trim();
   let host = "";
-  let panelPath = (server.domain || '').trim();
-  if (!panelPath.startsWith('/')) panelPath = '';
 
   if (rawIp.includes('://')) {
     host = rawIp;
+    // If rawIp is just http://ip:port without path, and domain is a secret path, append it
+    if (domainOrPath) {
+      if (!domainOrPath.includes('.') && !domainOrPath.startsWith('/')) {
+        domainOrPath = '/' + domainOrPath;
+      }
+      if (domainOrPath.startsWith('/')) {
+        try {
+          const url = new URL(host);
+          if (url.pathname === '/' || url.pathname === '') {
+            host = host.replace(/\/$/, '') + domainOrPath;
+          }
+        } catch (e) {}
+      }
+    }
   } else {
     // If rawIp contains a path (e.g. 1.2.3.4/secret), split it
     let ipPart = rawIp;
+    let pathPart = "";
+    
     if (rawIp.includes('/')) {
       const parts = rawIp.split('/');
       ipPart = parts[0];
-      if (!panelPath) panelPath = '/' + parts.slice(1).join('/');
+      pathPart = '/' + parts.slice(1).join('/');
+    }
+
+    if (domainOrPath) {
+      if (domainOrPath.startsWith('/')) {
+        pathPart = domainOrPath;
+      } else if (!domainOrPath.includes('.')) {
+        // Likely a secret path provided without a leading slash (e.g. "LZ6dkLpY4gzESk")
+        pathPart = '/' + domainOrPath;
+      } else {
+        // It's a domain (e.g. vpn.example.com), use it as the base host to connect
+        ipPart = domainOrPath;
+      }
     }
 
     // If ipPart contains a port (e.g. 1.2.3.4:443), use it
     if (ipPart.includes(':')) {
        const [ip, port] = ipPart.split(':');
        const protocol = (port === '443' || port === '8443' || port === '2053') ? 'https' : 'http';
-       host = `${protocol}://${ip}:${port}${panelPath}`;
+       host = `${protocol}://${ip}:${port}${pathPart}`;
     } else {
        const port = server.api_port || 2053;
        const protocol = (port === 443 || port === 8443 || port === 2053) ? 'https' : 'http';
-       host = `${protocol}://${ipPart}:${port}${panelPath}`;
+       host = `${protocol}://${ipPart}:${port}${pathPart}`;
     }
   }
 
