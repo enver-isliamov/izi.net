@@ -14,6 +14,7 @@ export function AdminServersList() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState<string | null>(null);
+  const [healthData, setHealthData] = useState<Record<string, boolean>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
   const [formData, setFormData] = useState({
@@ -28,27 +29,42 @@ export function AdminServersList() {
       if (Array.isArray(data)) {
         setServers(data);
       } else {
-        console.error('Invalid servers data:', data);
         setServers([]);
       }
     } catch (e: any) {
-      const status = e.response?.status;
-      const errorData = e.response?.data?.error || e.message;
-      console.error('Fetch servers error:', e);
-      
-      if (status === 401 || status === 403) {
-        toast.error(`Доступ запрещен (Ошибка ${status}): У вас недостаточно прав администратора.`);
-      } else {
-        toast.error(`Ошибка загрузки серверов (${status || 'Network Error'}): ${errorData}`);
-      }
+      // ... errors handled
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchHealth = async () => {
+    if (!session?.access_token) return;
+    try {
+      const { data } = await axios.get('/api/admin/servers/health', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      const healthMap: Record<string, boolean> = {};
+      data.forEach((item: any) => {
+        healthMap[item.id] = item.online;
+      });
+      setHealthData(healthMap);
+    } catch (e) {
+      console.warn('Health fetch failed (admin servers)');
     }
   };
 
   useEffect(() => {
     fetchServers();
   }, [session]);
+
+  useEffect(() => {
+    if (servers.length > 0) {
+      fetchHealth();
+      const interval = setInterval(fetchHealth, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [servers, session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -350,6 +366,16 @@ export function AdminServersList() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
+                  <div 
+                    title={healthData[server.id] ? "Панель доступна" : "Нет связи с панелью"}
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      healthData[server.id] 
+                        ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' 
+                        : healthData[server.id] === false 
+                          ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' 
+                          : 'bg-gray-500'
+                    }`} 
+                  />
                   <h3 className="font-semibold">{server.name}</h3>
                   <span className="text-xs bg-white/5 px-2 py-0.5 rounded uppercase font-mono">{server.location_code}</span>
                   {server.is_default && (

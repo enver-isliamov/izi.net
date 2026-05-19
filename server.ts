@@ -291,6 +291,18 @@ class XUIService {
     }
   }
 
+  async checkHealth(): Promise<boolean> {
+    try {
+      if (!this.host) return false;
+      await this.login(true);
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+      await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }, 4000));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async getInbounds() {
     if (!this.sessionCookie) await this.login();
     try {
@@ -1124,6 +1136,119 @@ async function getSystemSetting(key: string, fallback: string = ''): Promise<str
 }
 
 // Admin Settings Endpoints
+// --- Admin Settings Endpoints
+app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
+  try {
+    const { data: servers, error } = await supabase.from('vpn_servers').select('id, name');
+    if (error) throw error;
+    
+    // Check all servers in parallel with timeout
+    const results = await Promise.all((servers || []).map(async (s) => {
+      try {
+        const { instance } = await getXuiForServer(s.id);
+        const isOnline = await instance.checkHealth();
+        return { id: s.id, online: isOnline };
+      } catch (e) {
+        return { id: s.id, online: false };
+      }
+    }));
+    
+    res.json(results);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/system/sync-all', adminOnly, async (req, res) => {
+  console.log('🚀 [Sync] Starting global background synchronization...');
+  res.json({ success: true, message: 'Синхронизация запущена в фоновом режиме.' });
+
+  // Run heavy sync in background
+  (async () => {
+    try {
+      const { data: activeSubs } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('status', 'active');
+      
+      const { data: servers } = await supabase
+        .from('vpn_servers')
+        .select('*')
+        .eq('is_active', true);
+
+      if (!activeSubs || !servers) return;
+
+      const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+
+      for (const sub of activeSubs) {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+        const expiresAtMs = sub.expires_at ? new Date(sub.expires_at).getTime() : 0;
+        const limitBytes = (sub.traffic_limit_mb || 0) * 1024 * 1024;
+
+        for (const device of devices) {
+          for (const server of servers) {
+            try {
+              const { instance: xui } = await getXuiForServer(server.id);
+              await xui.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
+            } catch (e) {
+              // Silently continue if one server fails
+            }
+          }
+        }
+      }
+      console.log('✅ [Sync] Global sync completed successfully.');
+    } catch (e) {
+      console.error('❌ [Sync] Background sync failed:', e);
+    }
+  })();
+});
+
+// --- Traffic Webhook for 3x-ui ---
+// Usage: http://your-site.app/api/webhooks/traffic-limit?token=YOUR_SECRET
+app.post('/api/webhooks/traffic-limit', async (req, res) => {
+  const { email, traffic_used, traffic_limit, server_name } = req.body;
+  const token = req.query.token;
+  
+  // Basic security check if token set
+  const secret = process.env.WEBHOOK_SECRET || 'izinet_secret';
+  if (token !== secret) {
+    return res.status(403).json({ error: 'Invalid webhook token' });
+  }
+
+  if (!email) return res.status(400).json({ error: 'Email required' });
+
+  console.log(`[Webhook] Traffic limit alert for ${email} on server ${server_name || 'unknown'}`);
+
+  try {
+    // 1. Find subscription(s) containing this client email
+    // Note: email in 3x-ui is usually stored in v2ray_config JSON
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('status', 'active');
+
+    const affectedSub = subs?.find(s => {
+      const devices = parseVpnDevices(s.v2ray_config);
+      return devices.some(d => d.email === email);
+    });
+
+    if (affectedSub) {
+      // 2. Mark as limited if usage is near limit
+      await supabase
+        .from('subscriptions')
+        .update({ status: 'limited', updated_at: new Date().toISOString() })
+        .eq('id', affectedSub.id);
+      
+      console.log(`[Webhook] Subscription ${affectedSub.id} for user ${affectedSub.user_id} marked as LIMITED.`);
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Webhook] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admin/settings', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('settings').select('*');

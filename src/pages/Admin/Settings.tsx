@@ -20,6 +20,7 @@ export default function AdminSettings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
 
   useEffect(() => {
@@ -84,6 +85,21 @@ export default function AdminSettings() {
       toast.error(e.response?.data?.error || 'Ошибка при сохранении');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleFullSync = async () => {
+    try {
+      setIsSyncing(true);
+      toast.loading('Запуск глобальной синхронизации...', { id: 'sync-all' });
+      await axios.post('/api/admin/system/sync-all', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success('Синхронизация запущена в фоновом режиме', { id: 'sync-all' });
+    } catch (e: any) {
+      toast.error('Ошибка: ' + (e.response?.data?.error || e.message), { id: 'sync-all' });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -225,6 +241,41 @@ export default function AdminSettings() {
                 </p>
               </div>
             </div>
+          </div>
+        </motion.div>
+
+        {/* System Maintenance Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-red-500/5 rounded-2xl border border-red-500/10 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center gap-3 pb-4 border-b border-red-500/10">
+            <div className="p-2 bg-red-500/10 rounded-lg text-red-400">
+              <RefreshCw size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Обслуживание системы</h2>
+              <p className="text-xs text-muted-foreground">Глобальные инструменты управления инфраструктурой</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-black/20 rounded-xl">
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-white">Полная синхронизация X-UI</h3>
+              <p className="text-xs text-muted-foreground max-w-md">
+                Принудительно переподключит всех активных пользователей к X-UI на всех активных серверах. Используйте после добавления новых серверов или массовых обновлений.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={isSyncing}
+              onClick={handleFullSync}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-xl transition-colors font-bold text-xs whitespace-nowrap border border-red-500/20"
+            >
+              {isSyncing ? <RefreshCw className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+              Запустить синхронизацию
+            </button>
           </div>
         </motion.div>
 
