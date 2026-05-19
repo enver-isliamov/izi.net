@@ -164,7 +164,8 @@ app.use(cors({
 
 // 🔍 Diagnostic logging for API and Page requests
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/') || req.path === '/' || req.path === '/health') {
+  const isExcluded = req.path.includes('health') || req.path.includes('.ico') || req.path.includes('.png');
+  if (!isExcluded) {
     console.log(`[REQ] ${new Date().toISOString()} | ${req.method} ${req.path} 
       | Host: ${req.get('host')} 
       | Real-IP: ${req.get('x-real-ip') || req.ip}
@@ -3892,8 +3893,12 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Server started on port ${PORT}`);
-    console.log(`🌍 Public URL: ${process.env.PUBLIC_URL || 'Not Set'}`);
+    console.log(`
+🚀 SERVER STARTED SUCCESSFULLY
+🌍 URL: http://0.0.0.0:${PORT}
+🔧 Mode: ${process.env.NODE_ENV}
+📅 Date: ${new Date().toLocaleString()}
+    `);
   });
 }
 
