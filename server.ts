@@ -162,7 +162,7 @@ app.use((req, res, next) => {
 
 app.set('trust proxy', true); // Required for Cloudflare reverse proxy
 app.use(express.json());
-const PORT = parseInt(process.env.PORT || '3000');
+const PORT = parseInt(process.env.PORT || '3005');
 
 // --- XUI Service ---
 class XUIService {
@@ -3757,7 +3757,8 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Server started on port ${PORT}`);
+    console.log(`🌍 Public URL: ${process.env.PUBLIC_URL || 'Not Set'}`);
   });
 }
 
