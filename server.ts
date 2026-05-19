@@ -109,7 +109,13 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 if (!supabaseUrl || !supabaseServiceKey) {
   console.warn('⚠️ SUPABASE credentials missing in environment variables!');
 }
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+    detectSessionInUrl: false
+  }
+});
 
 // 🔍 Startup health check for Database
 async function checkDatabase() {
@@ -1057,10 +1063,11 @@ async function adminOnly(req: any, res: any, next: any) {
   }
 
   const token = authHeader.replace('Bearer ', '');
+  console.log(`[AdminAuth][${requestId}] Verifying token: ${token.substring(0, 15)}...`);
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
 
   if (authErr || !user) {
-    console.warn(`[AdminAuth][${requestId}] ❌ Invalid token:`, authErr?.message);
+    console.warn(`[AdminAuth][${requestId}] ❌ Invalid token:`, authErr?.message, authErr?.status);
     return res.status(401).json({ 
       error: 'Invalid Session', 
       message: 'Сессия истекла. Пожалуйста, войдите снова.' 
@@ -1100,7 +1107,10 @@ async function authenticateUser(req: any, res: any, next: any) {
   if (!authHeader) return res.status(401).json({ error: 'Auth required' });
   const token = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return res.status(401).json({ error: 'Unauthorized' });
+  if (error || !user) {
+    console.error('[AuthError]', error?.message || 'No user', 'Token prefix:', token.substring(0, 10));
+    return res.status(401).json({ error: 'Unauthorized', message: error?.message });
+  }
   (req as any).user = user;
   next();
 }
