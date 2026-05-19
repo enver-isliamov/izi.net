@@ -260,19 +260,16 @@ class XUIService {
         return response;
       } catch (err: any) {
         lastError = err;
-        if (err.response?.status === 403) {
-           throw err; // Stop on 403 immediately (rate-limit or WAF block)
-        }
-        if (err.response?.status === 404) {
-           return null; // Return null so next path can be tried only on 404
-        }
-        // Try JSON if not successful and not 404/403
+        
+        // Return null to continue trying other paths unless we know for sure we should stop
+        // We will no longer throw on 403 immediately because a wrong path might return 403
+        
+        // Try JSON if not successful
         try {
           const response = await axios.post(url, jsonPayload, getRequestConfig(url));
           return response;
         } catch (innerErr: any) {
           lastError = innerErr;
-          if (innerErr.response?.status === 403) throw innerErr; 
           return null; // Return null so the next path can be tried
         }
       }
@@ -285,7 +282,13 @@ class XUIService {
       if (!response) response = await tryLogin('/panel/login');
       
       if (!response) {
-        throw new Error(lastError?.message ? `Login failed. Last error: HTTP ${lastError.response?.status} ${lastError.message}` : `Could not find login endpoint at ${this.host}${this.basePath}.`);
+        let msg = `Could not find login endpoint at ${this.host}${this.basePath}.`;
+        if (lastError?.response?.status === 403) {
+           msg = `Login blocked (403 Forbidden). Rate limit/Fail2Ban active, or WAF blocking. Wait 5-15 mins or check IP whitelist.`;
+        } else if (lastError?.message) {
+           msg = `Login failed. HTTP ${lastError.response?.status || 'Error'} - ${lastError.message}`;
+        }
+        throw new Error(msg);
       }
       
       if (response.data && response.data.success === false) {
@@ -308,9 +311,9 @@ class XUIService {
 
   async checkHealth(): Promise<boolean> {
     if (!this.host) throw new Error('Host is not configured');
-    await this.login(true);
-    const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-    await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }, 8000));
+    
+    // Utilize getInbounds which already handles session caching and 401 retries
+    await this.getInbounds();
     return true;
   }
 
