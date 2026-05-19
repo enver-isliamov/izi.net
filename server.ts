@@ -47,7 +47,11 @@ function getRequestConfig(url: string, headers: any = {}, customTimeout?: number
   const isHttps = url.startsWith('https');
   const timeout = customTimeout || 7000; // Increased default timeout to 7s
   return {
-    headers,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      ...headers
+    },
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
     httpAgent: !isHttps ? sharedHttpAgent : undefined,
     timeout: timeout
@@ -243,6 +247,8 @@ class XUIService {
       return this.sessionCookie;
     }
     
+    let lastError: any = null;
+
     const tryLogin = async (path: string) => {
       const url = `${this.host}${this.basePath}${path}`;
       const payload = `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
@@ -250,44 +256,36 @@ class XUIService {
 
       try {
         // Try form-urlencoded first (default for most 3x-ui)
-        const response = await axios.post(
-          url,
-          payload,
-          getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded' })
-        );
+        const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded' }));
         return response;
       } catch (err: any) {
-        if (err.response?.status === 404) return null;
-
-        // Try JSON if not 404
+        lastError = err;
+        if (err.response?.status === 403) {
+           throw err; // Stop on 403 immediately (rate-limit or WAF block)
+        }
+        if (err.response?.status === 404) {
+           return null; // Return null so next path can be tried only on 404
+        }
+        // Try JSON if not successful and not 404/403
         try {
           const response = await axios.post(url, jsonPayload, getRequestConfig(url));
           return response;
         } catch (innerErr: any) {
-          if (innerErr.response?.data) {
-            console.error(`❌ 3x-ui login detail [${url}]:`, typeof innerErr.response.data === 'string' ? innerErr.response.data.substring(0, 200) : JSON.stringify(innerErr.response.data));
-          }
-          throw innerErr;
+          lastError = innerErr;
+          if (innerErr.response?.status === 403) throw innerErr; 
+          return null; // Return null so the next path can be tried
         }
       }
     };
 
     try {
-      // Try root path first (common for secret paths), then /login, then /panel/login
-      // VPN-04: Increased login timeout to 10s
-      let response = await tryLogin('');
-      if (!response) {
-        response = await tryLogin('/');
-      }
-      if (!response) {
-        response = await tryLogin('/login');
-      }
-      if (!response) {
-        response = await tryLogin('/panel/login');
-      }
+      // 3x-ui almost universally uses /login. Trying others blindly triggers rate limits.
+      let response = await tryLogin('/login');
+      if (!response) response = await tryLogin(''); // Some custom setups might proxy right to root
+      if (!response) response = await tryLogin('/panel/login');
       
       if (!response) {
-        throw new Error(`404: Could not find login endpoint at ${this.host}${this.basePath}. Please check your XUI host URL and secret path.`);
+        throw new Error(lastError?.message ? `Login failed. Last error: HTTP ${lastError.response?.status} ${lastError.message}` : `Could not find login endpoint at ${this.host}${this.basePath}.`);
       }
       
       if (response.data && response.data.success === false) {
