@@ -1883,6 +1883,44 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
   }
 });
 
+app.post('/api/admin/servers/:id/backup', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { instance: xuiInstance, server } = await getXuiForServer(id);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+
+    console.log(`[Backup] Starting cloud backup for server: ${server.name} (${id})`);
+    
+    const inbounds = await xuiInstance.getInbounds();
+    if (!inbounds || inbounds.length === 0) {
+      return res.status(400).json({ error: 'На сервере не найдено инбаундов для бэкапа. Убедитесь, что сервер онлайн.' });
+    }
+
+    const { error } = await supabase
+      .from('vpn_servers')
+      .update({ 
+        xui_config_state: { 
+          inbounds: inbounds, 
+          backup_at: new Date().toISOString(),
+          server_name: server.name,
+          ip: server.ip
+        } 
+      })
+      .eq('id', id);
+
+    if (error) throw error;
+
+    res.json({ 
+      success: true, 
+      message: 'Конфигурация сервера успешно сохранена в Supabase',
+      inbounds_count: inbounds.length
+    });
+  } catch (err: any) {
+    console.error(`[AdminBackup] Error for server ${id}:`, err.message);
+    res.status(500).json({ error: 'Ошибка при создании бэкапа: ' + err.message });
+  }
+});
+
 app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
   try {
     console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);

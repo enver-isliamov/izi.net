@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck, Cloud } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import axios from 'axios';
@@ -14,6 +14,7 @@ export function AdminServersList() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState<string | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState<string | null>(null);
   const [healthData, setHealthData] = useState<Record<string, boolean>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
@@ -117,6 +118,27 @@ export function AdminServersList() {
       }
     } finally {
       setIsChecking(null);
+    }
+  };
+
+  const cloudBackup = async (id: string) => {
+    try {
+      setIsBackingUp(id);
+      toast.loading('Создание бэкапа в облако...', { id: 'backup' });
+      const { data } = await axios.post(`/api/admin/servers/${id}/backup`, {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (data.success) {
+        toast.success(data.message, { id: 'backup' });
+        fetchServers();
+      } else {
+        toast.error(data.error || 'Ошибка бэкапа', { id: 'backup' });
+      }
+    } catch (e: any) {
+      console.error('Cloud backup error:', e);
+      toast.error('Критическая ошибка бэкапа: ' + (e.response?.data?.error || e.message), { id: 'backup' });
+    } finally {
+      setIsBackingUp(null);
     }
   };
 
@@ -381,6 +403,12 @@ export function AdminServersList() {
                   {server.is_default && (
                     <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full border border-blue-500/30 font-bold uppercase tracking-widest">Default</span>
                   )}
+                  {server.xui_config_state?.backup_at && (
+                    <span className="text-[9px] bg-green-500/10 text-green-400 px-1.5 py-0.5 rounded-full border border-green-500/20 flex items-center gap-1">
+                      <Cloud size={10} /> 
+                      {new Date(server.xui_config_state.backup_at).toLocaleDateString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground font-mono truncate max-w-[200px] md:max-w-xs">{server.ip}{server.domain ? ` (${server.domain})` : ''}</p>
                 
@@ -402,6 +430,14 @@ export function AdminServersList() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-0">
+              <button 
+                onClick={() => cloudBackup(server.id)}
+                disabled={isBackingUp === server.id}
+                className="p-2 md:p-2.5 bg-green-500/10 text-green-500 hover:bg-green-500/20 rounded-xl transition-colors disabled:opacity-50"
+                title="Бэкап конфигурации в Supabase"
+              >
+                {isBackingUp === server.id ? <RefreshCw className="animate-spin" size={18} /> : <Cloud size={18} />}
+              </button>
               <button 
                 onClick={() => checkConnection(server.id)}
                 disabled={isChecking === server.id}
