@@ -10,9 +10,8 @@ services:
     container_name: izinet-app
     restart: unless-stopped
     ports:
-      # Пробрасываем порт 3005 хоста на порт 3000 внутри контейнера,
-      # так как 3000 у вас занят AdGuard'ом.
-      - "3005:3000"
+      # Работаем напрямую через порт 3005 для совместимости с Cloudflare Origin Rules и Nginx
+      - "3005:3005"
     environment:
       - NODE_ENV=production
     env_file:

@@ -47,3 +47,46 @@ vless://uuid@194.50.94.28:443?security=reality&sni=google.com&fp=chrome&pbk=ВА
 - Flow: `xtls-rprx-vision` (обход детектирования по отпечатку TLS).
 
 > **ВЫВОД:** Документ RECO.MD — это отличный план. С точки зрения архитектуры проекта `izinet`, база уже готова. Остался один шаг: если вы хотите бесшовный автоматический переход, нам нужно будет отменить жесткую привязку `device <-> 1 server` и переписать код так, чтобы мы "размазывали" подписки пользователей по **всем доступным серверам сразу**. Дайте команду, если согласны перестроить логику.
+
+---
+
+## 5. Оптимизация Cloudflare для РФ (Решение ошибки 521 и Invalid URL)
+
+Если вы используете Cloudflare в режиме **"Proxied"** (оранжевое облако), сайт часто не открывается в РФ из-за блокировок IP Cloudflare.
+
+**Рекомендуемое решение:**
+1. Переключите Cloudflare в режим **"DNS Only"** (серое облако).
+2. Т.к. в этом режиме Cloudflare не делает "Origin Rules" (перенаправление на порт 3005) и не дает SSL, настройте **Nginx** прямо на основном сервере OneDash.
+
+### Конфигурация Nginx для вашего сервера:
+Создайте файл `/etc/nginx/sites-available/izinet.online`:
+```nginx
+server {
+    listen 80;
+    server_name izinet.online www.izinet.online;
+
+    location / {
+        proxy_pass http://localhost:3005;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### Команды для применения:
+```bash
+sudo ln -s /etc/nginx/sites-available/izinet.online /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+# Установка SSL (Let's Encrypt)
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d izinet.online -d www.izinet.online
+```
+
+Это решение позволит сайту работать в РФ максимально быстро, без ошибок 521 и без необходимости вводить `:3005` в браузере.

@@ -31,7 +31,7 @@ COPY --from=builder /app ./
 ENV NODE_ENV=production_docker
 
 # Открываем порт
-EXPOSE 3000
+EXPOSE 3005
 
 # Запуск
 CMD ["npm", "run", "start"]
