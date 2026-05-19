@@ -168,6 +168,7 @@ app.use((req, res, next) => {
   if (!isExcluded) {
     console.log(`[REQ] ${new Date().toISOString()} | ${req.method} ${req.path} 
       | Host: ${req.get('host')} 
+      | SNI/OriginalHost: ${req.get('x-forwarded-host') || 'N/A'}
       | Real-IP: ${req.get('x-real-ip') || req.ip}
       | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'}`);
   }

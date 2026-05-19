@@ -29,6 +29,7 @@
 - [x] **SYS-03: Cloudflare RF Patch** (Документировано решение с Fallback через X-Ray 443 -> 3005 для работы в РФ).
 - [x] **SYS-04: 3x-ui v3.0.2 Update Path** (Инструкция по обновлению панели предоставлена пользователю и применена).
 - [x] **SYS-05: Port 3005 Fallback Strategy** (Docker ограничен localhost:3005 для безопасности и исключения конфликтов с Nginx/Xray).
+- [x] **SYS-06: SNI Fallback Mismatch** (Исправлено перенаправление на Google 404 путем очистки поля SNI в Fallbacks 3x-ui для поддержки www и без-www доменов).
 
 ---
 
