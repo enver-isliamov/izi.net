@@ -132,6 +132,7 @@ app.use(cors({
                      origin.includes('localhost') ||
                      origin.includes('127.0.0.1') ||
                      origin.includes('194.50.94.28') ||
+                     origin.endsWith('izinet.online') ||
                      origin.includes('izinet.online'); 
 
     if (isAllowed) {
@@ -145,6 +146,15 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
   credentials: true
 }));
+
+// 🔍 Diagnostic logging for API requests
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    console.log(`[REQ] ${req.method} ${req.path} | Host: ${req.get('host')} | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'} | Origin: ${req.get('origin') || 'N/A'}`);
+  }
+  next();
+});
+
 app.set('trust proxy', true); // Required for Cloudflare reverse proxy
 app.use(express.json());
 const PORT = parseInt(process.env.PORT || '3000');
