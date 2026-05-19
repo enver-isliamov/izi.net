@@ -4041,10 +4041,16 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const fs = await import('fs');
     app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
       if (req.url.startsWith('/api')) return next();
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send("izinet API Backend is running");
+      }
     });
   }
 
