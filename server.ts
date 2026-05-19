@@ -4041,16 +4041,14 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    const fs = await import('fs');
     app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
       if (req.url.startsWith('/api')) return next();
-      const indexPath = path.join(distPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(200).send("izinet API Backend is running");
-      }
+      res.sendFile(path.join(distPath, 'index.html'), (err) => {
+        if (err) {
+          res.status(404).send('izinet Full-Stack Node.js App is running. Frontend build (dist/index.html) not found. Please run "npm run build".');
+        }
+      });
     });
   }
 
