@@ -3,7 +3,7 @@ name: izinet
 description: Use for any work in the izinet VPN subscription service: payments, wallet balance, subscriptions, 3x-ui provisioning, Supabase schema/RLS, Telegram bot, Vercel/VPS deployment, or project documentation.
 ---
 
-# izinet Project Skill
+# izinet Project Skill 
 
 ## Stack
 

@@ -2,7 +2,7 @@
 
 Дата актуализации: 2026-05-06
 
-## Backend smoke
+## Backend smoke 
 
 - [x] `GET http://YOUR_VPS_IP:3005/api/locations` возвращает активные серверы.
 - [x] `POST /api/pay/create` без `Authorization` возвращает `401`.

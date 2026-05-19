@@ -2,7 +2,7 @@
 
 > Актуально на 2026-05-06: Vercel обслуживает frontend и проксирует `/api/*` на VPS backend `YOUR_VPS_IP:3005`. Оплата работает через новый ENOT invoice API, а не через старый `enot.io/checkout`. Для точной схемы платежей см. `PAYMENT_SETUP.md`; для открытых проблем см. `fix.md`.
 
-## Шаг 1: Создайте Supabase проект
+## Шаг 1: Создайте Supabase проект 
 
 1. Перейдите на [supabase.com](https://supabase.com)
 2. Нажмите **"Start your project"**
