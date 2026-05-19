@@ -1921,6 +1921,52 @@ app.post('/api/admin/servers/:id/backup', adminOnly, async (req, res) => {
   }
 });
 
+app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { instance: xuiInstance, server } = await getXuiForServer(id);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+
+    console.log(`[Restore] Starting cloud restore for server: ${server.name} (${id})`);
+    
+    if (!server.xui_config_state || !server.xui_config_state.inbounds) {
+      return res.status(400).json({ error: 'В базе нет инбаундов для этого сервера. Сделайте бэкап сначала.' });
+    }
+    
+    const inbounds = server.xui_config_state.inbounds;
+    
+    // First, login
+    if (!xuiInstance['sessionCookie']) await xuiInstance.login();
+
+    const existingInbounds = await xuiInstance.getInbounds();
+    
+    for (const inbound of inbounds) {
+      const exists = existingInbounds.find((ei: any) => ei.port === inbound.port && ei.protocol === inbound.protocol);
+      if (exists) {
+        console.log(`[Restore] Deleting existing inbound on port ${inbound.port}`);
+        await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del/${exists.id}`, {}, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del`, { 'Cookie': xuiInstance['sessionCookie']}));
+      }
+      
+      const newInbound = { ...inbound };
+      delete newInbound.id;
+      newInbound.up = 0;
+      newInbound.down = 0;
+      
+      console.log(`[Restore] Creating inbound: ${inbound.remark} on port ${inbound.port}`);
+      await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, newInbound, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, { 'Cookie': xuiInstance['sessionCookie'], 'Content-Type': 'application/json' }));
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Конфигурация (инбаунды и клиенты) успешно восстановлена на сервер',
+      restored_inbounds: inbounds.length
+    });
+  } catch (err: any) {
+    console.error(`[AdminRestore] Error for server ${id}:`, err.message);
+    res.status(500).json({ error: 'Ошибка при восстановлении бэкапа: ' + err.message });
+  }
+});
+
 app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
   try {
     console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck, Cloud } from 'lucide-react';
+import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck, Cloud, CloudDownload } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import axios from 'axios';
@@ -15,6 +15,7 @@ export function AdminServersList() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState<string | null>(null);
   const [isBackingUp, setIsBackingUp] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState<string | null>(null);
   const [healthData, setHealthData] = useState<Record<string, boolean>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
@@ -139,6 +140,28 @@ export function AdminServersList() {
       toast.error('Критическая ошибка бэкапа: ' + (e.response?.data?.error || e.message), { id: 'backup' });
     } finally {
       setIsBackingUp(null);
+    }
+  };
+
+  const cloudRestore = async (id: string) => {
+    if (!window.confirm('ВНИМАНИЕ! Это действие удалит все текущие настройки на панели 3x-ui и восстановит настройки из бэкапа (включая всех пользователей и порты). Продолжить?')) return;
+    
+    try {
+      setIsRestoring(id);
+      toast.loading('Восстановление конфигурации...', { id: 'restore' });
+      const { data } = await axios.post(`/api/admin/servers/${id}/restore`, {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (data.success) {
+        toast.success(data.message, { id: 'restore' });
+      } else {
+        toast.error(data.error || 'Ошибка восстановления', { id: 'restore' });
+      }
+    } catch (e: any) {
+      console.error('Cloud restore error:', e);
+      toast.error('Ошибка восстановления: ' + (e.response?.data?.error || e.message), { id: 'restore' });
+    } finally {
+      setIsRestoring(null);
     }
   };
 
@@ -430,6 +453,14 @@ export function AdminServersList() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-0">
+              <button 
+                onClick={() => cloudRestore(server.id)}
+                disabled={isRestoring === server.id || !server.xui_config_state?.backup_at}
+                className="p-2 md:p-2.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 rounded-xl transition-colors disabled:opacity-50"
+                title="Восстановить конфигурацию из облака на сервер"
+              >
+                {isRestoring === server.id ? <RefreshCw className="animate-spin" size={18} /> : <CloudDownload size={18} />}
+              </button>
               <button 
                 onClick={() => cloudBackup(server.id)}
                 disabled={isBackingUp === server.id}
