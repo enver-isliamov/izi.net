@@ -126,15 +126,14 @@ app.use(cors({
     // Разрешаем запросы без origin (например, от мобильных приложений или системных инструментов)
     if (!origin) return callback(null, true);
     
-    const isAllowed = allowedOrigins.some(allowed => origin.startsWith(allowed)) || 
+    const isAllowed = !origin || 
+                     allowedOrigins.some(allowed => origin.startsWith(allowed)) || 
                      origin.includes('vercel.app') || 
                      origin.includes('run.app') || 
                      origin.includes('localhost') ||
                      origin.includes('127.0.0.1') ||
-                     origin.includes('194.50.94.28') ||
-                     origin.endsWith('izinet.online') ||
                      origin.includes('izinet.online') ||
-                     process.env.NODE_ENV !== 'production'; // Allow all in dev/staging to avoid blocks
+                     process.env.NODE_ENV !== 'production';
 
     if (isAllowed) {
       callback(null, true);
@@ -162,7 +161,7 @@ app.use((req, res, next) => {
 
 app.set('trust proxy', true); // Required for Cloudflare reverse proxy
 app.use(express.json());
-const PORT = parseInt(process.env.PORT || '3005');
+const PORT = parseInt(process.env.PORT || '3000');
 
 // --- XUI Service ---
 class XUIService {
