@@ -10,8 +10,9 @@ services:
     container_name: izinet-app
     restart: unless-stopped
     ports:
-      # Работаем напрямую через порт 3005 для совместимости с Cloudflare Origin Rules и Nginx
-      - "3005:3005"
+      # Работаем через порт 3005. 
+      # Внешний трафик будет приходить сюда через Fallback от Xray (порт 443)
+      - "127.0.0.1:3005:3005"
     environment:
       - NODE_ENV=production
     env_file:
