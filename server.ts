@@ -107,6 +107,21 @@ if (!supabaseUrl || !supabaseServiceKey) {
 }
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// 🔍 Startup health check for Database
+async function checkDatabase() {
+  try {
+    const { data, error } = await supabase.from('servers').select('count').single();
+    if (error) {
+      console.error('❌ Database connection error on startup:', error.message);
+    } else {
+      console.log('✅ Database connected successfully');
+    }
+  } catch (err) {
+    console.error('❌ Failed to connect to database:', err);
+  }
+}
+checkDatabase();
+
 //@ts-ignore
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
