@@ -133,7 +133,8 @@ app.use(cors({
                      origin.includes('127.0.0.1') ||
                      origin.includes('194.50.94.28') ||
                      origin.endsWith('izinet.online') ||
-                     origin.includes('izinet.online'); 
+                     origin.includes('izinet.online') ||
+                     process.env.NODE_ENV !== 'production'; // Allow all in dev/staging to avoid blocks
 
     if (isAllowed) {
       callback(null, true);
@@ -150,7 +151,11 @@ app.use(cors({
 // 🔍 Diagnostic logging for API requests
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) {
-    console.log(`[REQ] ${req.method} ${req.path} | Host: ${req.get('host')} | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'} | Origin: ${req.get('origin') || 'N/A'}`);
+    console.log(`[REQ] ${req.method} ${req.path} 
+      | Host: ${req.get('host')} 
+      | X-Forwarded-Host: ${req.get('x-forwarded-host') || 'N/A'}
+      | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'} 
+      | Origin: ${req.get('origin') || 'N/A'}`);
   }
   next();
 });
