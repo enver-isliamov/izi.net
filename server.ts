@@ -168,6 +168,7 @@ const PORT = parseInt(process.env.PORT || '3005');
 class XUIService {
   public host: string;
   public basePath: string = "";
+  public displayDomain: string = "";
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
@@ -430,26 +431,17 @@ class XUIService {
     const security = streamSettings.security || 'none';
     const port = inbound.port;
     
-    let hostName = 'server.izinet.app';
-    let isIP = false;
-    try {
-      const u = new URL(this.host);
-      hostName = u.hostname;
-      // Check if hostname is an IP
-      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-    } catch (e) {
-      hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
-      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-    }
-
+    let hostName = this.displayDomain || 'server.izinet.app';
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
+
+    const isIPOrEmpty = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName) || hostName === '';
 
     if (security === 'reality') {
       const realitySettings = streamSettings.realitySettings || {};
       // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
       const rs = realitySettings.settings || realitySettings;
       
-      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIP ? 'google.com' : hostName);
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIPOrEmpty ? 'google.com' : hostName);
       const pbk = rs.publicKey || realitySettings.publicKey || '';
       
       if (!pbk || pbk.includes('m_G-oZ_9a6')) {
@@ -466,6 +458,7 @@ class XUIService {
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
       const tlsSettings = streamSettings.tlsSettings || {};
+      const isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
       const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
       let sniPart = sni ? `&sni=${sni}` : "";
       return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
@@ -799,6 +792,10 @@ async function getXuiForServer(serverId?: string | null) {
     username: server.username,
     password: server.password
   });
+
+  if (server.domain && !server.domain.startsWith('/')) {
+    newInstance.displayDomain = server.domain;
+  }
 
   xuiInstances.set(serverId, newInstance);
   console.log(`[XUI] Initialized instance for server "${server.name}" using database credentials (Host: ${host}, User: ${server.username})`);
