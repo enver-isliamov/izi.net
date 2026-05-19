@@ -154,14 +154,15 @@ app.use((req, res, next) => {
       | Host: ${req.get('host')} 
       | X-Forwarded-Host: ${req.get('x-forwarded-host') || 'N/A'}
       | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'} 
+      | CF-Visitor: ${req.get('cf-visitor') || 'N/A'}
       | Origin: ${req.get('origin') || 'N/A'}`);
   }
   next();
 });
 
-app.set('trust proxy', true); // Required for Cloudflare reverse proxy
+app.set('trust proxy', 1); // Trust first proxy (Cloudflare/Nginx)
 app.use(express.json());
-const PORT = parseInt(process.env.PORT || '3000');
+const PORT = parseInt(process.env.PORT || '3005');
 
 // --- XUI Service ---
 class XUIService {
