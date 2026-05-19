@@ -169,6 +169,7 @@ app.use((req, res, next) => {
     console.log(`[REQ] ${new Date().toISOString()} | ${req.method} ${req.path} 
       | Host: ${req.get('host')} 
       | SNI/OriginalHost: ${req.get('x-forwarded-host') || 'N/A'}
+      | X-Forwarded-Proto: ${req.get('x-forwarded-proto') || 'http'}
       | Real-IP: ${req.get('x-real-ip') || req.ip}
       | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'}`);
   }
