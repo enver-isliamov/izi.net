@@ -206,9 +206,32 @@ class XUIService {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
 
-    
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
+    }
+
+    // Set a default display domain based on the host before we potentially rewrite it for internal Docker net
+    try {
+      if (host) {
+        const url = new URL(host);
+        this.displayDomain = url.hostname;
+      }
+    } catch (_) {}
+
+    // Internal routing optimization:
+    // If the server connects to the LOCAL server ('194.50.94.28' or 'izinet.online' or 'localhost' or '127.0.0.1'),
+    // we bypass the external port/IP and talk directly to the 'x3-ui:2053' service in the Docker network.
+    // This solves loopback blocks (NAT loopback), port blockage, and UFW issues perfectly.
+    if (host && (host.includes('194.50.94.28') || host.includes('izinet.online') || host.includes('localhost') || host.includes('127.0.0.1'))) {
+      const originalHost = host;
+      try {
+        const parsedUrl = new URL(host);
+        host = `http://x3-ui:2053${parsedUrl.pathname}`;
+        console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+      } catch (e) {
+        host = host.replace(/^(https?:\/\/)?([^\/]+)(:\d+)?/, 'http://x3-ui:2053');
+        console.log(`[XUI Router] Optimized local routing (fallback regex): rewritten ${originalHost} -> ${host}`);
+      }
     }
 
     // Handle secret path (e.g. https://ip:port/secret_path)
