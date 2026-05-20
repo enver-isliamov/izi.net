@@ -1388,6 +1388,143 @@ app.post('/api/admin/settings', adminOnly, async (req, res) => {
   }
 });
 
+// Helper to get Cloudflare authentication headers from DB (with process.env fallbacks)
+async function getCloudflareHeaders() {
+  const { data: dbSettings } = await supabase.from('settings').select('*');
+  const settingsMap: Record<string, string> = {};
+  dbSettings?.forEach((s: any) => settingsMap[s.key] = s.value);
+
+  const token = (settingsMap['CLOUDFLARE_API_TOKEN'] || process.env.CLOUDFLARE_API_TOKEN || '').trim();
+  const email = (settingsMap['CLOUDFLARE_EMAIL'] || process.env.CLOUDFLARE_EMAIL || '').trim();
+  const apiKey = (settingsMap['CLOUDFLARE_API_KEY'] || process.env.CLOUDFLARE_API_KEY || '').trim();
+
+  if (token) {
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+  } else if (email && apiKey) {
+    return {
+      'X-Auth-Email': email,
+      'X-Auth-Key': apiKey,
+      'Content-Type': 'application/json'
+    };
+  } else {
+    throw new Error('Учётные данные Cloudflare не настроены. Пожалуйста, укажите API Токен или Email + Global API Key в настройках.');
+  }
+}
+
+// Cloudflare Integration Endpoints
+app.get('/api/admin/cloudflare/zones', adminOnly, async (req, res) => {
+  try {
+    const headers = await getCloudflareHeaders();
+    console.log('🌐 [Cloudflare] Fetching zones list...');
+    const response = await axios.get('https://api.cloudflare.com/client/v4/zones?per_page=50', { headers, timeout: 10000 });
+    
+    if (!response.data || !response.data.success) {
+      throw new Error(response.data?.errors?.[0]?.message || 'Ошибка интеграции Cloudflare API');
+    }
+
+    const zones = response.data.result.map((z: any) => ({
+      id: z.id,
+      name: z.name,
+      status: z.status
+    }));
+
+    res.json(zones);
+  } catch (err: any) {
+    console.error('❌ [Cloudflare] Error getting zones:', err.response?.data || err.message);
+    const apiError = err.response?.data?.errors?.[0]?.message || err.message;
+    res.status(500).json({ error: apiError });
+  }
+});
+
+app.post('/api/admin/cloudflare/bind', adminOnly, async (req, res) => {
+  const { zoneId, domain, ip, proxied, serverId } = req.body;
+
+  if (!zoneId || !domain || !ip) {
+    return res.status(400).json({ error: 'Необходимы параметры: zoneId, domain, ip' });
+  }
+
+  try {
+    const headers = await getCloudflareHeaders();
+    const cleanDomain = domain.trim().toLowerCase();
+    const cleanIp = ip.trim();
+
+    console.log(`🌐 [Cloudflare] Checking existing DNS record for domain: ${cleanDomain}...`);
+
+    // Check if there is an existing A record
+    const listUrl = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=A&name=${cleanDomain}`;
+    const listResp = await axios.get(listUrl, { headers, timeout: 10000 });
+    
+    if (!listResp.data || !listResp.data.success) {
+      throw new Error(listResp.data?.errors?.[0]?.message || 'Не удалось получить DNS записи с Cloudflare');
+    }
+
+    const records = listResp.data.result;
+    let dnsResult;
+
+    if (records.length > 0) {
+      const recordId = records[0].id;
+      console.log(`🌐 [Cloudflare] Updating existing DNS A record ${recordId} to ${cleanIp}...`);
+      const updateResp = await axios.put(
+        `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${recordId}`,
+        {
+          type: 'A',
+          name: cleanDomain,
+          content: cleanIp,
+          ttl: 1, // Auto
+          proxied: !!proxied
+        },
+        { headers, timeout: 10000 }
+      );
+      dnsResult = updateResp.data;
+    } else {
+      console.log(`🌐 [Cloudflare] Creating new DNS A record for ${cleanDomain} pointing to ${cleanIp}...`);
+      const createResp = await axios.post(
+        `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`,
+        {
+          type: 'A',
+          name: cleanDomain,
+          content: cleanIp,
+          ttl: 1, // Auto
+          proxied: !!proxied
+        },
+        { headers, timeout: 10000 }
+      );
+      dnsResult = createResp.data;
+    }
+
+    if (!dnsResult || !dnsResult.success) {
+      throw new Error(dnsResult?.errors?.[0]?.message || 'Не удалось сохранить запись в Cloudflare');
+    }
+
+    // If serverId is provided, automatically update the domain inside the database!
+    if (serverId) {
+      console.log(`🌐 [Cloudflare] Associating domain ${cleanDomain} with VPN Server ID ${serverId}...`);
+      const { error: srvErr } = await supabase
+        .from('vpn_servers')
+        .update({ domain: cleanDomain })
+        .eq('id', serverId);
+
+      if (srvErr) {
+        throw new Error(`DNS изменен, но не удалось обновить домен сервера в базе данных: ${srvErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Домен ${cleanDomain} успешно привязан к IP ${cleanIp}! DNS запись обновлена в Cloudflare${serverId ? ' и обновлена в настройках сервера.' : '.'}`,
+      result: dnsResult.result
+    });
+
+  } catch (err: any) {
+    console.error('❌ [Cloudflare Bind Error]:', err.response?.data || err.message);
+    const apiError = err.response?.data?.errors?.[0]?.message || err.message;
+    res.status(500).json({ error: apiError });
+  }
+});
+
 // --- Admin API Routes ---
 
 app.get('/api/admin/stats', adminOnly, async (req, res) => {

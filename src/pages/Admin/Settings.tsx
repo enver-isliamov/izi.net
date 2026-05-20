@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -17,15 +17,42 @@ export default function AdminSettings() {
     ENOT_MERCHANT_ID: '',
     ENOT_SECRET_KEY: '',
     ENOT_SECRET_KEY2: '',
+    CLOUDFLARE_EMAIL: '',
+    CLOUDFLARE_API_KEY: '',
+    CLOUDFLARE_API_TOKEN: '',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
 
+  // States for Cloudflare Domain Binder Tool
+  const [servers, setServers] = useState<any[]>([]);
+  const [zones, setZones] = useState<any[]>([]);
+  const [isLoadingZones, setIsLoadingZones] = useState(false);
+  const [isBinding, setIsBinding] = useState(false);
+  const [bindingLogs, setBindingLogs] = useState<string[]>(['Жду получения списка зон...']);
+
+  const [selectedZone, setSelectedZone] = useState<any>(null);
+  const [subdomain, setSubdomain] = useState('');
+  const [selectedServerId, setSelectedServerId] = useState('panel'); // 'panel' or server.id
+  const [isProxied, setIsProxied] = useState(false);
+
   useEffect(() => {
     fetchSettings();
+    fetchServers();
   }, [session]);
+
+  const fetchServers = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/servers', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      setServers(data || []);
+    } catch (e) {
+      console.error('Failed to fetch servers:', e);
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -70,6 +97,9 @@ export default function AdminSettings() {
         ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim(),
         ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim(),
         ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim(),
+        CLOUDFLARE_EMAIL: settings.CLOUDFLARE_EMAIL?.trim(),
+        CLOUDFLARE_API_KEY: settings.CLOUDFLARE_API_KEY?.trim(),
+        CLOUDFLARE_API_TOKEN: settings.CLOUDFLARE_API_TOKEN?.trim(),
       };
       
       const payload = Object.entries(cleanSettings).map(([key, value]) => ({ key, value }));
@@ -85,6 +115,94 @@ export default function AdminSettings() {
       toast.error(e.response?.data?.error || 'Ошибка при сохранении');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLoadZones = async () => {
+    try {
+      setIsLoadingZones(true);
+      setBindingLogs(['[Система] Запрос списка зон из Cloudflare API через наш backend...']);
+      const { data } = await axios.get('/api/admin/cloudflare/zones', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      setZones(data || []);
+      if (data && data.length > 0) {
+        setSelectedZone(data[0]);
+        setBindingLogs(prev => [...prev, `[Успех] Загружено ${data.length} зон из Cloudflare! Выберите нужную зону в выпадающем списке.`]);
+        toast.success('Список DNS зон успешно получен!');
+      } else {
+        setBindingLogs(prev => [...prev, '[Внимание] Зоны не найдены в вашем аккаунте. Убедитесь, что токен имеет права "Zone.DNS".']);
+        toast.error('Доступные DNS зоны не найдены');
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setBindingLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Не удалось загрузить зоны: ' + errMsg);
+    } finally {
+      setIsLoadingZones(false);
+    }
+  };
+
+  const handleBindDomain = async () => {
+    if (!selectedZone) {
+      toast.error('Пожалуйста, выберите DNS зону');
+      return;
+    }
+    
+    let targetIp = '';
+    let serverName = '';
+    if (selectedServerId === 'panel') {
+      targetIp = window.location.hostname;
+      serverName = 'Главный VPS панели';
+    } else {
+      const srv = servers.find(s => s.id === selectedServerId);
+      if (srv) {
+        targetIp = srv.ip;
+        serverName = srv.name;
+      }
+    }
+
+    if (!targetIp || targetIp === 'localhost' || targetIp.includes('127.0.0.1')) {
+      setBindingLogs(prev => [...prev, `[Внимание] Не удалось автоматически определить внешний IP для панели (${targetIp}). Для VPN серверов IP подтянется корректно.`]);
+    }
+
+    const recName = subdomain.trim() === '' || subdomain.trim() === '@' 
+      ? selectedZone.name 
+      : `${subdomain.trim()}.${selectedZone.name}`;
+
+    try {
+      setIsBinding(true);
+      setBindingLogs(prev => [
+        ...prev,
+        `[Старт] Привязка домена "${recName}" к IP "${targetIp}" (${serverName})...`,
+        `[Процесс 1/2] Отправка запроса на Cloudflare (проксирование=${isProxied ? 'ВКЛ' : 'ВЫКЛ'})...`
+      ]);
+
+      const { data } = await axios.post('/api/admin/cloudflare/bind', {
+        zoneId: selectedZone.id,
+        domain: recName,
+        ip: targetIp,
+        proxied: isProxied,
+        serverId: selectedServerId === 'panel' ? null : selectedServerId
+      }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+
+      setBindingLogs(prev => [
+        ...prev,
+        `[Процесс 2/2] ${data.message}`,
+        `[Успех] Домен привязан к серверу! Настройки обновлены. 🚀`
+      ]);
+      toast.success('Домен привязан!');
+      if (selectedServerId !== 'panel') {
+        fetchServers();
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setBindingLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Ошибка привязки: ' + errMsg);
+    } finally {
+      setIsBinding(false);
     }
   };
 
@@ -239,6 +357,250 @@ export default function AdminSettings() {
                   2. В первое поле ключа вставьте <b>секретный ключ кассы</b> для заголовка x-api-key. <br />
                   3. Во второе поле вставьте <b>дополнительный ключ</b> для проверки HMAC-подписи webhook.
                 </p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Cloudflare API Integration */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+            <div className="p-2 bg-orange-500/10 rounded-lg text-orange-400">
+              <Cloud size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Cloudflare API & DNS Integration</h2>
+              <p className="text-xs text-muted-foreground">Настройки интеграции с Cloudflare для автоматического управления DNS-записями</p>
+            </div>
+          </div>
+
+          <div className="grid gap-6">
+            <div className="p-4 bg-zinc-500/5 border border-white/5 rounded-xl text-xs space-y-1 text-zinc-400">
+              <p className="font-semibold text-zinc-300">Инструкция безопасности:</p>
+              <p>Вы можете использовать либо современный <b>API Token</b> (Рекомендуется, нужны права Zone.DNS:Edit), либо традиционную связку <b>Global API Key + Email</b>.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Cloudflare API Token</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-orange-400 transition-colors">
+                    <Key size={18} />
+                  </div>
+                  <input
+                    type={showKeys.CLOUDFLARE_API_TOKEN ? "text" : "password"}
+                    value={settings.CLOUDFLARE_API_TOKEN || ''}
+                    onChange={(e) => setSettings({ ...settings, CLOUDFLARE_API_TOKEN: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-orange-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm"
+                    placeholder="Рекомендуется: Токен DNS редактирования"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleKey('CLOUDFLARE_API_TOKEN')}
+                    className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {showKeys.CLOUDFLARE_API_TOKEN ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Global API Key</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-orange-400 transition-colors">
+                    <Key size={18} />
+                  </div>
+                  <input
+                    type={showKeys.CLOUDFLARE_API_KEY ? "text" : "password"}
+                    value={settings.CLOUDFLARE_API_KEY || ''}
+                    onChange={(e) => setSettings({ ...settings, CLOUDFLARE_API_KEY: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-orange-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm"
+                    placeholder="Используйте, если нет токена API"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleKey('CLOUDFLARE_API_KEY')}
+                    className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {showKeys.CLOUDFLARE_API_KEY ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Email аккаунта Cloudflare</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-orange-400 transition-colors">
+                  <Globe size={18} />
+                </div>
+                <input
+                  type="email"
+                  value={settings.CLOUDFLARE_EMAIL || ''}
+                  onChange={(e) => setSettings({ ...settings, CLOUDFLARE_EMAIL: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-orange-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                  placeholder="Необходим ТОЛЬКО для Global API Key"
+                />
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* 1-Click Domain Binding Widget */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center justify-between pb-4 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-500/10 rounded-lg text-green-400">
+                <Globe size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-white">Привязка домена в 2 клика</h2>
+                <p className="text-xs text-muted-foreground">Быстрое перенаправление DNS в Cloudflare и настройка узлов панели</p>
+              </div>
+            </div>
+            
+            <button
+              type="button"
+              onClick={handleLoadZones}
+              disabled={isLoadingZones}
+              className="flex items-center gap-2 px-4 py-2 bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded-xl transition-colors font-medium text-xs border border-orange-500/20 active:scale-95 disabled:opacity-50"
+            >
+              {isLoadingZones ? <RefreshCw className="animate-spin" size={12} /> : <Cloud size={12} />}
+              Шаг 1: Загрузить домены
+            </button>
+          </div>
+
+          <div className="grid gap-6">
+            {zones.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* DNS Zone Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-mono text-zinc-400">DNS Зона (Основной домен)</label>
+                  <select
+                    value={selectedZone?.id || ''}
+                    onChange={(e) => {
+                      const zone = zones.find(z => z.id === e.target.value);
+                      setSelectedZone(zone);
+                    }}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-orange-500/50 transition-colors font-mono text-sm"
+                  >
+                    {zones.map(z => (
+                      <option key={z.id} value={z.id} className="bg-neutral-900 text-white">
+                        {z.name} (ID: {z.id.substring(0,6)}...)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Subdomain configure */}
+                <div className="space-y-2">
+                  <label className="text-xs font-mono text-zinc-400">Субдомен (Subdomain)</label>
+                  <input
+                    type="text"
+                    value={subdomain}
+                    onChange={(e) => setSubdomain(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-orange-500/50 transition-colors font-mono text-sm"
+                    placeholder="Например: node1 или @ для корня"
+                  />
+                </div>
+
+                {/* Target VPS Server destination */}
+                <div className="space-y-2">
+                  <label className="text-xs font-mono text-zinc-400">Назначение привязки (Сервер)</label>
+                  <select
+                    value={selectedServerId}
+                    onChange={(e) => setSelectedServerId(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-orange-500/50 transition-colors font-mono text-sm"
+                  >
+                    <option value="panel" className="bg-neutral-900 text-white">
+                      Главный VPS панели (Эта система: {window.location.hostname})
+                    </option>
+                    {servers.map(s => (
+                      <option key={s.id} value={s.id} className="bg-neutral-900 text-white">
+                        {s.name} ({s.location_code || 'VPN Node'}) — IP {s.ip}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Toggle Cloudflare Proxy (grey vs orange cloud) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-mono text-zinc-400 flex items-center gap-1">
+                    Проксирование Cloudflare (CDN)
+                  </label>
+                  <div className="flex items-center gap-4 py-2 pl-1 bg-white/[0.02] border border-white/5 rounded-xl px-4">
+                    <input
+                      type="checkbox"
+                      id="cf-proxied-toggle"
+                      checked={isProxied}
+                      onChange={(e) => setIsProxied(e.target.checked)}
+                      className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-orange-600 focus:ring-orange-500 focus:ring-offset-black"
+                    />
+                    <label htmlFor="cf-proxied-toggle" className="text-xs text-zinc-300 cursor-pointer select-none">
+                      {isProxied ? (
+                        <span className="text-orange-400 font-semibold">Оранжевое облако (Рекомендуется только для сайта панели)</span>
+                      ) : (
+                        <span className="text-zinc-400">Серое облако (ОБЯЗАТЕЛЬНО для VPN нод VLESS / Reality)</span>
+                      )}
+                    </label>
+                  </div>
+                </div>
+
+                {/*实时预览 Real-time domain preview */}
+                <div className="md:col-span-2 p-4 bg-white/[0.03] border border-white/5 rounded-xl flex items-center justify-between text-xs font-mono text-zinc-300">
+                  <span className="text-zinc-400">Результирующее доменное имя:</span>
+                  <span className="text-orange-400 font-bold select-all">
+                    {subdomain.trim() === '' || subdomain.trim() === '@' 
+                      ? selectedZone.name 
+                      : `${subdomain.trim()}.${selectedZone.name}`}
+                  </span>
+                </div>
+
+                <div className="md:col-span-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleBindDomain}
+                    disabled={isBinding}
+                    className="w-full md:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-xl transition-all font-bold text-xs shadow-lg shadow-green-600/10 active:scale-95"
+                  >
+                    {isBinding ? <RefreshCw className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+                    Шаг 2: Привязать домен за 1 клик!
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 text-center bg-black/10 rounded-2xl border border-dashed border-white/5 space-y-3">
+                <Globe className="mx-auto text-zinc-500 animate-pulse" size={40} />
+                <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+                  Сохраните настройки Cloudflare API (Email + Ключ / Токен) выше, а затем нажмите <b>«Шаг 1: Загрузить домены»</b>, чтобы активировать мастер быстрой привязки.
+                </p>
+              </div>
+            )}
+
+            {/* Interactive Domain Binding Console log outputs */}
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Статус интеграции и логи DNS:</label>
+              <div className="bg-black/60 font-mono text-xs p-4 rounded-xl border border-white/5 space-y-1.5 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 select-none">
+                {bindingLogs.map((log, idx) => {
+                  let colorClass = 'text-zinc-400';
+                  if (log.startsWith('[Ошибка]')) colorClass = 'text-red-400 font-bold';
+                  if (log.startsWith('[Успех]')) colorClass = 'text-green-400 font-semibold';
+                  if (log.startsWith('[Старт]') || log.startsWith('[Система]')) colorClass = 'text-blue-400';
+                  return (
+                    <div key={idx} className="flex gap-2">
+                      <span className="text-zinc-600">[{idx+1}]</span>
+                      <span className={colorClass}>{log}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
