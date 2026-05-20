@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Check, 
   ChevronRight, 
@@ -28,6 +29,7 @@ const steps = [
 ];
 
 export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, targetDeviceName, hasActiveSub = false, existingDeviceCount = 0 }: { onClose: () => void, forceNew?: boolean, targetDeviceId?: string, targetDeviceName?: string, hasActiveSub?: boolean, existingDeviceCount?: number }) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [periods, setPeriods] = useState<any[]>([]);
@@ -387,7 +389,7 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
                   <div className="flex-1 text-sm">
                     Недостаточно средств на балансе. Нужно еще {(totalPrice - balance).toFixed(2)} ₽
                   </div>
-                  <Button size="sm" variant="destructive" className="rounded-lg h-8" onClick={() => window.location.reload()}>
+                  <Button size="sm" variant="destructive" className="rounded-lg h-8" onClick={() => navigate('/wallet')}>
                     Пополнить
                   </Button>
                 </div>

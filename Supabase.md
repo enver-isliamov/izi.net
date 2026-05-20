@@ -172,42 +172,53 @@ drop policy if exists "Admins can manage transactions" on public.transactions;
 drop policy if exists "Admins can manage settings" on public.settings;
 drop policy if exists "Public access to telegram tokens" on public.telegram_linking_tokens;
 
+-- Хелпер-функция безопасной проверки роли (security definer) во избежание рекурсии
+create or replace function public.is_admin()
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.users 
+    where id = auth.uid() and role in ('admin', 'superadmin')
+  );
+end;
+$$ language plpgsql security definer;
+
 -- Политики пользователей (users)
 create policy "Users can view own data" on public.users for select using (auth.uid() = id);
 create policy "Users can update own data" on public.users for update using (auth.uid() = id);
 create policy "Admins can manage users" on public.users for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики балансов (balances)
 create policy "Users can view own balance" on public.balances for select using (auth.uid() = user_id);
 create policy "Admins can manage balances" on public.balances for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики серверов (vpn_servers)
 create policy "Users can select active servers" on public.vpn_servers for select using (is_active = true);
 create policy "Admins can manage servers" on public.vpn_servers for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики подписок (subscriptions)
 create policy "Users can view own subscriptions" on public.subscriptions for select using (auth.uid() = user_id);
 create policy "Admins can manage subscriptions" on public.subscriptions for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики устройств (devices)
 create policy "Users can manage own devices" on public.devices for all using (auth.uid() = user_id);
 create policy "Admins can manage devices" on public.devices for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики тикетов поддержки (support_tickets)
 create policy "Users can view own tickets" on public.support_tickets for select using (auth.uid() = user_id);
 create policy "Users can insert own tickets" on public.support_tickets for insert with check (auth.uid() = user_id);
 create policy "Admins can manage tickets" on public.support_tickets for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики сообщений тикетов (support_messages)
@@ -218,25 +229,25 @@ create policy "Users can send messages to their tickets" on public.support_messa
   sender = 'user' and exists (select 1 from public.support_tickets where id = ticket_id and user_id = auth.uid())
 );
 create policy "Admins can manage support messages" on public.support_messages for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики счетов пополнений (payments)
 create policy "Users can view own payments" on public.payments for select using (auth.uid() = user_id);
 create policy "Users can insert own payments" on public.payments for insert with check (auth.uid() = user_id);
 create policy "Admins can manage payments" on public.payments for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики транзакций (transactions)
 create policy "Users can view own transactions" on public.transactions for select using (auth.uid() = user_id);
 create policy "Admins can manage transactions" on public.transactions for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики глобальных настроек (settings)
 create policy "Admins can manage settings" on public.settings for all using (
-  exists (select 1 from public.users where id = auth.uid() and role in ('admin', 'superadmin'))
+  public.is_admin()
 );
 
 -- Политики токенов авторизации Telegram
