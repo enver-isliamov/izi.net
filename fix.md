@@ -28,8 +28,9 @@
 - [x] **SYS-02: Docker Port Standard** (Устранено расхождение портов в Dockerfile и docker-compose.yml: 3005:3005).
 - [x] **SYS-03: Cloudflare RF Patch** (Документировано решение с Fallback через X-Ray 443 -> 3005 для работы в РФ).
 - [x] **SYS-04: 3x-ui v3.0.2 Update Path** (Инструкция по обновлению панели предоставлена пользователю и применена).
-- [x] **SYS-05: Port 3005 Fallback Strategy** (Docker ограничен localhost:3005 для безопасности и исключения конфликтов с Nginx/Xray).
+- [x] **SYS-05: Port 3005 Fallback Strategy** (Docker ограничен localhost:3005 для безопасности и исключения конфликтов с Nginx/Xray. Если нужен прямой доступ по IP:3005, порт открывается в docker-compose.yml без привязки к 127.0.0.1).
 - [x] **SYS-06: SNI Fallback Mismatch** (Исправлено перенаправление на Google 404 путем очистки поля SNI в Fallbacks 3x-ui и отключения Proxy Cloudflare).
+- [x] **BUG-14: Superadmin Bypass & Auth Fix** (Решена проблема, когда администратор `enverphoto@gmail.com` не распознавался как суперадмин из-за рассинхронизации сессий или задержек базы данных. Добавлен надежный локальный и серверный обход проверок роли для главного e-mail).
 - [ ] **SYS-07: HTTPS Force Redirect** (Планируется: принудительный редирект на HTTPS в коде Express после подтверждения работы Fallback).
 
 ---
