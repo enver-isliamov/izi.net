@@ -16,6 +16,7 @@ export function AdminServersList() {
   const [isChecking, setIsChecking] = useState<string | null>(null);
   const [isBackingUp, setIsBackingUp] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState<string | null>(null);
+  const [restoreModalTarget, setRestoreModalTarget] = useState<any | null>(null);
   const [healthData, setHealthData] = useState<Record<string, { online: boolean, error?: string }>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
@@ -143,13 +144,13 @@ export function AdminServersList() {
     }
   };
 
-  const cloudRestore = async (id: string) => {
+  const cloudRestore = async (id: string, sourceId?: string) => {
     if (!window.confirm('ВНИМАНИЕ! Это действие удалит все текущие настройки на панели 3x-ui и восстановит настройки из бэкапа (включая всех пользователей и порты). Продолжить?')) return;
     
     try {
       setIsRestoring(id);
       toast.loading('Восстановление конфигурации...', { id: 'restore' });
-      const { data } = await axios.post(`/api/admin/servers/${id}/restore`, {}, {
+      const { data } = await axios.post(`/api/admin/servers/${id}/restore`, { sourceId }, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       if (data.success) {
@@ -396,6 +397,104 @@ export function AdminServersList() {
             </form>
           </motion.div>
         )}
+
+        {restoreModalTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-[#151515] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl overflow-hidden"
+            >
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <h3 className="font-semibold text-white text-base">Синхронизация конфигурации</h3>
+                <button 
+                  onClick={() => setRestoreModalTarget(null)}
+                  className="text-muted-foreground hover:text-white transition-colors p-1"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Выберите конфигурацию (инбаунды и порты), которую вы хотите скопировать и применить на сервер <span className="text-blue-400 font-bold">{restoreModalTarget.name}</span>:
+                </p>
+                <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/25 rounded-lg text-[11px] text-yellow-500 leading-normal">
+                  ⚠️ <strong>Внимание:</strong> Текущие инбаунды на целевом сервере будут полностью удалены и заменены на новые. Подключения пользователей будут перегенерированы по новым портам.
+                </div>
+              </div>
+
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
+                {servers
+                  .filter(s => s.xui_config_state?.backup_at)
+                  .map(sourceServer => {
+                    const isOwn = sourceServer.id === restoreModalTarget.id;
+                    const backupDate = new Date(sourceServer.xui_config_state.backup_at).toLocaleString([], {
+                      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                    });
+                    const count = sourceServer.xui_config_state.inbounds?.length || 0;
+
+                    return (
+                      <div 
+                        key={sourceServer.id}
+                        className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                          isOwn 
+                            ? 'bg-blue-600/5 border-blue-500/20 hover:border-blue-500/40' 
+                            : 'bg-white/5 border-white/5 hover:border-white/15'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-semibold text-white truncate">{sourceServer.name}</span>
+                            {isOwn && (
+                              <span className="text-[8px] bg-blue-500/25 text-blue-400 border border-blue-500/30 px-1 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">Целевой</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-mono">
+                            <span>Бэкап: {backupDate}</span>
+                            <span>•</span>
+                            <span className="text-indigo-400">{count} инбаундов</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const targetId = restoreModalTarget.id;
+                            const sourceId = sourceServer.id;
+                            setRestoreModalTarget(null);
+                            cloudRestore(targetId, sourceId);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-all shrink-0 shadow-md"
+                        >
+                          Выбрать
+                        </button>
+                      </div>
+                    );
+                  })}
+                
+                {servers.filter(s => s.xui_config_state?.backup_at).length === 0 && (
+                  <div className="text-center py-6 text-muted-foreground text-xs">
+                    Нет доступных бэкапов в облаке. Сначала сделайте бэкап с эталонного сервера (кнопка ☁️).
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-white/5">
+                <button
+                  onClick={() => setRestoreModalTarget(null)}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs text-white transition-all font-medium"
+                >
+                  Отмена
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
@@ -454,8 +553,8 @@ export function AdminServersList() {
 
             <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-0">
               <button 
-                onClick={() => cloudRestore(server.id)}
-                disabled={isRestoring === server.id || !server.xui_config_state?.backup_at}
+                onClick={() => setRestoreModalTarget(server)}
+                disabled={isRestoring === server.id || !(Array.isArray(servers) && servers.some(s => s.xui_config_state?.backup_at))}
                 className="p-2 md:p-2.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 rounded-xl transition-colors disabled:opacity-50"
                 title="Восстановить конфигурацию из облака на сервер"
               >

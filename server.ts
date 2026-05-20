@@ -2170,17 +2170,34 @@ app.post('/api/admin/servers/:id/backup', adminOnly, async (req, res) => {
 
 app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
   const { id } = req.params;
+  const { sourceId } = req.body || {};
   try {
     const { instance: xuiInstance, server } = await getXuiForServer(id);
     if (!server) return res.status(404).json({ error: 'Server not found' });
 
-    console.log(`[Restore] Starting cloud restore for server: ${server.name} (${id})`);
+    console.log(`[Restore] Starting cloud restore for server: ${server.name} (${id}) ${sourceId ? `from source server ID: ${sourceId}` : ''}`);
     
-    if (!server.xui_config_state || !server.xui_config_state.inbounds) {
-      return res.status(400).json({ error: 'В базе нет инбаундов для этого сервера. Сделайте бэкап сначала.' });
+    let configState;
+    if (sourceId) {
+      const { data: sourceServer, error: sErr } = await supabase
+        .from('vpn_servers')
+        .select('xui_config_state, name')
+        .eq('id', sourceId)
+        .maybeSingle();
+      
+      if (sErr) throw sErr;
+      if (!sourceServer || !sourceServer.xui_config_state || !sourceServer.xui_config_state.inbounds) {
+        return res.status(400).json({ error: `В базе нет инбаундов для сервера-источника ${sourceServer?.name || sourceId}. Сделайте бэкап с него сначала.` });
+      }
+      configState = sourceServer.xui_config_state;
+    } else {
+      if (!server.xui_config_state || !server.xui_config_state.inbounds) {
+        return res.status(400).json({ error: 'В базе нет инбаундов для этого сервера. Сделайте бэкап сначала.' });
+      }
+      configState = server.xui_config_state;
     }
     
-    const inbounds = server.xui_config_state.inbounds;
+    const inbounds = configState.inbounds;
     
     // First, login
     if (!xuiInstance['sessionCookie']) await xuiInstance.login();
