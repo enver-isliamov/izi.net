@@ -11,6 +11,9 @@ services:
     restart: unless-stopped
     ports:
       - "3005:3005"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - NODE_ENV=production
       - XUI_HOST=http://x3-ui:2053
@@ -29,6 +32,9 @@ services:
       - "2053:2053" # Panel port
       - "443:443"   # Common VPN port
       - "80:80"     # Common VPN port
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - XUI_LOG_LEVEL=info
     volumes:
