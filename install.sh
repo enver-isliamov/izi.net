@@ -37,7 +37,7 @@ if [ ! -f "docker-compose.yml" ]; then
         echo "📂 Клонируем репозиторий в $INSTALL_DIR..."
         sudo mkdir -p $INSTALL_DIR
         sudo chown $USER:$USER $INSTALL_DIR
-        git clone https://github.com/enverphoto/izinet.git $INSTALL_DIR
+        git clone https://github.com/enver-isliamov/izi.net.git $INSTALL_DIR
     fi
     cd $INSTALL_DIR
 fi
