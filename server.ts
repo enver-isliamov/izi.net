@@ -379,7 +379,7 @@ class XUIService {
     }
   }
 
-  private authHeaders(extra: any = {}) {
+  authHeaders(extra: any = {}) {
     const headers: any = { ...extra };
     if (this.sessionCookie) headers['Cookie'] = this.sessionCookie;
     if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
@@ -2208,7 +2208,7 @@ app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
       const exists = existingInbounds.find((ei: any) => ei.port === inbound.port && ei.protocol === inbound.protocol);
       if (exists) {
         console.log(`[Restore] Deleting existing inbound on port ${inbound.port}`);
-        await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del/${exists.id}`, {}, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del`, { 'Cookie': xuiInstance['sessionCookie']}));
+        await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del/${exists.id}`, {}, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del`, xuiInstance.authHeaders()));
       }
       
       const newInbound = { ...inbound };
@@ -2217,7 +2217,7 @@ app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
       newInbound.down = 0;
       
       console.log(`[Restore] Creating inbound: ${inbound.remark} on port ${inbound.port}`);
-      await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, newInbound, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, { 'Cookie': xuiInstance['sessionCookie'], 'Content-Type': 'application/json' }));
+      await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, newInbound, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, xuiInstance.authHeaders({ 'Content-Type': 'application/json' })));
     }
 
     res.json({ 
@@ -2244,7 +2244,7 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
             console.log(`Fixing limitIp=0 on server ${server.name}...`);
             const { instance } = await getXuiForServer(server.id);
             if (!instance['sessionCookie']) await instance.login();
-            const listResp = await axios.get(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, { 'Cookie': instance['sessionCookie'] }));
+            const listResp = await axios.get(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, instance.authHeaders()));
             
             const inbounds = listResp.data.obj || [];
             let inboundsUpdated = 0;
@@ -2266,7 +2266,7 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
                 await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, {
                   ...inbound,
                   settings: JSON.stringify(settings)
-                }, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, { 'Cookie': instance['sessionCookie'] }));
+                }, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, instance.authHeaders()));
                 inboundsUpdated++;
               }
             }
