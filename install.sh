@@ -45,11 +45,11 @@ fi
 # 4. Настройка .env (Интерактивно)
 if [ ! -f .env ]; then
     echo -e "${GREEN}⚙️ Настройка окружения. Нам нужны ваши ключи Supabase:${NC}"
-    read -p "Supabase URL (например, https://xxx.supabase.co): " SB_URL
-    read -p "Supabase Anon Key: " SB_ANON
-    read -p "Supabase Service Role Key: " SB_SERVICE
-    read -p "Telegram Bot Token: " TG_TOKEN
-    read -p "Telegram Bot Name (без @): " TG_NAME
+    read -p "Supabase URL (например, https://xxx.supabase.co): " SB_URL < /dev/tty
+    read -p "Supabase Anon Key: " SB_ANON < /dev/tty
+    read -p "Supabase Service Role Key: " SB_SERVICE < /dev/tty
+    read -p "Telegram Bot Token: " TG_TOKEN < /dev/tty
+    read -p "Telegram Bot Name (без @): " TG_NAME < /dev/tty
 
     cp .env.example .env
     
