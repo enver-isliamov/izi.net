@@ -120,11 +120,11 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 // 🔍 Startup health check for Database
 async function checkDatabase() {
   try {
-    const { data, error } = await supabase.from('servers').select('count').single();
+    const { count, error } = await supabase.from('vpn_servers').select('*', { count: 'exact', head: true });
     if (error) {
       console.error('❌ Database connection error on startup:', error.message);
     } else {
-      console.log('✅ Database connected successfully');
+      console.log('✅ Database connected successfully. Active servers in table:', count || 0);
     }
   } catch (err) {
     console.error('❌ Failed to connect to database:', err);
