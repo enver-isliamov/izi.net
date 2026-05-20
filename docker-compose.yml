@@ -28,6 +28,8 @@ services:
     restart: unless-stopped
     ports:
       - "2053:2053" # Panel port
+      - "41758:41758" # Custom panel port selected by user
+      - "8443:8443" # Alternate panel / VPN port
       - "443:443"   # Common VPN port
       - "80:80"     # Common VPN port
     dns:
