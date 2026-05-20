@@ -43,8 +43,20 @@ if [ ! -f "docker-compose.yml" ]; then
 fi
 
 # 4. Настройка .env (Интерактивно)
+ENV_NEEDS_CONFIG=false
 if [ ! -f .env ]; then
+    ENV_NEEDS_CONFIG=true
+else
+    # Проверяем, пустые ли ключевые переменные (это бывает, если первый запуск прошел без терминала)
+    if grep -q "VITE_SUPABASE_URL=$" .env || [ -z "$(grep "VITE_SUPABASE_URL=" .env | cut -d'=' -f2-)" ]; then
+        ENV_NEEDS_CONFIG=true
+    fi
+fi
+
+if [ "$ENV_NEEDS_CONFIG" = "true" ]; then
     echo -e "${GREEN}⚙️ Настройка окружения. Нам нужны ваши ключи Supabase:${NC}"
+    
+    # Считываем данные с терминала напрямую
     read -p "Supabase URL (например, https://xxx.supabase.co): " SB_URL < /dev/tty
     read -p "Supabase Anon Key: " SB_ANON < /dev/tty
     read -p "Supabase Service Role Key: " SB_SERVICE < /dev/tty
@@ -68,6 +80,9 @@ if [ ! -f .env ]; then
     # Получаем IP сервера для VITE_API_URL
     SERVER_IP=$(curl -s https://ifconfig.me)
     sed -i "s|VITE_API_URL=.*|VITE_API_URL=http://$SERVER_IP:3005|" .env
+else
+    echo -e "${GREEN}✅ Файл .env уже настроен. Пропускаем шаг конфигурации.${NC}"
+    echo -e "Если вы хотите перенастроить ключи, удалите файл .env на VPS (rm /opt/izinet/.env) и запустите скрипт заново."
 fi
 
 # 5. Запуск
