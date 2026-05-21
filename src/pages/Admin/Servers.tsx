@@ -238,7 +238,7 @@ export function AdminServersList() {
             onClick={async () => {
               try {
                 toast.loading('Синхронизация...', { id: 'sync' });
-                const { data } = await axios.post('/api/admin/system/sync-servers', {}, {
+                const { data } = await axios.post('/api/admin/system/sync-servers', { force: true }, {
                   headers: { Authorization: `Bearer ${session?.access_token}` }
                 });
                 toast.success(`Синхронизировано ${data.updatedUsers} пользователей`, { id: 'sync' });

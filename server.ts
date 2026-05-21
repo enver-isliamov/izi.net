@@ -2199,8 +2199,8 @@ app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
     
     const inbounds = configState.inbounds;
     
-    // First, login
-    if (!xuiInstance['sessionCookie']) await xuiInstance.login();
+    // Connect to 3x-ui and force clean fresh login session to avoid 403 session expiration
+    await xuiInstance.login(true);
 
     const existingInbounds = await xuiInstance.getInbounds();
     
@@ -2276,6 +2276,7 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
         }
     }
 
+    const force = req.body?.force === true;
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').eq('status', 'active');
     if (subErr) throw subErr;
@@ -2296,9 +2297,9 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
           links.some(l => l.endsWith(`#${s.name.replace(/\s+/g,'_')}`))
         );
 
-        // If the number of links doesn't match the number of active servers, OR we're missing an active server suffix, we need to sync!
-        if (links.length !== activeServers.length || !hasAllActiveServers) {
-          console.log(`[SyncServers] Syncing device ${device.label} for user ${sub.user_id}`);
+        // If force is true, OR the number of links doesn't match, OR we're missing an active server suffix, we need to sync!
+        if (force || links.length !== activeServers.length || !hasAllActiveServers) {
+          console.log(`[SyncServers] Syncing/regenerating device ${device.label} for user ${sub.user_id} (force: ${force})`);
           let newConfigLines: string[] = [];
           const expiresAtMs = new Date(device.expiresAt).getTime();
 
