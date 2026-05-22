@@ -60,7 +60,7 @@ def main():
         
     # Read core inbound 443 (Reality)
     try:
-        cursor.execute("SELECT id, port, protocol, remark, enable, stream_settings FROM inbounds WHERE port=443;")
+        cursor.execute("SELECT id, port, protocol, remark, enable, settings, stream_settings FROM inbounds WHERE port=443;")
         inbound = cursor.fetchone()
     except Exception as e:
         print(f"❌ Failed to query database for port 443: {e}")
@@ -70,9 +70,15 @@ def main():
     db_updated = False
     
     if inbound:
-        inbound_id, port, protocol, remark, enable, stream_settings_str = inbound
+        inbound_id, port, protocol, remark, enable, settings_str, stream_settings_str = inbound
         print(f"\nFind inbound: ID={inbound_id}, Port={port}, Protocol={protocol}, Remark='{remark}', Enabled={enable}")
         
+        try:
+            settings = json.loads(settings_str) if settings_str else {}
+        except Exception as e:
+            print(f"⚠️ Failed to parse inbound protocol settings JSON: {e}")
+            settings = {}
+            
         try:
             stream_settings = json.loads(stream_settings_str) if stream_settings_str else {}
         except Exception as e:
@@ -105,8 +111,14 @@ def main():
                 db_updated = True
                 print("✅ Successfully corrected PrivateKey, PublicKey, Dest and SNI settings inside JSON!")
             
-            # Check fallbacks for Docker gateway redirect
-            fallbacks = stream_settings.get("fallbacks", [])
+            # Clean up fallbacks incorrectly placed in stream_settings
+            if "fallbacks" in stream_settings:
+                print("🧹 Found 'fallbacks' incorrectly placed in stream_settings. Moving them to the protocol 'settings' field!")
+                del stream_settings["fallbacks"]
+                db_updated = True
+
+            # Check fallbacks for Docker gateway redirect inside protocol settings
+            fallbacks = settings.get("fallbacks", [])
             fallback_fixed = False
             if fallbacks:
                 for idx, fallback in enumerate(fallbacks):
@@ -119,25 +131,23 @@ def main():
                         print(f"✅ Corrected Fallback #{idx+1} destination to 'host.docker.internal:3443'.")
             
             if not fallbacks or not fallback_fixed:
-                print("\nℹ️ Adding/refreshing proper fallback redirect to port host.docker.internal:3443...")
-                stream_settings["fallbacks"] = [
+                print("\nℹ️ Adding proper VLESS fallback redirect to port host.docker.internal:3443 inside protocol settings...")
+                settings["fallbacks"] = [
                     {
-                        "name": "izinet.online",
-                        "alpn": "any",
-                        "path": "",
                         "dest": "host.docker.internal:3443",
                         "xver": 0
                     }
                 ]
                 db_updated = True
-                print("✅ Added standard fallback rule to redirect regular HTTPS traffic to port host.docker.internal:3443!")
+                print("✅ Added standard fallback rule inside protocol settings to redirect regular HTTPS traffic to port host.docker.internal:3443!")
             
             if db_updated:
                 try:
-                    updated_settings_str = json.dumps(stream_settings, separators=(',', ':'))
-                    cursor.execute("UPDATE inbounds SET stream_settings=? WHERE id=?;", (updated_settings_str, inbound_id))
+                    updated_settings_str = json.dumps(settings, separators=(',', ':'))
+                    updated_stream_settings_str = json.dumps(stream_settings, separators=(',', ':'))
+                    cursor.execute("UPDATE inbounds SET settings=?, stream_settings=? WHERE id=?;", (updated_settings_str, updated_stream_settings_str, inbound_id))
                     conn.commit()
-                    print("💾 Changes SAVED to database successfully!")
+                    print("💾 Changes SAVED to database successfully (both Settings and Stream Settings updated)!")
                 except Exception as e:
                     print(f"❌ Error while updating database: {e}")
                     conn.rollback()
