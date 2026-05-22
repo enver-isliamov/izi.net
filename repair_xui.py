@@ -82,31 +82,31 @@ def main():
         else:
             print("✅ Reality private key looks structurally valid (not a file path). No automatic cleanup required.")
             
-        # --- NEW CODE: Check fallback configuration and correct 3005 to 3443 ---
+        # --- NEW CODE: Check fallback configuration and correct to host.docker.internal:3443 ---
         fallbacks = stream_settings.get("fallbacks", [])
         if fallbacks:
             print(f"\n🔍 Found {len(fallbacks)} custom fallback rule(s). Inspecting destinations...")
             for idx, fallback in enumerate(fallbacks):
                 dest = str(fallback.get("dest", ""))
-                if dest == "3005" or dest == "localhost:3005" or dest == "127.0.0.1:3005":
+                if dest in ["3005", "localhost:3005", "127.0.0.1:3005", "3443", "localhost:3443", "127.0.0.1:3443"]:
                     print(f"⚠️ Fallback #{idx+1} destination is set to '{dest}'.")
-                    print("👉 This is incorrect! VLESS Reality fallback MUST send the encrypted TLS handshake to Nginx ssl port (3443), NOT to NodeJS plaintext port (3005) directly.")
-                    fallback["dest"] = "3443"
+                    print("👉 VLESS Reality fallback MUST send the encrypted TLS handshake to Nginx ssl port on the host (host.docker.internal:3443).")
+                    fallback["dest"] = "host.docker.internal:3443"
                     is_modified = True
-                    print(f"✅ Corrected Fallback #{idx+1} destination to '3443'.")
+                    print(f"✅ Corrected Fallback #{idx+1} destination to 'host.docker.internal:3443'.")
         else:
-            print("\nℹ️ No fallbacks found in the config. Creating a proper fallback to port 3443...")
+            print("\nℹ️ No fallbacks found in the config. Creating a proper fallback to port host.docker.internal:3443...")
             stream_settings["fallbacks"] = [
                 {
                     "name": "izinet.online",
                     "alpn": "any",
                     "path": "",
-                    "dest": "3443",
+                    "dest": "host.docker.internal:3443",
                     "xver": 0
                 }
             ]
             is_modified = True
-            print("✅ Added standard fallback rule to redirect regular HTTPS traffic to port 3443!")
+            print("✅ Added standard fallback rule to redirect regular HTTPS traffic to port host.docker.internal:3443!")
             
     else:
          print(f"ℹ️ Security protocol is set to: '{security}' instead of 'reality'.")
@@ -125,6 +125,45 @@ def main():
         print("\nℹ️ No modifications were necessary for the database.")
         
     conn.close()
+
+    # --- AUTO-PATCH NGINX ---
+    nginx_path = "/etc/nginx/sites-available/izinet"
+    if os.path.exists(nginx_path):
+        print(f"\n⚡ Found Nginx site configuration at {nginx_path}. Checking listen directive...")
+        try:
+            with open(nginx_path, "r", encoding="utf-8") as f:
+                nginx_content = f.read()
+            
+            target_listen = "listen 127.0.0.1:3443 ssl http2;"
+            replacement_listen = "listen 3443 ssl http2;"
+            
+            if target_listen in nginx_content:
+                print(f"⚠️ Found '{target_listen}'. It makes Nginx only listen on localhost, which blocks Docker container access.")
+                print(f"👉 Replacing it with '{replacement_listen}' so Docker containers can contact it.")
+                updated_content = nginx_content.replace(target_listen, replacement_listen)
+                
+                with open(nginx_path, "w", encoding="utf-8") as f:
+                    f.write(updated_content)
+                print("✅ Successfully patched Nginx site config!")
+                
+                # Test configuration syntactic correctness
+                import subprocess
+                res = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+                if res.returncode == 0:
+                    print("✅ Nginx configuration test passed successfully.")
+                    print("⚡ Reloading Nginx service...")
+                    subprocess.run(["systemctl", "reload", "nginx"])
+                    print("✅ Nginx reloaded!")
+                else:
+                    print(f"❌ Nginx config test failed: {res.stderr}")
+            else:
+                if "listen 3443 ssl http2;" in nginx_content:
+                    print("✅ Nginx is already listening on broad port 3443. Perfect!")
+                else:
+                    print("⚠️ Nginx config doesn't contain standard listen line or has custom listen ports.")
+        except Exception as e:
+            print(f"⚠️ Failed to inspect or patch Nginx: {e}")
+
     print("\n====================================================")
     print("🚀 Auto-repair script execution finished!")
     print("====================================================")
