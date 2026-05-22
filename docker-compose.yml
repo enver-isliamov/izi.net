@@ -9,7 +9,6 @@ services:
     restart: unless-stopped
     ports:
       - "3005:3005"
-      - "80:3005" # Map host port 80 to web app port 3005 so http://izinet.online works
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -31,7 +30,6 @@ services:
       - "2053:2053" # Panel port
       - "41758:2053" # Map host 41758 to container 2053 where x-ui is running
       - "8443:8443" # Alternate panel / VPN port
-      - "443:443"   # Common VPN port
     dns:
       - 8.8.8.8
       - 1.1.1.1
