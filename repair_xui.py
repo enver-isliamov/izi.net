@@ -136,6 +136,16 @@ def main():
                 del stream_settings["fallbacks"]
                 db_updated = True
 
+            # Always ensure realitySettings redirect target/dest points to Nginx (host.docker.internal:3443)
+            # This is the key fix that binds the web traffic to Nginx TLS certificate handler on port 3443!
+            if reality_settings.get("target") != "host.docker.internal:3443" or reality_settings.get("dest") != "host.docker.internal:3443":
+                print(f"⚠️ Correcting Reality target/dest from '{reality_settings.get('target')}/{reality_settings.get('dest')}' to 'host.docker.internal:3443'...")
+                reality_settings["target"] = "host.docker.internal:3443"
+                reality_settings["dest"] = "host.docker.internal:3443"
+                stream_settings["realitySettings"] = reality_settings
+                db_updated = True
+                print("✅ Configured Self-hosted Reality redirect fallback to our own local Nginx decryption port (3443)!")
+
             # Setup robust, explicit fallbacks for both domains, and a general wildcard fallback
             settings["fallbacks"] = [
                 {
