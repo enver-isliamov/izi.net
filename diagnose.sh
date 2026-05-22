@@ -74,6 +74,36 @@ echo ""
 # 3. Анализ локальной доступности портов (curl на localhost)
 echo "--- 🔌 3. Проверка доступности веб-сервисов (локальный curl) ---"
 
+# 3.2 Чтение конфигурации Xray из панели 3x-ui
+echo "--- ⚙️ 3.2 Конфигурация Xray (config.json внутри контейнера) ---"
+if docker ps | grep -q "x3-ui"; then
+    echo "Содержимое config.json (основная часть VLESS):"
+    docker exec x3-ui cat /etc/x-ui/config.json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    inbounds = data.get("inbounds", [])
+    for ib in inbounds:
+        if ib.get("port") == 443:
+            print(json.dumps(ib, indent=2))
+except Exception as e:
+    print("Ошибка чтения /etc/x-ui/config.json:", e)
+' 2>/dev/null || {
+    docker exec x3-ui cat /bin/config.json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    inbounds = data.get("inbounds", [])
+    for ib in inbounds:
+        if ib.get("port") == 443:
+            print(json.dumps(ib, indent=2))
+except Exception as e:
+    print("Ошибка чтения /bin/config.json:", e)
+' 2>/dev/null
+}
+fi
+echo ""
+
 echo "Бекенд (изнутри хоста, порт 3005):"
 curl -Is http://127.0.0.1:3005 | head -n 1 || echo "❌ Бекенд на порту 3005 не отвечает"
 

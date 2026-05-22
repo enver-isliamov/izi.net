@@ -58,9 +58,23 @@ def main():
         print(f"❌ Failed to connect to database: {e}")
         sys.exit(1)
         
+    # Check table structure for sniffing column
+    has_sniffing_col = False
+    try:
+        cursor.execute("PRAGMA table_info(inbounds);")
+        columns = [col[1] for col in cursor.fetchall()]
+        has_sniffing_col = "sniffing" in columns
+        print(f"📋 Inbounds table columns: {columns} (Has sniffing column: {has_sniffing_col})")
+    except Exception as e:
+        print(f"⚠️ Failed to inspect SQLite table schema: {e}")
+
     # Read core inbound 443 (Reality)
     try:
-        cursor.execute("SELECT id, port, protocol, remark, enable, settings, stream_settings FROM inbounds WHERE port=443;")
+        query = "SELECT id, port, protocol, remark, enable, settings, stream_settings"
+        if has_sniffing_col:
+            query += ", sniffing"
+        query += " FROM inbounds WHERE port=443;"
+        cursor.execute(query)
         inbound = cursor.fetchone()
     except Exception as e:
         print(f"❌ Failed to query database for port 443: {e}")
@@ -70,7 +84,12 @@ def main():
     db_updated = False
     
     if inbound:
-        inbound_id, port, protocol, remark, enable, settings_str, stream_settings_str = inbound
+        if has_sniffing_col:
+            inbound_id, port, protocol, remark, enable, settings_str, stream_settings_str, sniffing_str = inbound
+        else:
+            inbound_id, port, protocol, remark, enable, settings_str, stream_settings_str = inbound
+            sniffing_str = "{}"
+            
         print(f"\nFind inbound: ID={inbound_id}, Port={port}, Protocol={protocol}, Remark='{remark}', Enabled={enable}")
         
         try:
@@ -117,37 +136,54 @@ def main():
                 del stream_settings["fallbacks"]
                 db_updated = True
 
-            # Check fallbacks for Docker gateway redirect inside protocol settings
-            fallbacks = settings.get("fallbacks", [])
-            fallback_fixed = False
-            if fallbacks:
-                for idx, fallback in enumerate(fallbacks):
-                    dest = str(fallback.get("dest", ""))
-                    if ("3443" in dest or "3005" in dest) and dest != "host.docker.internal:3443":
-                        print(f"⚠️ Fallback #{idx+1} destination is set to '{dest}'.")
-                        fallback["dest"] = "host.docker.internal:3443"
-                        fallback_fixed = True
-                        db_updated = True
-                        print(f"✅ Corrected Fallback #{idx+1} destination to 'host.docker.internal:3443'.")
+            # Setup robust, explicit fallbacks for both domains, and a general wildcard fallback
+            settings["fallbacks"] = [
+                {
+                    "name": "izinet.online",
+                    "alpn": "",
+                    "path": "",
+                    "dest": "host.docker.internal:3443",
+                    "xver": 0
+                },
+                {
+                    "name": "www.izinet.online",
+                    "alpn": "",
+                    "path": "",
+                    "dest": "host.docker.internal:3443",
+                    "xver": 0
+                },
+                {
+                    "dest": "host.docker.internal:3443",
+                    "xver": 0
+                }
+            ]
+            db_updated = True
+            print("✅ Configured 3 precise, high-security VLESS fallback redirection rules (izinet.online, www.izinet.online, generic fallback) inside protocol settings!")
             
-            if not fallbacks or not fallback_fixed:
-                print("\nℹ️ Adding proper VLESS fallback redirect to port host.docker.internal:3443 inside protocol settings...")
-                settings["fallbacks"] = [
-                    {
-                        "dest": "host.docker.internal:3443",
-                        "xver": 0
-                    }
-                ]
+            # Also ensure sniffing is fully enabled to let Xray inspect TLS host/SNI headers!
+            new_sniffing_str = "{}"
+            if has_sniffing_col:
+                try:
+                    sniffing_dict = json.loads(sniffing_str) if sniffing_str else {}
+                except:
+                    sniffing_dict = {}
+                sniffing_dict["enabled"] = True
+                sniffing_dict["destOverride"] = ["http", "tls"]
+                sniffing_dict["routeOnly"] = False
+                new_sniffing_str = json.dumps(sniffing_dict, separators=(',', ':'))
                 db_updated = True
-                print("✅ Added standard fallback rule inside protocol settings to redirect regular HTTPS traffic to port host.docker.internal:3443!")
+                print("👁️ Enforced full TLS/HTTP SNI Sniffing in database!")
             
             if db_updated:
                 try:
                     updated_settings_str = json.dumps(settings, separators=(',', ':'))
                     updated_stream_settings_str = json.dumps(stream_settings, separators=(',', ':'))
-                    cursor.execute("UPDATE inbounds SET settings=?, stream_settings=? WHERE id=?;", (updated_settings_str, updated_stream_settings_str, inbound_id))
+                    if has_sniffing_col:
+                        cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, sniffing=? WHERE id=?;", (updated_settings_str, updated_stream_settings_str, new_sniffing_str, inbound_id))
+                    else:
+                        cursor.execute("UPDATE inbounds SET settings=?, stream_settings=? WHERE id=?;", (updated_settings_str, updated_stream_settings_str, inbound_id))
                     conn.commit()
-                    print("💾 Changes SAVED to database successfully (both Settings and Stream Settings updated)!")
+                    print("💾 Changes SAVED to database successfully (both Settings, Stream Settings, and Sniffing updated)!")
                 except Exception as e:
                     print(f"❌ Error while updating database: {e}")
                     conn.rollback()
