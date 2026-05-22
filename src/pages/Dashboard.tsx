@@ -375,9 +375,9 @@ export default function Dashboard() {
                {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
             </Button>
           <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-            <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
+            <DialogContent className="max-w-[95%] sm:max-w-[450px] bg-card border-border p-4 md:p-6 shadow-2xl">
               <DialogHeader>
-                <DialogTitle className="text-xl font-bold">
+                <DialogTitle className="text-base md:text-lg font-bold">
                   {wizardMode === 'new' ? 'Добавление устройства' : 'Оформление подписки'}
                 </DialogTitle>
               </DialogHeader>

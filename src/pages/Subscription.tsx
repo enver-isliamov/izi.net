@@ -225,7 +225,7 @@ export default function Subscription() {
           <p className="text-muted-foreground mt-1">Информация о вашем тарифе и лимитах</p>
         </div>
         
-        <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
+          <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
           <DialogTrigger 
             render={
               <Button className="bg-primary text-black hover:bg-primary/90 rounded-xl px-6 neon-glow" onClick={() => openWizard('extend')}>
@@ -233,9 +233,9 @@ export default function Subscription() {
               </Button>
             }
           />
-          <DialogContent className="sm:max-w-[500px] bg-card border-border p-6 shadow-2xl">
+          <DialogContent className="max-w-[95%] sm:max-w-[450px] bg-card border-border p-4 md:p-6 shadow-2xl">
             <DialogHeader>
-              <DialogTitle className="text-xl font-bold">
+              <DialogTitle className="text-base md:text-lg font-bold">
                 {wizardMode === 'new' ? 'Добавление устройства' : 'Оформление подписки'}
               </DialogTitle>
             </DialogHeader>
@@ -411,24 +411,6 @@ export default function Subscription() {
         </div>
 
         <div className="space-y-6">
-          {/* Quick Info */}
-          <Card className="glass-card bg-primary/5 border-primary/20">
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-bold">Ускорьте свой VPN</h3>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Перейдите на тариф <span className="text-primary font-bold">LTE</span> и получите приоритетную работу сети с повышенной стабильностью.
-              </p>
-              <Button className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl">
-                Улучшить тариф
-              </Button>
-            </CardContent>
-          </Card>
-
           <Card className="glass-card">
             <CardHeader>
               <CardTitle className="text-sm">Важные уведомления</CardTitle>

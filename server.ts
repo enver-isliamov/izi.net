@@ -3188,12 +3188,16 @@ app.get('/api/subscription/plans', async (req, res) => {
         ],
         serverTypes: [
           { id: 'wifi', label: 'Wi-Fi', price: 0 },
-          { id: 'lte', label: 'LTE', price: 50 },
         ],
         deviceLimit: 2
       });
     }
     const plans = JSON.parse(plansJson);
+    if (plans.serverTypes) {
+      plans.serverTypes = plans.serverTypes.filter((s: any) => s.id === 'wifi');
+    } else {
+      plans.serverTypes = [{ id: 'wifi', label: 'Wi-Fi', price: 0 }];
+    }
     const deviceLimit = await getSystemSetting('DEVICE_LIMIT', '2');
     res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
   } catch (err: any) {
@@ -3423,7 +3427,7 @@ app.post('/api/subscription/buy', async (req, res) => {
         email: email,
         uuid: uuid,
         expiresAt: expiresAt.toISOString(),
-        serverType: serverType || 'LTE',
+        serverType: serverType || 'WIFI',
         trafficUsedBytes: 0,
         serverId: activeServers[0].id // Keep first ID just for backward compatibility
       };
