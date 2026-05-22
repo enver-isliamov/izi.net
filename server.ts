@@ -13,6 +13,8 @@ process.on('unhandledRejection', (reason, promise) => {
 import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
+import { exec } from 'child_process';
+import fs from 'fs';
 import { Telegraf, Context } from 'telegraf';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
@@ -1324,6 +1326,55 @@ app.post('/api/admin/system/sync-all', adminOnly, async (req, res) => {
       console.error('❌ [Sync] Background sync failed:', e);
     }
   })();
+});
+
+// VPS Diagnostics and Repair endpoints
+app.post('/api/admin/system/repair-vless', adminOnly, async (req, res) => {
+  console.log('🛠️ [AdminAPI] Starting Repair VLESS/Reality Coexistence...');
+  
+  let scriptPath = './repair_xui.py';
+  if (fs.existsSync('/opt/izinet/repair_xui.py')) {
+    scriptPath = 'python3 /opt/izinet/repair_xui.py';
+  } else if (fs.existsSync('./repair_xui.py')) {
+    scriptPath = 'python3 ./repair_xui.py';
+  } else {
+    return res.status(404).json({ error: 'Скрипт repair_xui.py не найден на сервере' });
+  }
+
+  // Set 120 seconds timeout and 10MB buffer limit
+  exec(scriptPath, { timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    console.log('[AdminAPI] Repair completed.');
+    res.json({
+      success: !error,
+      stdout: stdout || '',
+      stderr: stderr || '',
+      message: error ? 'Ремонт завершился с ошибками' : 'Автодиагностика и автонастройка Reality + Nginx выполнена успешно!'
+    });
+  });
+});
+
+app.post('/api/admin/system/diagnose-vps', adminOnly, async (req, res) => {
+  console.log('🔍 [AdminAPI] Starting VPS diagnostics...');
+  
+  let scriptPath = './diagnose.sh';
+  if (fs.existsSync('/opt/izinet/diagnose.sh')) {
+    scriptPath = 'bash /opt/izinet/diagnose.sh';
+  } else if (fs.existsSync('./diagnose.sh')) {
+    scriptPath = 'bash ./diagnose.sh';
+  } else {
+    return res.status(404).json({ error: 'Скрипт diagnose.sh не найден на сервере' });
+  }
+
+  // Set 120 seconds timeout and 10MB buffer limit
+  exec(scriptPath, { timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    console.log('[AdminAPI] Diagnostics completed.');
+    res.json({
+      success: !error,
+      stdout: stdout || '',
+      stderr: stderr || '',
+      message: error ? 'Диагностика завершилась с предупреждениями' : 'Диагностика сервера выполнена успешно!'
+    });
+  });
 });
 
 // --- Traffic Webhook for 3x-ui ---

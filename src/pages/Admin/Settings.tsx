@@ -206,6 +206,80 @@ export default function AdminSettings() {
     }
   };
 
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [systemLogs, setSystemLogs] = useState<string[]>([
+    '[Система] Добро пожаловать в веб-консоль управления сервером изинет.',
+    '[Система] Выберите желаемое действие выше для получения детального отчета.',
+    '[Подсказка] Кнопка ремонта полностью настроит сожительство Reality на порту 443 и Nginx на порту 3443.'
+  ]);
+
+  const handleRepairVless = async () => {
+    try {
+      setIsRepairing(true);
+      setSystemLogs([
+        '[Старт] Запуск автоматического ремонта VLESS/Reality и сожительства с Nginx...',
+        '[Система] Пожалуйста подождите, операция может занять до 20 секунд...'
+      ]);
+      toast.loading('Запуск авторемонта Reality + Nginx...', { id: 'sys-repair' });
+      
+      const { data } = await axios.post('/api/admin/system/repair-vless', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      
+      const outLines = (data.stdout || '').split('\n');
+      const errLines = (data.stderr || '').split('\n');
+      const lines = [...outLines, ...errLines].filter((l: string) => l.trim().length > 0);
+      
+      setSystemLogs(lines.length ? lines : ['[Успех] Скрипт не вернул логов, но завершился успешно.']);
+      
+      if (data.success) {
+        toast.success(data.message || 'Авторемонт успешно выполнен!', { id: 'sys-repair' });
+      } else {
+        toast.error('Ремонт выполнен с предупреждениями', { id: 'sys-repair' });
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Ошибка ремонта: ' + errMsg, { id: 'sys-repair' });
+    } finally {
+      setIsRepairing(false);
+    }
+  };
+
+  const handleDiagnoseVps = async () => {
+    try {
+      setIsDiagnosing(true);
+      setSystemLogs([
+        '[Старт] Сбор диагностических данных VPS (активные порты, докер-контейнеры, сертификаты, настройки SQ-Lite)...',
+        '[Система] Пожалуйста подождите...'
+      ]);
+      toast.loading('Запуск диагностики сервера...', { id: 'sys-diag' });
+      
+      const { data } = await axios.post('/api/admin/system/diagnose-vps', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      
+      const outLines = (data.stdout || '').split('\n');
+      const errLines = (data.stderr || '').split('\n');
+      const lines = [...outLines, ...errLines].filter((l: string) => l.trim().length > 0);
+      
+      setSystemLogs(lines.length ? lines : ['[Успех] Скрипт диагностики завершен.']);
+      
+      if (data.success) {
+        toast.success(data.message || 'Диагностика успешно выполнена!', { id: 'sys-diag' });
+      } else {
+        toast.error('Диагностика выполнена с предупреждениями', { id: 'sys-diag' });
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Ошибка диагностики: ' + errMsg, { id: 'sys-diag' });
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+
   const handleFullSync = async () => {
     try {
       setIsSyncing(true);
@@ -622,22 +696,92 @@ export default function AdminSettings() {
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-black/20 rounded-xl">
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-white">Полная синхронизация X-UI</h3>
-              <p className="text-xs text-muted-foreground max-w-md">
-                Принудительно переподключит всех активных пользователей к X-UI на всех активных серверах. Используйте после добавления новых серверов или массовых обновлений.
-              </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Sync Card */}
+            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Синхронизация X-UI</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Принудительно переподключит всех активных пользователей к X-UI на всех серверах.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isSyncing}
+                onClick={handleFullSync}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-red-500/20"
+              >
+                {isSyncing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                Запустить синхронизацию
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={isSyncing}
-              onClick={handleFullSync}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-xl transition-colors font-bold text-xs whitespace-nowrap border border-red-500/20"
-            >
-              {isSyncing ? <RefreshCw className="animate-spin" size={14} /> : <RefreshCw size={14} />}
-              Запустить синхронизацию
-            </button>
+
+            {/* Repair / Coexistence Card */}
+            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Авторемонт VLESS & Nginx</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Запустит скрипт <code className="text-orange-400">repair_xui.py</code> для настройки VLESS Reality (443) + Nginx (3443) co-existence.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isRepairing}
+                onClick={handleRepairVless}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-yellow-500/20"
+              >
+                {isRepairing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                Ремонт портов и VLESS
+              </button>
+            </div>
+
+            {/* VPS Diagnostics Card */}
+            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Диагностика VPS сервера</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Проверит свободные порты, запущенные docker-контейнеры, SSL сертификаты и настройки БД.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isDiagnosing}
+                onClick={handleDiagnoseVps}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-blue-500/20"
+              >
+                {isDiagnosing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                Диагностика системы
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal Console Output */}
+          <div className="space-y-2 pt-2">
+            <div className="flex justify-between items-center ml-1">
+              <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">Интерактивная Веб-Консоль Логов (VPS Terminal):</label>
+              <button 
+                type="button" 
+                onClick={() => setSystemLogs(['[Консоль очищена пользователем]'])}
+                className="text-[10px] text-zinc-500 hover:text-zinc-300 font-mono underline"
+              >
+                Очистить экран
+              </button>
+            </div>
+            <div className="bg-neutral-950 font-mono text-[10px] md:text-xs p-4 rounded-xl border border-zinc-800 space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 select-all">
+              {systemLogs.map((log, idx) => {
+                let colorClass = 'text-zinc-300';
+                if (log.includes('[Ошибка]') || log.toLowerCase().includes('failed') || log.startsWith('❌')) colorClass = 'text-red-400 font-semibold';
+                if (log.toLowerCase().includes('success') || log.startsWith('✅')) colorClass = 'text-green-400 font-semibold';
+                if (log.startsWith('[Старт]') || log.startsWith('[Система]')) colorClass = 'text-cyan-400';
+                if (log.startsWith('===') || log.startsWith('---')) colorClass = 'text-zinc-500 font-bold';
+                return (
+                  <div key={idx} className="flex gap-2 leading-relaxed">
+                    <span className="text-zinc-600 shrink-0 select-none">~</span>
+                    <span className={colorClass}>{log}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </motion.div>
 
