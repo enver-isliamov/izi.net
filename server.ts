@@ -1377,6 +1377,34 @@ app.post('/api/admin/system/diagnose-vps', adminOnly, async (req, res) => {
   });
 });
 
+app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
+  console.log('🔄 [AdminAPI] Starting Git Pull & Rebuild deployment...');
+  
+  // Выполняем git pull и сборку приложения
+  const cmd = 'git pull && npm install && npm run build';
+  
+  exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    console.log('[AdminAPI] Git pull & build completed.');
+    const success = !error;
+    
+    res.json({
+      success,
+      stdout: stdout || '',
+      stderr: stderr || '',
+      message: success 
+        ? 'Код успешно стянут с GitHub и пересобран! Сервер автоматически перезапустится через 2 секунды...' 
+        : 'Сборка завершилась с ошибками во время выполнения git pull или npm run build'
+    });
+
+    if (success) {
+      setTimeout(() => {
+        console.log('🔄 [System] Exiting process code 0 to trigger automatic restart by supervisor/PM2...');
+        process.exit(0);
+      }, 2000);
+    }
+  });
+});
+
 // --- Traffic Webhook for 3x-ui ---
 // Usage: http://your-site.app/api/webhooks/traffic-limit?token=YOUR_SECRET
 app.post('/api/webhooks/traffic-limit', async (req, res) => {

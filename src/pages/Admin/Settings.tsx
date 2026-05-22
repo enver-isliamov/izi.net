@@ -208,11 +208,52 @@ export default function AdminSettings() {
 
   const [isRepairing, setIsRepairing] = useState(false);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [isRedeploying, setIsRedeploying] = useState(false);
   const [systemLogs, setSystemLogs] = useState<string[]>([
     '[Система] Добро пожаловать в веб-консоль управления сервером изинет.',
     '[Система] Выберите желаемое действие выше для получения детального отчета.',
-    '[Подсказка] Кнопка ремонта полностью настроит сожительство Reality на порту 443 и Nginx на порту 3443.'
+    '[Подсказка] Кнопка ремонта полностью настроит сожительство Reality на порту 443 и Nginx на порту 3443.',
+    '[Подсказка] Кнопка деплоя из GitHub стянет свежую версию кода, установит зависимости, пересоберет проект и автоматически перезапустит сервер.'
   ]);
+
+  const handleGitRedeploy = async () => {
+    try {
+      setIsRedeploying(true);
+      setSystemLogs([
+        '[Старт] Запуск развертывания новой версии с GitHub (git pull)...',
+        '[Сборка] Установка новых npm зависимостей (npm install)...',
+        '[Компиляция] Сборка фронтенда и бэкенда (npm run build)...',
+        '[Система] Пожалуйста подождите, сборка в среднем занимает от 30 до 90 секунд...'
+      ]);
+      toast.loading('Деплой и сборка кода из GitHub...', { id: 'sys-redeploy' });
+      
+      const { data } = await axios.post('/api/admin/system/git-pull-redeploy', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      
+      const outLines = (data.stdout || '').split('\n');
+      const errLines = (data.stderr || '').split('\n');
+      const lines = [...outLines, ...errLines].filter((l: string) => l.trim().length > 0);
+      
+      setSystemLogs(lines.length ? lines : ['[Успех] Код успешно обновлен.']);
+      
+      if (data.success) {
+        toast.success(data.message || 'Сборка успешна! Перезапуск сервера...', { id: 'sys-redeploy' });
+        // Даем 4 секунды на перезагрузку страницы, пока сервер перезапускается
+        setTimeout(() => {
+          window.location.reload();
+        }, 4000);
+      } else {
+        toast.error('Сборка завершилась ошибкой', { id: 'sys-redeploy' });
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Ошибка сборки с GitHub: ' + errMsg, { id: 'sys-redeploy' });
+    } finally {
+      setIsRedeploying(false);
+    }
+  };
 
   const handleRepairVless = async () => {
     try {
@@ -696,7 +737,7 @@ export default function AdminSettings() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             {/* Sync Card */}
             <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
               <div className="space-y-1">
@@ -713,6 +754,25 @@ export default function AdminSettings() {
               >
                 {isSyncing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
                 Запустить синхронизацию
+              </button>
+            </div>
+
+            {/* GitHub Pull / Redeploy Card */}
+            <div className="p-4 bg-blue-500/5 rounded-xl flex flex-col justify-between border border-blue-500/10 space-y-3 shadow-md shadow-blue-500/5">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-blue-400">Деплой с GitHub</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Стянет свежий код с ветки репозитория, бережно пересоберет проект и выполнит хот-рестарт.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isRedeploying}
+                onClick={handleGitRedeploy}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-blue-500/30"
+              >
+                {isRedeploying ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                Стянуть и обновить
               </button>
             </div>
 
