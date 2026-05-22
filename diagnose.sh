@@ -14,13 +14,16 @@ DB_PATH="/opt/izinet/xui-db/x-ui.db"
 if [ -f "$DB_PATH" ]; then
     echo "✅ Файл базы данных найден: $DB_PATH"
     
-    # Пытаемся найти sqlite3 на хосте, если нет, пробуем выполнить sqlite3 внутри контейнера x3-ui
+    # Пытаемся найти sqlite3 на хосте, если нет — используем Python, который гарантированно есть на VPS
     if command -v sqlite3 &> /dev/null; then
         echo "Порт, базовый путь и сертификаты из базы настроек:"
         sqlite3 "$DB_PATH" "SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');"
     else
-        echo "sqlite3 не установлен на хосте. Пробуем получить данные через Docker контейнер x3-ui..."
-        docker exec x3-ui sqlite3 /etc/x-ui/x-ui.db "SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');" 2>/dev/null || echo "❌ Не удалось прочитать БД даже через докер."
+        echo "sqlite3 не установлен на хосте. Извлекаем данные конфигурации с помощью Python3..."
+        python3 -c "import sqlite3; conn=sqlite3.connect('$DB_PATH'); c=conn.cursor(); c.execute(\"SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');\"); print('\n'.join(f'  🔹 {r[0]}: {r[1]}' for r in c.fetchall()))" 2>/dev/null || {
+            echo "Пробуем прочитать через докер..."
+            docker exec x3-ui sqlite3 /etc/x-ui/x-ui.db "SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');" 2>/dev/null || echo "❌ Не удалось прочитать БД даже через докер."
+        }
     fi
 else
     echo "❌ Файл базы данных x-ui.db по пути $DB_PATH НЕ найден!"
