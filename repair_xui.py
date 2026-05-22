@@ -123,7 +123,7 @@ def main():
             if fallbacks:
                 for idx, fallback in enumerate(fallbacks):
                     dest = str(fallback.get("dest", ""))
-                    if dest in ["3005", "localhost:3005", "127.0.0.1:3005", "3443", "localhost:3443", "127.0.0.1:3443"]:
+                    if ("3443" in dest or "3005" in dest) and dest != "host.docker.internal:3443":
                         print(f"⚠️ Fallback #{idx+1} destination is set to '{dest}'.")
                         fallback["dest"] = "host.docker.internal:3443"
                         fallback_fixed = True
