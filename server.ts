@@ -1381,7 +1381,7 @@ app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
   console.log('🔄 [AdminAPI] Starting Git Pull & Rebuild deployment...');
   
   // Выполняем git pull и сборку приложения
-  const cmd = 'git stash && git pull && npm install && npm run build';
+  const cmd = 'cd /opt/izinet && git stash && git pull && docker compose up -d --build && docker image prune -f';
   
   exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
     console.log('[AdminAPI] Git pull & build completed.');
@@ -1392,16 +1392,12 @@ app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
       stdout: stdout || '',
       stderr: stderr || '',
       message: success 
-        ? 'Код успешно стянут с GitHub и пересобран! Сервер автоматически перезапустится через 2 секунды...' 
-        : 'Сборка завершилась с ошибками во время выполнения git pull или npm run build'
+        ? 'Код успешно стянут с GitHub и пересобран! Docker compose запущен в фоновом режиме.' 
+        : 'Сборка завершилась с ошибками во время выполнения git pull или docker compose'
     });
 
-    if (success) {
-      setTimeout(() => {
-        console.log('🔄 [System] Exiting process code 0 to trigger automatic restart by supervisor/PM2...');
-        process.exit(0);
-      }, 2000);
-    }
+    // We don't want to kill process here anymore because Docker compose does it gracefully by restarting the whole container
+    // Let Docker handle the container restart loop.
   });
 });
 

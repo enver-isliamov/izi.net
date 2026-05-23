@@ -34,7 +34,7 @@ export default function AdminUsers() {
   const [subCreateData, setSubCreateData] = useState({
     serverId: '',
     periodMonths: '1',
-    trafficLimitMb: '0'
+    trafficLimitGb: '0'
   });
 
   useEffect(() => {
@@ -46,7 +46,11 @@ export default function AdminUsers() {
   const handleCreateSub = async () => {
     if (!subCreateUser) return;
     try {
-      await axios.post(`/api/admin/users/${subCreateUser.id}/subscription`, subCreateData, {
+      const payload = {
+        ...subCreateData,
+        trafficLimitMb: subCreateData.trafficLimitGb ? String(parseFloat(subCreateData.trafficLimitGb) * 1024) : '0'
+      };
+      await axios.post(`/api/admin/users/${subCreateUser.id}/subscription`, payload, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       toast.success('Подписка успешно выдана');
@@ -754,13 +758,14 @@ export default function AdminUsers() {
                    />
                  </div>
                  <div className="space-y-2">
-                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (МБ)</label>
+                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (ГБ)</label>
                    <input
                      type="number"
-                     value={subCreateData.trafficLimitMb}
-                     onChange={(e) => setSubCreateData(prev => ({ ...prev, trafficLimitMb: e.target.value }))}
+                     value={subCreateData.trafficLimitGb}
+                     onChange={(e) => setSubCreateData(prev => ({ ...prev, trafficLimitGb: e.target.value }))}
                      className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
                      min="0"
+                     step="0.1"
                      placeholder="0 = безлимит"
                    />
                  </div>
