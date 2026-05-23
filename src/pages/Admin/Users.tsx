@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus, QrCode, RefreshCw, Copy } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus, QrCode, RefreshCw, Copy, UserPlus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { cn, copyToClipboard } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AdminNav } from '@/components/admin/AdminNav';
 import { UserHistoryModal } from '@/components/admin/UserHistoryModal';
+import { CreateUserModal } from '@/components/admin/CreateUserModal';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Dialog,
@@ -25,6 +26,52 @@ export default function AdminUsers() {
   const [search, setSearch] = useState('');
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [balanceEditUser, setBalanceEditUser] = useState<any>(null);
+  const [balanceEditValue, setBalanceEditValue] = useState<string>('');
+  
+  const [subCreateUser, setSubCreateUser] = useState<any>(null);
+  const [subCreateData, setSubCreateData] = useState({
+    serverId: '',
+    periodMonths: '1',
+    trafficLimitMb: '0'
+  });
+
+  useEffect(() => {
+    if (servers.length > 0 && !subCreateData.serverId) {
+      setSubCreateData(prev => ({ ...prev, serverId: servers[0].id }));
+    }
+  }, [servers]);
+
+  const handleCreateSub = async () => {
+    if (!subCreateUser) return;
+    try {
+      await axios.post(`/api/admin/users/${subCreateUser.id}/subscription`, subCreateData, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success('Подписка успешно выдана');
+      setSubCreateUser(null);
+      fetchData();
+    } catch (err: any) {
+      toast.error('Ошибка: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handleUpdateBalance = async () => {
+    if (!balanceEditUser) return;
+    try {
+      const val = parseFloat(balanceEditValue);
+      if (isNaN(val)) throw new Error('Неверное число');
+      await axios.put(`/api/admin/users/${balanceEditUser.id}`, { balance: val }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success('Баланс обновлен');
+      setBalanceEditUser(null);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Ошибка обновления баланса');
+    }
+  };
   
   // QR States
   const [isQrOpen, setIsQrOpen] = useState(false);
@@ -165,14 +212,23 @@ export default function AdminUsers() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Пользователи</h1>
-        <div className="relative w-full md:w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
-          <input
-            placeholder="Email, Имя или Telegram ID..."
-            className="w-full bg-secondary/30 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm focus:border-blue-500/50 outline-none transition-all"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+            <input
+              placeholder="Email, Имя или Telegram ID..."
+              className="w-full bg-secondary/30 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm focus:border-blue-500/50 outline-none transition-all"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 rounded-xl transition-colors shrink-0 whitespace-nowrap text-sm font-bold border border-blue-500/20"
+          >
+            <UserPlus size={16} /> {/* don't forget to import UserPlus */}
+            Создать юзера
+          </button>
         </div>
       </div>
 
@@ -261,7 +317,19 @@ export default function AdminUsers() {
                           )}
                         </div>
                         <span className="text-[10px] text-muted-foreground font-mono">{user.email}</span>
-                        <span className="font-mono text-xs text-blue-400 font-bold mt-1">Баланс: {user.balance || 0} ₽</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="font-mono text-xs text-blue-400 font-bold">Баланс: {user.balance || 0} ₽</span>
+                          <button
+                            onClick={() => {
+                              setBalanceEditUser(user);
+                              setBalanceEditValue(String(user.balance || 0));
+                            }}
+                            className="text-muted-foreground hover:text-blue-400 transition-colors bg-white/5 rounded px-1.5 py-0.5 text-[10px]"
+                            title="Изменить баланс"
+                          >
+                            Изм.
+                          </button>
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 align-top">
@@ -388,7 +456,17 @@ export default function AdminUsers() {
                               <Plus size={10} /> Добавить
                             </button>
                           </div>
-                        ) : <span className="opacity-30 text-xs">—</span>
+                        ) : (
+                          <div className="flex flex-col items-start gap-2">
+                            <span className="opacity-30 text-xs">—</span>
+                            <button
+                              onClick={() => setSubCreateUser(user)}
+                              className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-80 hover:opacity-100 transition-all border border-blue-500/20 bg-blue-500/10 rounded px-2 py-1"
+                            >
+                              <Plus size={10} /> Выдать подписку
+                            </button>
+                          </div>
+                        )
                       )}
                     </td>
                     <td className="px-6 py-4 border-l border-white/5 align-top">
@@ -459,7 +537,19 @@ export default function AdminUsers() {
                       )}
                     </div>
                     <span className="text-xs text-muted-foreground font-mono">{user.email}</span>
-                    <span className="font-mono text-xs text-blue-400 font-bold mt-1">Баланс: {user.balance || 0} ₽</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="font-mono text-xs text-blue-400 font-bold">Баланс: {user.balance || 0} ₽</span>
+                      <button
+                        onClick={() => {
+                          setBalanceEditUser(user);
+                          setBalanceEditValue(String(user.balance || 0));
+                        }}
+                        className="text-muted-foreground hover:text-blue-400 transition-colors bg-white/5 rounded px-1.5 py-0.5 text-[10px]"
+                        title="Изменить баланс"
+                      >
+                        Изм.
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
                     <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -489,7 +579,7 @@ export default function AdminUsers() {
                     </button>
                   </div>
                   
-                  {sub && (
+                  {sub ? (
                     <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-3">
                       <div className="flex justify-between items-center">
                         <p className="text-[10px] text-muted-foreground uppercase flex items-center gap-1"><Key size={12}/> Устройства ({devices.length})</p>
@@ -596,6 +686,15 @@ export default function AdminUsers() {
                         </div>
                       )}
                     </div>
+                  ) : (
+                    <div className="pt-2 border-t border-white/5 flex flex-col gap-2">
+                       <button
+                         onClick={() => setSubCreateUser(user)}
+                         className="w-full text-xs text-blue-400 hover:text-blue-300 flex items-center justify-center gap-1 opacity-80 hover:opacity-100 transition-all border border-blue-500/20 bg-blue-500/10 rounded-xl py-2"
+                       >
+                         <Plus size={14} /> Выдать подписку
+                       </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -614,6 +713,96 @@ export default function AdminUsers() {
           isOpen={isHistoryOpen}
           onClose={() => setIsHistoryOpen(false)}
         />
+
+        <CreateUserModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          servers={servers}
+          onSuccess={fetchData}
+        />
+
+        {/* Sub Create Dialog */}
+        <Dialog open={!!subCreateUser} onOpenChange={(open) => !open && setSubCreateUser(null)}>
+          <DialogContent className="sm:max-w-[400px] bg-[#0a0c10] border-white/5 p-6">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-xl font-bold text-white tracking-tight">Выдача подписки</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-1">Добавить подписку ({subCreateUser?.email})</p>
+            </DialogHeader>
+            <div className="space-y-4">
+               <div className="space-y-2">
+                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Локация</label>
+                 <select
+                   value={subCreateData.serverId}
+                   onChange={(e) => setSubCreateData(prev => ({ ...prev, serverId: e.target.value }))}
+                   className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                 >
+                   {servers.map(s => (
+                     <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
+                   ))}
+                 </select>
+               </div>
+
+               <div className="grid grid-cols-2 gap-4">
+                 <div className="space-y-2">
+                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Срок (мес)</label>
+                   <input
+                     type="number"
+                     value={subCreateData.periodMonths}
+                     onChange={(e) => setSubCreateData(prev => ({ ...prev, periodMonths: e.target.value }))}
+                     className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                     min="1"
+                   />
+                 </div>
+                 <div className="space-y-2">
+                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (МБ)</label>
+                   <input
+                     type="number"
+                     value={subCreateData.trafficLimitMb}
+                     onChange={(e) => setSubCreateData(prev => ({ ...prev, trafficLimitMb: e.target.value }))}
+                     className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                     min="0"
+                     placeholder="0 = безлимит"
+                   />
+                 </div>
+               </div>
+              <div className="flex gap-2 justify-end pt-4">
+                <Button variant="ghost" className="text-muted-foreground" onClick={() => setSubCreateUser(null)}>
+                  Отмена
+                </Button>
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleCreateSub}>
+                  Создать (1 устройство)
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Balance Edit Dialog */}
+        <Dialog open={!!balanceEditUser} onOpenChange={(open) => !open && setBalanceEditUser(null)}>
+          <DialogContent className="sm:max-w-[400px] bg-[#0a0c10] border-white/5 p-6">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-xl font-bold text-white tracking-tight">Изменить баланс</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-1">Пользователь: {balanceEditUser?.email}</p>
+            </DialogHeader>
+            <div className="space-y-4">
+              <input
+                type="number"
+                value={balanceEditValue}
+                onChange={(e) => setBalanceEditValue(e.target.value)}
+                className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                placeholder="Сумма"
+              />
+              <div className="flex gap-2 justify-end">
+                <Button variant="ghost" className="text-muted-foreground" onClick={() => setBalanceEditUser(null)}>
+                  Отмена
+                </Button>
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleUpdateBalance}>
+                  Сохранить
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
          {/* QR Code Dialog */}
          <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>

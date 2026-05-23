@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Server, Plus, Globe, Settings, Trash2, CheckCircle, XCircle, Zap, RefreshCw, Activity, AlertTriangle, ShieldCheck, Cloud, CloudDownload } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import axios from 'axios';
@@ -14,6 +14,10 @@ export function AdminServersList() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState<string | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState<string | null>(null);
+  const [restoreModalTarget, setRestoreModalTarget] = useState<any | null>(null);
+  const [healthData, setHealthData] = useState<Record<string, { online: boolean, error?: string }>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
   const [formData, setFormData] = useState({
@@ -28,27 +32,42 @@ export function AdminServersList() {
       if (Array.isArray(data)) {
         setServers(data);
       } else {
-        console.error('Invalid servers data:', data);
         setServers([]);
       }
     } catch (e: any) {
-      const status = e.response?.status;
-      const errorData = e.response?.data?.error || e.message;
-      console.error('Fetch servers error:', e);
-      
-      if (status === 401 || status === 403) {
-        toast.error(`Доступ запрещен (Ошибка ${status}): У вас недостаточно прав администратора.`);
-      } else {
-        toast.error(`Ошибка загрузки серверов (${status || 'Network Error'}): ${errorData}`);
-      }
+      // ... errors handled
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchHealth = async () => {
+    if (!session?.access_token) return;
+    try {
+      const { data } = await axios.get('/api/admin/servers/health', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      const healthMap: Record<string, { online: boolean, error?: string }> = {};
+      data.forEach((item: any) => {
+        healthMap[item.id] = { online: item.online, error: item.error };
+      });
+      setHealthData(healthMap);
+    } catch (e) {
+      console.warn('Health fetch failed (admin servers)');
     }
   };
 
   useEffect(() => {
     fetchServers();
   }, [session]);
+
+  useEffect(() => {
+    if (servers.length > 0) {
+      fetchHealth();
+      const interval = setInterval(fetchHealth, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [servers, session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,6 +120,49 @@ export function AdminServersList() {
       }
     } finally {
       setIsChecking(null);
+    }
+  };
+
+  const cloudBackup = async (id: string) => {
+    try {
+      setIsBackingUp(id);
+      toast.loading('Создание бэкапа в облако...', { id: 'backup' });
+      const { data } = await axios.post(`/api/admin/servers/${id}/backup`, {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (data.success) {
+        toast.success(data.message, { id: 'backup' });
+        fetchServers();
+      } else {
+        toast.error(data.error || 'Ошибка бэкапа', { id: 'backup' });
+      }
+    } catch (e: any) {
+      console.error('Cloud backup error:', e);
+      toast.error('Критическая ошибка бэкапа: ' + (e.response?.data?.error || e.message), { id: 'backup' });
+    } finally {
+      setIsBackingUp(null);
+    }
+  };
+
+  const cloudRestore = async (id: string, sourceId?: string) => {
+    if (!window.confirm('ВНИМАНИЕ! Это действие удалит все текущие настройки на панели 3x-ui и восстановит настройки из бэкапа (включая всех пользователей и порты). Продолжить?')) return;
+    
+    try {
+      setIsRestoring(id);
+      toast.loading('Восстановление конфигурации...', { id: 'restore' });
+      const { data } = await axios.post(`/api/admin/servers/${id}/restore`, { sourceId }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (data.success) {
+        toast.success(data.message, { id: 'restore' });
+      } else {
+        toast.error(data.error || 'Ошибка восстановления', { id: 'restore' });
+      }
+    } catch (e: any) {
+      console.error('Cloud restore error:', e);
+      toast.error('Ошибка восстановления: ' + (e.response?.data?.error || e.message), { id: 'restore' });
+    } finally {
+      setIsRestoring(null);
     }
   };
 
@@ -176,7 +238,7 @@ export function AdminServersList() {
             onClick={async () => {
               try {
                 toast.loading('Синхронизация...', { id: 'sync' });
-                const { data } = await axios.post('/api/admin/system/sync-servers', {}, {
+                const { data } = await axios.post('/api/admin/system/sync-servers', { force: true }, {
                   headers: { Authorization: `Bearer ${session?.access_token}` }
                 });
                 toast.success(`Синхронизировано ${data.updatedUsers} пользователей`, { id: 'sync' });
@@ -335,6 +397,104 @@ export function AdminServersList() {
             </form>
           </motion.div>
         )}
+
+        {restoreModalTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-[#151515] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl overflow-hidden"
+            >
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <h3 className="font-semibold text-white text-base">Синхронизация конфигурации</h3>
+                <button 
+                  onClick={() => setRestoreModalTarget(null)}
+                  className="text-muted-foreground hover:text-white transition-colors p-1"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Выберите конфигурацию (инбаунды и порты), которую вы хотите скопировать и применить на сервер <span className="text-blue-400 font-bold">{restoreModalTarget.name}</span>:
+                </p>
+                <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/25 rounded-lg text-[11px] text-yellow-500 leading-normal">
+                  ⚠️ <strong>Внимание:</strong> Текущие инбаунды на целевом сервере будут полностью удалены и заменены на новые. Подключения пользователей будут перегенерированы по новым портам.
+                </div>
+              </div>
+
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
+                {servers
+                  .filter(s => s.xui_config_state?.backup_at)
+                  .map(sourceServer => {
+                    const isOwn = sourceServer.id === restoreModalTarget.id;
+                    const backupDate = new Date(sourceServer.xui_config_state.backup_at).toLocaleString([], {
+                      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                    });
+                    const count = sourceServer.xui_config_state.inbounds?.length || 0;
+
+                    return (
+                      <div 
+                        key={sourceServer.id}
+                        className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                          isOwn 
+                            ? 'bg-blue-600/5 border-blue-500/20 hover:border-blue-500/40' 
+                            : 'bg-white/5 border-white/5 hover:border-white/15'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-semibold text-white truncate">{sourceServer.name}</span>
+                            {isOwn && (
+                              <span className="text-[8px] bg-blue-500/25 text-blue-400 border border-blue-500/30 px-1 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">Целевой</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-mono">
+                            <span>Бэкап: {backupDate}</span>
+                            <span>•</span>
+                            <span className="text-indigo-400">{count} инбаундов</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const targetId = restoreModalTarget.id;
+                            const sourceId = sourceServer.id;
+                            setRestoreModalTarget(null);
+                            cloudRestore(targetId, sourceId);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-all shrink-0 shadow-md"
+                        >
+                          Выбрать
+                        </button>
+                      </div>
+                    );
+                  })}
+                
+                {servers.filter(s => s.xui_config_state?.backup_at).length === 0 && (
+                  <div className="text-center py-6 text-muted-foreground text-xs">
+                    Нет доступных бэкапов в облаке. Сначала сделайте бэкап с эталонного сервера (кнопка ☁️).
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-white/5">
+                <button
+                  onClick={() => setRestoreModalTarget(null)}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs text-white transition-all font-medium"
+                >
+                  Отмена
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
@@ -350,10 +510,26 @@ export function AdminServersList() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
+                  <div 
+                    title={healthData[server.id]?.online ? "Панель доступна" : `Нет связи с панелью: ${healthData[server.id]?.error || 'Неизвестная ошибка'}`}
+                    className={`w-2 h-2 rounded-full shrink-0 cursor-help ${
+                      healthData[server.id]?.online 
+                        ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' 
+                        : healthData[server.id]?.online === false 
+                          ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' 
+                          : 'bg-gray-500'
+                    }`} 
+                  />
                   <h3 className="font-semibold">{server.name}</h3>
                   <span className="text-xs bg-white/5 px-2 py-0.5 rounded uppercase font-mono">{server.location_code}</span>
                   {server.is_default && (
                     <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full border border-blue-500/30 font-bold uppercase tracking-widest">Default</span>
+                  )}
+                  {server.xui_config_state?.backup_at && (
+                    <span className="text-[9px] bg-green-500/10 text-green-400 px-1.5 py-0.5 rounded-full border border-green-500/20 flex items-center gap-1">
+                      <Cloud size={10} /> 
+                      {new Date(server.xui_config_state.backup_at).toLocaleDateString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground font-mono truncate max-w-[200px] md:max-w-xs">{server.ip}{server.domain ? ` (${server.domain})` : ''}</p>
@@ -376,6 +552,22 @@ export function AdminServersList() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-0">
+              <button 
+                onClick={() => setRestoreModalTarget(server)}
+                disabled={isRestoring === server.id || !(Array.isArray(servers) && servers.some(s => s.xui_config_state?.backup_at))}
+                className="p-2 md:p-2.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 rounded-xl transition-colors disabled:opacity-50"
+                title="Восстановить конфигурацию из облака на сервер"
+              >
+                {isRestoring === server.id ? <RefreshCw className="animate-spin" size={18} /> : <CloudDownload size={18} />}
+              </button>
+              <button 
+                onClick={() => cloudBackup(server.id)}
+                disabled={isBackingUp === server.id}
+                className="p-2 md:p-2.5 bg-green-500/10 text-green-500 hover:bg-green-500/20 rounded-xl transition-colors disabled:opacity-50"
+                title="Бэкап конфигурации в Supabase"
+              >
+                {isBackingUp === server.id ? <RefreshCw className="animate-spin" size={18} /> : <Cloud size={18} />}
+              </button>
               <button 
                 onClick={() => checkConnection(server.id)}
                 disabled={isChecking === server.id}

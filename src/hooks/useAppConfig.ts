@@ -16,7 +16,8 @@ export function useAppConfig() {
     const fetchConfig = async () => {
       try {
         const envUrl = import.meta.env.VITE_API_URL;
-        const apiUrl = (envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : window.location.origin;
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const apiUrl = (isLocal && envUrl && envUrl.startsWith('http')) ? envUrl.replace(/\/$/, '') : '';
         const res = await fetch(`${apiUrl}/api/config`);
         if (res.ok) {
           const data = await res.json();

@@ -39,6 +39,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
         if (error) throw error;
         const newProfile = data || { id: userId, role: 'user' };
+        
+        // Force superadmin role for enverphoto@gmail.com to guarantee admin panel access
+        if (newProfile.email === 'enverphoto@gmail.com' || session?.user?.email === 'enverphoto@gmail.com') {
+          newProfile.role = 'superadmin';
+        }
+        
         localStorage.setItem(`izinet_profile_${userId}`, JSON.stringify(newProfile));
         if (mounted) setProfile(newProfile);
       } catch (e) {
@@ -105,7 +111,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       session, 
       isLoading, 
       signOut, 
-      role: profile?.role || 'user' 
+      role: (session?.user?.email === 'enverphoto@gmail.com' || profile?.email === 'enverphoto@gmail.com' || profile?.role === 'superadmin') ? 'superadmin' : (profile?.role || 'user') 
     }}>
       {children}
     </AuthContext.Provider>

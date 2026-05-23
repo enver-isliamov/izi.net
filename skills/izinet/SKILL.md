@@ -3,7 +3,7 @@ name: izinet
 description: Use for any work in the izinet VPN subscription service: payments, wallet balance, subscriptions, 3x-ui provisioning, Supabase schema/RLS, Telegram bot, Vercel/VPS deployment, or project documentation.
 ---
 
-# izinet Project Skill
+# izinet Project Skill 
 
 ## Stack
 
@@ -12,7 +12,7 @@ description: Use for any work in the izinet VPN subscription service: payments, 
 - Database/Auth: Supabase.
 - VPN provisioning: 3x-ui.
 - Payments: Enot.io new invoice API.
-- Deploy: Vercel frontend proxies `/api/*` to VPS backend `194.50.94.28:3005`.
+- Deploy: Vercel frontend proxies `/api/*` to VPS backend `YOUR_VPS_IP:3005`.
 
 ## Payment Contract
 

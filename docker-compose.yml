@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   izinet-app:
     build:
@@ -10,13 +8,47 @@ services:
     container_name: izinet-app
     restart: unless-stopped
     ports:
-      # Пробрасываем порт 3005 хоста на порт 3000 внутри контейнера,
-      # так как 3000 у вас занят AdGuard'ом.
-      - "3005:3000"
-    environment:
-      - NODE_ENV=production
-    env_file:
-      - .env
+      - "3005:3005"
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    environment:
+      - NODE_ENV=production
+      - XUI_HOST=http://x3-ui:2053
+    env_file:
+      - .env
+    depends_on:
+      - x3-ui
+    networks:
+      - izinet-net
+
+  x3-ui:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: x3-ui
+    restart: unless-stopped
+    ports:
+      - "2053:2053" # Panel port
+      - "41758:2053" # Map host 41758 to container 2053 where x-ui is running
+      - "8443:8443" # Alternate panel / VPN port
+      - "443:443" # Run VLESS on port 443
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - XUI_LOG_LEVEL=info
+    volumes:
+      - ./xui-db:/etc/x-ui
+      - ./xui-cert:/root/cert
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    networks:
+      - izinet-net
+
+networks:
+  izinet-net:
+    driver: bridge
+
+volumes:
+  xui-db:
+  xui-cert:

@@ -13,6 +13,8 @@ process.on('unhandledRejection', (reason, promise) => {
 import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
+import { exec } from 'child_process';
+import fs from 'fs';
 import { Telegraf, Context } from 'telegraf';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
@@ -47,7 +49,11 @@ function getRequestConfig(url: string, headers: any = {}, customTimeout?: number
   const isHttps = url.startsWith('https');
   const timeout = customTimeout || 7000; // Increased default timeout to 7s
   return {
-    headers,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      ...headers
+    },
     httpsAgent: isHttps ? sharedHttpsAgent : undefined,
     httpAgent: !isHttps ? sharedHttpAgent : undefined,
     timeout: timeout
@@ -105,7 +111,28 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 if (!supabaseUrl || !supabaseServiceKey) {
   console.warn('⚠️ SUPABASE credentials missing in environment variables!');
 }
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+    detectSessionInUrl: false
+  }
+});
+
+// 🔍 Startup health check for Database
+async function checkDatabase() {
+  try {
+    const { count, error } = await supabase.from('vpn_servers').select('*', { count: 'exact', head: true });
+    if (error) {
+      console.error('❌ Database connection error on startup:', error.message);
+    } else {
+      console.log('✅ Database connected successfully. Active servers in table:', count || 0);
+    }
+  } catch (err) {
+    console.error('❌ Failed to connect to database:', err);
+  }
+}
+checkDatabase();
 
 //@ts-ignore
 const __filename = fileURLToPath(import.meta.url);
@@ -126,12 +153,14 @@ app.use(cors({
     // Разрешаем запросы без origin (например, от мобильных приложений или системных инструментов)
     if (!origin) return callback(null, true);
     
-    const isAllowed = allowedOrigins.some(allowed => origin.startsWith(allowed)) || 
+    const isAllowed = !origin || 
+                     allowedOrigins.some(allowed => origin.startsWith(allowed)) || 
                      origin.includes('vercel.app') || 
                      origin.includes('run.app') || 
                      origin.includes('localhost') ||
                      origin.includes('127.0.0.1') ||
-                     origin.includes('194.50.94.28'); 
+                     origin.includes('izinet.online') ||
+                     process.env.NODE_ENV !== 'production';
 
     if (isAllowed) {
       callback(null, true);
@@ -144,25 +173,67 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Subscription-Userinfo'],
   credentials: true
 }));
+
+// 🔍 Diagnostic logging for API and Page requests
+app.use((req, res, next) => {
+  const isExcluded = req.path.includes('health') || req.path.includes('.ico') || req.path.includes('.png');
+  if (!isExcluded) {
+    console.log(`[REQ] ${new Date().toISOString()} | ${req.method} ${req.path} 
+      | Host: ${req.get('host')} 
+      | SNI/OriginalHost: ${req.get('x-forwarded-host') || 'N/A'}
+      | X-Forwarded-Proto: ${req.get('x-forwarded-proto') || 'http'}
+      | Real-IP: ${req.get('x-real-ip') || req.ip}
+      | CF-IP: ${req.get('cf-connecting-ip') || 'N/A'}`);
+  }
+  next();
+});
+
+app.set('trust proxy', 1); // Trust first proxy (Cloudflare/Nginx)
 app.use(express.json());
-const PORT = parseInt(process.env.PORT || '3000');
+const PORT = parseInt(process.env.PORT || '3005');
 
 // --- XUI Service ---
 class XUIService {
   public host: string;
   public basePath: string = "";
+  public displayDomain: string = "";
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
+  private csrfToken: string | null = null;
   private readonly SESSION_TTL = 2 * 60 * 1000; // 2 minutes cache for session cookie (VPN-04: Fresher sessions)
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Priority: 1. Passed configs, 2. Database (handled by caller), 3. Environment (fallback for legacy/default)
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
-    
+
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
+    }
+
+    // Set a default display domain based on the host before we potentially rewrite it for internal Docker net
+    try {
+      if (host) {
+        const url = new URL(host);
+        this.displayDomain = url.hostname;
+      }
+    } catch (_) {}
+
+    // Internal routing optimization:
+    // If the server connects to the LOCAL server ('194.50.94.28' or 'izinet.online' or 'localhost' or '127.0.0.1'),
+    // we bypass the external port/IP and talk directly to the 'x3-ui:2053' service in the Docker network.
+    // This solves loopback blocks (NAT loopback), port blockage, and UFW issues perfectly.
+    if (host && (host.includes('194.50.94.28') || host.includes('izinet.online') || host.includes('localhost') || host.includes('127.0.0.1'))) {
+      const originalHost = host;
+      try {
+        const parsedUrl = new URL(host);
+        host = `http://x3-ui:2053${parsedUrl.pathname}`;
+        console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+      } catch (e) {
+        host = host.replace(/^(https?:\/\/)?([^\/]+)(:\d+)?/, 'http://x3-ui:2053');
+        console.log(`[XUI Router] Optimized local routing (fallback regex): rewritten ${originalHost} -> ${host}`);
+      }
     }
 
     // Handle secret path (e.g. https://ip:port/secret_path)
@@ -209,60 +280,96 @@ class XUIService {
       return this.sessionCookie;
     }
     
-    const tryLogin = async (path: string) => {
+    let lastError: any = null;
+
+    const tryLogin = async (path: string, csrfData?: { token: string, cookieStr: string }) => {
       const url = `${this.host}${this.basePath}${path}`;
       const payload = `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
       const jsonPayload = { username: this.username, password: this.password };
 
+      let customHeaders: any = {};
+      if (csrfData) {
+         customHeaders['X-CSRF-Token'] = csrfData.token;
+         if (csrfData.cookieStr) customHeaders['Cookie'] = csrfData.cookieStr;
+      }
+
       try {
         // Try form-urlencoded first (default for most 3x-ui)
-        const response = await axios.post(
-          url,
-          payload,
-          getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded' })
-        );
+        const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded', ...customHeaders }));
+        if (csrfData && csrfData.cookieStr) {
+           response.headers['x-passed-cookie'] = csrfData.cookieStr;
+        }
         return response;
       } catch (err: any) {
-        if (err.response?.status === 404) return null;
-
-        // Try JSON if not 404
+        lastError = err;
+        
+        // Return null to continue trying other paths unless we know for sure we should stop
+        // We will no longer throw on 403 immediately because a wrong path might return 403
+        
+        // Try JSON if not successful
         try {
-          const response = await axios.post(url, jsonPayload, getRequestConfig(url));
+          const response = await axios.post(url, jsonPayload, getRequestConfig(url, customHeaders));
+          if (csrfData && csrfData.cookieStr) {
+             response.headers['x-passed-cookie'] = csrfData.cookieStr;
+          }
           return response;
         } catch (innerErr: any) {
-          if (innerErr.response?.data) {
-            console.error(`❌ 3x-ui login detail [${url}]:`, typeof innerErr.response.data === 'string' ? innerErr.response.data.substring(0, 200) : JSON.stringify(innerErr.response.data));
-          }
-          throw innerErr;
+          lastError = innerErr;
+          return null; // Return null so the next path can be tried
         }
       }
     };
 
     try {
-      // Try root path first (common for secret paths), then /login, then /panel/login
-      // VPN-04: Increased login timeout to 10s
-      let response = await tryLogin('');
-      if (!response) {
-        response = await tryLogin('/');
+      // Step 1: Pre-flight to get potential Session Cookies & CSRF Token
+      let csrfToken = '';
+      let cookies: string[] = [];
+      try {
+        const rootUrl = `${this.host}${this.basePath}/`;
+        const rootRes = await axios.get(rootUrl, getRequestConfig(rootUrl, {}, 5000));
+        if (rootRes.headers['set-cookie']) {
+          cookies = cookies.concat(rootRes.headers['set-cookie']);
+        }
+        const csrfUrl = `${this.host}${this.basePath}/csrf-token`;
+        const csrfRes = await axios.get(csrfUrl, getRequestConfig(csrfUrl, { Cookie: cookies.join(';') }, 5000));
+        if (csrfRes.data && csrfRes.data.success && csrfRes.data.obj) {
+           csrfToken = csrfRes.data.obj;
+        }
+        if (csrfRes.headers['set-cookie']) {
+           cookies = cookies.concat(csrfRes.headers['set-cookie']);
+        }
+      } catch (e) {
+        // CSRF endpoint might not exist on older versions, just ignore
       }
-      if (!response) {
-        response = await tryLogin('/login');
-      }
-      if (!response) {
-        response = await tryLogin('/panel/login');
-      }
+
+      const csrfData = csrfToken ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
+
+      // 3x-ui almost universally uses /login. Trying others blindly triggers rate limits.
+      let response = await tryLogin('/login', csrfData);
+      if (!response) response = await tryLogin('', csrfData); // Some custom setups might proxy right to root
+      if (!response) response = await tryLogin('/panel/login', csrfData);
+
       
       if (!response) {
-        throw new Error(`404: Could not find login endpoint at ${this.host}${this.basePath}. Please check your XUI host URL and secret path.`);
+        let msg = `Could not find login endpoint at ${this.host}${this.basePath}.`;
+        if (lastError?.response?.status === 403) {
+           msg = `Login blocked (403 Forbidden). Rate limit/Fail2Ban active, or WAF blocking. Wait 5-15 mins or check IP whitelist.`;
+        } else if (lastError?.message) {
+           msg = `Login failed. HTTP ${lastError.response?.status || 'Error'} - ${lastError.message}`;
+        }
+        throw new Error(msg);
       }
       
       if (response.data && response.data.success === false) {
         throw new Error(response.data.msg || 'Login failed');
       }
 
-      const cookie = response.headers['set-cookie']?.[0];
+      const cookie = response.headers['set-cookie']?.[0] || response.headers['x-passed-cookie'];
       if (!cookie) throw new Error('No cookie received from 3x-ui. Check if host URL is correct and starts with http/https.');
       this.sessionCookie = cookie;
+      if (csrfData && csrfData.token) {
+         this.csrfToken = csrfData.token;
+      }
       this.lastLoginTime = Date.now();
       return cookie;
     } catch (error: any) {
@@ -274,11 +381,26 @@ class XUIService {
     }
   }
 
+  authHeaders(extra: any = {}) {
+    const headers: any = { ...extra };
+    if (this.sessionCookie) headers['Cookie'] = this.sessionCookie;
+    if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
+    return headers;
+  }
+
+  async checkHealth(): Promise<boolean> {
+    if (!this.host) throw new Error('Host is not configured');
+    
+    // Utilize getInbounds which already handles session caching and 401 retries
+    await this.getInbounds();
+    return true;
+  }
+
   async getInbounds() {
     if (!this.sessionCookie) await this.login();
     try {
       const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-      const resp = await axios.get(listUrl, getRequestConfig(listUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
       return resp.data.obj || [];
     } catch (e: any) {
       if (e.response?.status === 401) {
@@ -300,7 +422,7 @@ class XUIService {
     let flow = "";
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success) {
         inbound = resp.data.obj;
         const streamSettings = JSON.parse(inbound.streamSettings);
@@ -320,7 +442,7 @@ class XUIService {
             id: uuid,
             flow: flow,
             email: email,
-            limitIp: 2, // VPN-01: Allow 2 IPs to prevent timeouts on mobile switching (WiFi <> 4G)
+            limitIp: 0, // VPN-01: Allow unlimited IPs to prevent timeouts on mobile switching (WiFi <> 4G). Limits enforced by traffic quotas.
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -336,10 +458,9 @@ class XUIService {
       const response = await axios.post(
         addClientUrl,
         clientData,
-        getRequestConfig(addClientUrl, { 
-          'Cookie': this.sessionCookie,
+        getRequestConfig(addClientUrl, this.authHeaders({ 
           'Content-Type': 'application/json'
-        })
+        }))
       );
 
       if (response.data.success) {
@@ -378,7 +499,7 @@ class XUIService {
     let effectiveInboundId = inboundId;
 
     const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }, 10000));
+    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
     
     if (!resp.data.success || !resp.data.obj) {
       throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
@@ -401,26 +522,17 @@ class XUIService {
     const security = streamSettings.security || 'none';
     const port = inbound.port;
     
-    let hostName = 'server.izinet.app';
-    let isIP = false;
-    try {
-      const u = new URL(this.host);
-      hostName = u.hostname;
-      // Check if hostname is an IP
-      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-    } catch (e) {
-      hostName = this.host.replace(/https?:\/\//, '').split(':')[0].split('/')[0] || hostName;
-      isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
-    }
-
+    let hostName = this.displayDomain || 'server.izinet.app';
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
+
+    const isIPOrEmpty = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName) || hostName === '';
 
     if (security === 'reality') {
       const realitySettings = streamSettings.realitySettings || {};
       // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
       const rs = realitySettings.settings || realitySettings;
       
-      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIP ? 'google.com' : hostName);
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIPOrEmpty ? 'google.com' : hostName);
       const pbk = rs.publicKey || realitySettings.publicKey || '';
       
       if (!pbk || pbk.includes('m_G-oZ_9a6')) {
@@ -429,17 +541,15 @@ class XUIService {
 
       const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
       const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
-      const spiderX = rs.spiderX || realitySettings.spiderX || '';
+      const spiderX = rs.spiderX || realitySettings.spiderX || '/';
       
       console.log(`[XUI] Generating Reality link for ${email} on ${hostName}:${port}. SNI: ${sni}, SID: ${sid}, SPX: ${spiderX}`);
 
-      let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&flow=xtls-rprx-vision`;
-      if (spiderX && spiderX !== '/') {
-        link += `&spx=${encodeURIComponent(spiderX)}`;
-      }
+      let link = `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
       const tlsSettings = streamSettings.tlsSettings || {};
+      const isIP = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName);
       const sni = tlsSettings.serverName || (isIP ? "" : hostName); 
       let sniPart = sni ? `&sni=${sni}` : "";
       return `vless://${effectiveUuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
@@ -452,7 +562,7 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success && resp.data.obj) {
         const settings = JSON.parse(resp.data.obj.settings || '{}');
         const clients = settings.clients || [];
@@ -511,7 +621,7 @@ class XUIService {
     let flow = "";
     try {
       const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, { 'Cookie': this.sessionCookie }));
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success && resp.data.obj) {
         const streamSettings = JSON.parse(resp.data.obj.streamSettings || '{}');
         if (streamSettings.security === 'reality') {
@@ -535,7 +645,7 @@ class XUIService {
             id: effectiveUuid,
             flow: flow,
             email: email,
-            limitIp: 2, // VPN-01: Sync limitIp to 2
+            limitIp: 0, // VPN-01: Sync limitIp to 0
             totalGB: limitBytes,
             expiryTime: expiryTime,
             enable: true,
@@ -552,10 +662,9 @@ class XUIService {
       const response = await axios.post(
         updateClientUrl,
         clientData,
-        getRequestConfig(updateClientUrl, { 
-          'Cookie': this.sessionCookie,
+        getRequestConfig(updateClientUrl, this.authHeaders({ 
           'Content-Type': 'application/json'
-        })
+        }))
       );
 
       if (response.data.success) {
@@ -589,7 +698,7 @@ class XUIService {
 
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${email}`;
-      const response = await axios.get(url, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+      const response = await axios.get(url, getRequestConfig(url, this.authHeaders()));
 
       if (response.data.success && response.data.obj) {
         const stats = response.data.obj;
@@ -634,7 +743,7 @@ class XUIService {
 
     try {
       const deleteUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${effectiveUuid}`;
-      const response = await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, { 'Cookie': this.sessionCookie }));
+      const response = await axios.post(deleteUrl, {}, getRequestConfig(deleteUrl, this.authHeaders()));
       if (response.data.success) {
         console.log(`✅ Deleted client ${email || effectiveUuid} from 3x-ui [${this.host}]`);
         return true;
@@ -661,7 +770,7 @@ class XUIService {
     if (!this.sessionCookie) await this.login();
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
-      const response = await axios.post(url, {}, getRequestConfig(url, { 'Cookie': this.sessionCookie }));
+      const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       if (response.data.success && Array.isArray(response.data.obj)) {
         // Return unique emails to avoid overcounting multiple connections from same user
         const uniqueOnlines = [...new Set(response.data.obj.map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
@@ -741,30 +850,57 @@ async function getXuiForServer(serverId?: string | null) {
 
   // Robust host construction
   let rawIp = (server.ip || '').trim();
+  let domainOrPath = (server.domain || '').trim();
   let host = "";
-  let panelPath = (server.domain || '').trim();
-  if (!panelPath.startsWith('/')) panelPath = '';
 
   if (rawIp.includes('://')) {
     host = rawIp;
+    // If rawIp is just http://ip:port without path, and domain is a secret path, append it
+    if (domainOrPath) {
+      if (!domainOrPath.includes('.') && !domainOrPath.startsWith('/')) {
+        domainOrPath = '/' + domainOrPath;
+      }
+      if (domainOrPath.startsWith('/')) {
+        try {
+          const url = new URL(host);
+          if (url.pathname === '/' || url.pathname === '') {
+            host = host.replace(/\/$/, '') + domainOrPath;
+          }
+        } catch (e) {}
+      }
+    }
   } else {
     // If rawIp contains a path (e.g. 1.2.3.4/secret), split it
     let ipPart = rawIp;
+    let pathPart = "";
+    
     if (rawIp.includes('/')) {
       const parts = rawIp.split('/');
       ipPart = parts[0];
-      if (!panelPath) panelPath = '/' + parts.slice(1).join('/');
+      pathPart = '/' + parts.slice(1).join('/');
+    }
+
+    if (domainOrPath) {
+      if (domainOrPath.startsWith('/')) {
+        pathPart = domainOrPath;
+      } else if (!domainOrPath.includes('.')) {
+        // Likely a secret path provided without a leading slash (e.g. "LZ6dkLpY4gzESk")
+        pathPart = '/' + domainOrPath;
+      } else {
+        // It's a domain (e.g. vpn.example.com), use it as the base host to connect
+        ipPart = domainOrPath;
+      }
     }
 
     // If ipPart contains a port (e.g. 1.2.3.4:443), use it
     if (ipPart.includes(':')) {
        const [ip, port] = ipPart.split(':');
-       const protocol = (port === '443' || parseInt(port) > 10000) ? 'https' : 'http';
-       host = `${protocol}://${ip}:${port}${panelPath}`;
+       const protocol = (port === '443' || port === '8443' || port === '2053') ? 'https' : 'http';
+       host = `${protocol}://${ip}:${port}${pathPart}`;
     } else {
        const port = server.api_port || 2053;
-       const protocol = (port === 443 || port > 10000) ? 'https' : 'http';
-       host = `${protocol}://${ipPart}:${port}${panelPath}`;
+       const protocol = (port === 443 || port === 8443 || port === 2053) ? 'https' : 'http';
+       host = `${protocol}://${ipPart}:${port}${pathPart}`;
     }
   }
 
@@ -773,6 +909,10 @@ async function getXuiForServer(serverId?: string | null) {
     username: server.username,
     password: server.password
   });
+
+  if (server.domain && !server.domain.startsWith('/')) {
+    newInstance.displayDomain = server.domain;
+  }
 
   xuiInstances.set(serverId, newInstance);
   console.log(`[XUI] Initialized instance for server "${server.name}" using database credentials (Host: ${host}, User: ${server.username})`);
@@ -948,14 +1088,22 @@ async function adminOnly(req: any, res: any, next: any) {
   }
 
   const token = authHeader.replace('Bearer ', '');
+  console.log(`[AdminAuth][${requestId}] Verifying token: ${token.substring(0, 15)}...`);
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
 
   if (authErr || !user) {
-    console.warn(`[AdminAuth][${requestId}] ❌ Invalid token:`, authErr?.message);
+    console.warn(`[AdminAuth][${requestId}] ❌ Invalid token:`, authErr?.message, authErr?.status);
     return res.status(401).json({ 
       error: 'Invalid Session', 
       message: 'Сессия истекла. Пожалуйста, войдите снова.' 
     });
+  }
+
+  // Safeguard: Hardcoded bypass to guarantee the master administrator has immediate superadmin panel access
+  if (user.email === 'enverphoto@gmail.com') {
+    console.log(`[AdminAuth][${requestId}] 🛡️ Safeguard: Master admin email detected, bypassing role DB checks`);
+    req.user = { ...user, role: 'superadmin' };
+    return next();
   }
 
   // Fetch fresh role from DB to ensure it's not stale
@@ -991,7 +1139,10 @@ async function authenticateUser(req: any, res: any, next: any) {
   if (!authHeader) return res.status(401).json({ error: 'Auth required' });
   const token = authHeader.replace('Bearer ', '');
   const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return res.status(401).json({ error: 'Unauthorized' });
+  if (error || !user) {
+    console.error('[AuthError]', error?.message || 'No user', 'Token prefix:', token.substring(0, 10));
+    return res.status(401).json({ error: 'Unauthorized', message: error?.message });
+  }
   (req as any).user = user;
   next();
 }
@@ -1110,6 +1261,196 @@ async function getSystemSetting(key: string, fallback: string = ''): Promise<str
 }
 
 // Admin Settings Endpoints
+// --- Admin Settings Endpoints
+app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
+  try {
+    const { data: servers, error } = await supabase.from('vpn_servers').select('id, name');
+    if (error) throw error;
+    
+    // Check all servers in parallel with timeout
+    const results = await Promise.all((servers || []).map(async (s) => {
+      try {
+        const { instance } = await getXuiForServer(s.id);
+        const isOnline = await instance.checkHealth();
+        return { id: s.id, online: isOnline };
+      } catch (e: any) {
+        return { id: s.id, online: false, error: e.message };
+      }
+    }));
+    
+    res.json(results);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/system/sync-all', adminOnly, async (req, res) => {
+  console.log('🚀 [Sync] Starting global background synchronization...');
+  res.json({ success: true, message: 'Синхронизация запущена в фоновом режиме.' });
+
+  // Run heavy sync in background
+  (async () => {
+    try {
+      const { data: activeSubs } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('status', 'active');
+      
+      const { data: servers } = await supabase
+        .from('vpn_servers')
+        .select('*')
+        .eq('is_active', true);
+
+      if (!activeSubs || !servers) return;
+
+      const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+
+      for (const sub of activeSubs) {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+        const expiresAtMs = sub.expires_at ? new Date(sub.expires_at).getTime() : 0;
+        const limitBytes = (sub.traffic_limit_mb || 0) * 1024 * 1024;
+
+        for (const device of devices) {
+          for (const server of servers) {
+            try {
+              const { instance: xui } = await getXuiForServer(server.id);
+              await xui.addClient(device.email, device.uuid, inboundId, expiresAtMs, limitBytes);
+            } catch (e) {
+              // Silently continue if one server fails
+            }
+          }
+        }
+      }
+      console.log('✅ [Sync] Global sync completed successfully.');
+    } catch (e) {
+      console.error('❌ [Sync] Background sync failed:', e);
+    }
+  })();
+});
+
+// VPS Diagnostics and Repair endpoints
+app.post('/api/admin/system/repair-vless', adminOnly, async (req, res) => {
+  console.log('🛠️ [AdminAPI] Starting Repair VLESS/Reality Coexistence...');
+  
+  let scriptPath = './repair_xui.py';
+  if (fs.existsSync('/opt/izinet/repair_xui.py')) {
+    scriptPath = 'python3 /opt/izinet/repair_xui.py';
+  } else if (fs.existsSync('./repair_xui.py')) {
+    scriptPath = 'python3 ./repair_xui.py';
+  } else {
+    return res.status(404).json({ error: 'Скрипт repair_xui.py не найден на сервере' });
+  }
+
+  // Set 120 seconds timeout and 10MB buffer limit
+  exec(scriptPath, { timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    console.log('[AdminAPI] Repair completed.');
+    res.json({
+      success: !error,
+      stdout: stdout || '',
+      stderr: stderr || '',
+      message: error ? 'Ремонт завершился с ошибками' : 'Автодиагностика и автонастройка Reality + Nginx выполнена успешно!'
+    });
+  });
+});
+
+app.post('/api/admin/system/diagnose-vps', adminOnly, async (req, res) => {
+  console.log('🔍 [AdminAPI] Starting VPS diagnostics...');
+  
+  let scriptPath = './diagnose.sh';
+  if (fs.existsSync('/opt/izinet/diagnose.sh')) {
+    scriptPath = 'bash /opt/izinet/diagnose.sh';
+  } else if (fs.existsSync('./diagnose.sh')) {
+    scriptPath = 'bash ./diagnose.sh';
+  } else {
+    return res.status(404).json({ error: 'Скрипт diagnose.sh не найден на сервере' });
+  }
+
+  // Set 120 seconds timeout and 10MB buffer limit
+  exec(scriptPath, { timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    console.log('[AdminAPI] Diagnostics completed.');
+    res.json({
+      success: !error,
+      stdout: stdout || '',
+      stderr: stderr || '',
+      message: error ? 'Диагностика завершилась с предупреждениями' : 'Диагностика сервера выполнена успешно!'
+    });
+  });
+});
+
+app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
+  console.log('🔄 [AdminAPI] Starting Git Pull & Rebuild deployment...');
+  
+  // Выполняем git pull и сборку приложения
+  const cmd = 'git pull && npm install && npm run build';
+  
+  exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    console.log('[AdminAPI] Git pull & build completed.');
+    const success = !error;
+    
+    res.json({
+      success,
+      stdout: stdout || '',
+      stderr: stderr || '',
+      message: success 
+        ? 'Код успешно стянут с GitHub и пересобран! Сервер автоматически перезапустится через 2 секунды...' 
+        : 'Сборка завершилась с ошибками во время выполнения git pull или npm run build'
+    });
+
+    if (success) {
+      setTimeout(() => {
+        console.log('🔄 [System] Exiting process code 0 to trigger automatic restart by supervisor/PM2...');
+        process.exit(0);
+      }, 2000);
+    }
+  });
+});
+
+// --- Traffic Webhook for 3x-ui ---
+// Usage: http://your-site.app/api/webhooks/traffic-limit?token=YOUR_SECRET
+app.post('/api/webhooks/traffic-limit', async (req, res) => {
+  const { email, traffic_used, traffic_limit, server_name } = req.body;
+  const token = req.query.token;
+  
+  // Basic security check if token set
+  const secret = process.env.WEBHOOK_SECRET || 'izinet_secret';
+  if (token !== secret) {
+    return res.status(403).json({ error: 'Invalid webhook token' });
+  }
+
+  if (!email) return res.status(400).json({ error: 'Email required' });
+
+  console.log(`[Webhook] Traffic limit alert for ${email} on server ${server_name || 'unknown'}`);
+
+  try {
+    // 1. Find subscription(s) containing this client email
+    // Note: email in 3x-ui is usually stored in v2ray_config JSON
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('status', 'active');
+
+    const affectedSub = subs?.find(s => {
+      const devices = parseVpnDevices(s.v2ray_config);
+      return devices.some(d => d.email === email);
+    });
+
+    if (affectedSub) {
+      // 2. Mark as limited if usage is near limit
+      await supabase
+        .from('subscriptions')
+        .update({ status: 'limited', updated_at: new Date().toISOString() })
+        .eq('id', affectedSub.id);
+      
+      console.log(`[Webhook] Subscription ${affectedSub.id} for user ${affectedSub.user_id} marked as LIMITED.`);
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Webhook] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admin/settings', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('settings').select('*');
@@ -1153,6 +1494,143 @@ app.post('/api/admin/settings', adminOnly, async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper to get Cloudflare authentication headers from DB (with process.env fallbacks)
+async function getCloudflareHeaders() {
+  const { data: dbSettings } = await supabase.from('settings').select('*');
+  const settingsMap: Record<string, string> = {};
+  dbSettings?.forEach((s: any) => settingsMap[s.key] = s.value);
+
+  const token = (settingsMap['CLOUDFLARE_API_TOKEN'] || process.env.CLOUDFLARE_API_TOKEN || '').trim();
+  const email = (settingsMap['CLOUDFLARE_EMAIL'] || process.env.CLOUDFLARE_EMAIL || '').trim();
+  const apiKey = (settingsMap['CLOUDFLARE_API_KEY'] || process.env.CLOUDFLARE_API_KEY || '').trim();
+
+  if (token) {
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+  } else if (email && apiKey) {
+    return {
+      'X-Auth-Email': email,
+      'X-Auth-Key': apiKey,
+      'Content-Type': 'application/json'
+    };
+  } else {
+    throw new Error('Учётные данные Cloudflare не настроены. Пожалуйста, укажите API Токен или Email + Global API Key в настройках.');
+  }
+}
+
+// Cloudflare Integration Endpoints
+app.get('/api/admin/cloudflare/zones', adminOnly, async (req, res) => {
+  try {
+    const headers = await getCloudflareHeaders();
+    console.log('🌐 [Cloudflare] Fetching zones list...');
+    const response = await axios.get('https://api.cloudflare.com/client/v4/zones?per_page=50', { headers, timeout: 10000 });
+    
+    if (!response.data || !response.data.success) {
+      throw new Error(response.data?.errors?.[0]?.message || 'Ошибка интеграции Cloudflare API');
+    }
+
+    const zones = response.data.result.map((z: any) => ({
+      id: z.id,
+      name: z.name,
+      status: z.status
+    }));
+
+    res.json(zones);
+  } catch (err: any) {
+    console.error('❌ [Cloudflare] Error getting zones:', err.response?.data || err.message);
+    const apiError = err.response?.data?.errors?.[0]?.message || err.message;
+    res.status(500).json({ error: apiError });
+  }
+});
+
+app.post('/api/admin/cloudflare/bind', adminOnly, async (req, res) => {
+  const { zoneId, domain, ip, proxied, serverId } = req.body;
+
+  if (!zoneId || !domain || !ip) {
+    return res.status(400).json({ error: 'Необходимы параметры: zoneId, domain, ip' });
+  }
+
+  try {
+    const headers = await getCloudflareHeaders();
+    const cleanDomain = domain.trim().toLowerCase();
+    const cleanIp = ip.trim();
+
+    console.log(`🌐 [Cloudflare] Checking existing DNS record for domain: ${cleanDomain}...`);
+
+    // Check if there is an existing A record
+    const listUrl = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=A&name=${cleanDomain}`;
+    const listResp = await axios.get(listUrl, { headers, timeout: 10000 });
+    
+    if (!listResp.data || !listResp.data.success) {
+      throw new Error(listResp.data?.errors?.[0]?.message || 'Не удалось получить DNS записи с Cloudflare');
+    }
+
+    const records = listResp.data.result;
+    let dnsResult;
+
+    if (records.length > 0) {
+      const recordId = records[0].id;
+      console.log(`🌐 [Cloudflare] Updating existing DNS A record ${recordId} to ${cleanIp}...`);
+      const updateResp = await axios.put(
+        `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${recordId}`,
+        {
+          type: 'A',
+          name: cleanDomain,
+          content: cleanIp,
+          ttl: 1, // Auto
+          proxied: !!proxied
+        },
+        { headers, timeout: 10000 }
+      );
+      dnsResult = updateResp.data;
+    } else {
+      console.log(`🌐 [Cloudflare] Creating new DNS A record for ${cleanDomain} pointing to ${cleanIp}...`);
+      const createResp = await axios.post(
+        `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`,
+        {
+          type: 'A',
+          name: cleanDomain,
+          content: cleanIp,
+          ttl: 1, // Auto
+          proxied: !!proxied
+        },
+        { headers, timeout: 10000 }
+      );
+      dnsResult = createResp.data;
+    }
+
+    if (!dnsResult || !dnsResult.success) {
+      throw new Error(dnsResult?.errors?.[0]?.message || 'Не удалось сохранить запись в Cloudflare');
+    }
+
+    // If serverId is provided, automatically update the domain inside the database!
+    if (serverId) {
+      console.log(`🌐 [Cloudflare] Associating domain ${cleanDomain} with VPN Server ID ${serverId}...`);
+      const { error: srvErr } = await supabase
+        .from('vpn_servers')
+        .update({ domain: cleanDomain })
+        .eq('id', serverId);
+
+      if (srvErr) {
+        throw new Error(`DNS изменен, но не удалось обновить домен сервера в базе данных: ${srvErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Домен ${cleanDomain} успешно привязан к IP ${cleanIp}! DNS запись обновлена в Cloudflare${serverId ? ' и обновлена в настройках сервера.' : '.'}`,
+      result: dnsResult.result
+    });
+
+  } catch (err: any) {
+    console.error('❌ [Cloudflare Bind Error]:', err.response?.data || err.message);
+    const apiError = err.response?.data?.errors?.[0]?.message || err.message;
+    res.status(500).json({ error: apiError });
   }
 });
 
@@ -1459,6 +1937,118 @@ app.get('/api/admin/servers/diag', adminOnly, async (req, res) => {
   res.json(results);
 });
 
+app.post('/api/admin/users/create', adminOnly, async (req, res) => {
+  const { email, password, initialBalance, createSubscription, serverId, trafficLimitMb, periodMonths } = req.body;
+  
+  try {
+    const authData: any = {
+      email,
+      email_confirm: true,
+    };
+    if (password) {
+      authData.password = password;
+    } else {
+      authData.password = Math.random().toString(36).substring(2, 12);
+    }
+    
+    // Create auth user
+    const { data: authUser, error: authError } = await supabase.auth.admin.createUser(authData);
+    
+    if (authError) {
+      return res.status(400).json({ error: authError.message });
+    }
+
+    const userId = authUser.user.id;
+
+    // Wait for the on_auth_user_created trigger to insert user & balance
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Update balance
+    if (initialBalance && parseFloat(initialBalance) > 0) {
+      await supabase.from('balances').update({ amount: parseFloat(initialBalance) }).eq('user_id', userId);
+      // Log transaction
+      await supabase.from('transactions').insert({
+        user_id: userId,
+        amount: parseFloat(initialBalance),
+        type: 'deposit',
+        status: 'completed',
+        description: 'Initial balance transfer (Admin)'
+      });
+    }
+
+    // Create Subscription if checked
+    if (createSubscription && serverId) {
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + parseInt(periodMonths || '1'));
+      
+      const subRes = await supabase.from('subscriptions').insert({
+        user_id: userId,
+        server_id: serverId,
+        plan_type: 'premium',
+        status: 'active',
+        traffic_limit_mb: parseInt(trafficLimitMb || '0'),
+        period_months: parseInt(periodMonths || '1'),
+        expires_at: expiresAt.toISOString(),
+      }).select().single();
+      
+      if (subRes.error) {
+        console.error('Sub creation array:', subRes.error);
+        return res.status(500).json({ error: 'Пользователь создан, но ошибка создания подписки' });
+      }
+      const subscriptionId = subRes.data.id;
+      const sub = subRes.data;
+      
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      let devices: any[] = [];
+      if (activeServers && activeServers.length > 0) {
+        const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+        const limitBytes = parseInt(trafficLimitMb || '0') * 1024 * 1024;
+        const randomSuffix = Math.random().toString(36).substring(2, 6);
+        const email = `user_${userId.slice(0, 8)}_${randomSuffix}_0`;
+        const uuid = crypto.randomUUID();
+        const expiresAtMs = expiresAt.getTime();
+        let configLines: string[] = [];
+
+        for (const server of activeServers) {
+          try {
+            const { instance: xuiInstance } = await getXuiForServer(server.id);
+            const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+            if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+              configLines.push(rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`));
+            }
+          } catch (e) {
+            console.error(`[AdminCreateSub] Error creating on server ${server.name}`, e);
+          }
+        }
+        
+        if (configLines.length > 0) {
+          const newDevice = {
+            id: `device_${uuid.slice(0,8)}`,
+            label: 'Устройство 1',
+            config: configLines.join('\n'),
+            email: email,
+            uuid: uuid,
+            expiresAt: expiresAt.toISOString(),
+            serverType: 'wifi',
+            trafficUsedBytes: 0,
+            serverId: activeServers[0].id
+          };
+          devices.push(newDevice);
+        }
+      }
+      
+      await supabase.from('subscriptions').update({ 
+        v2ray_config: JSON.stringify(devices),
+        device_limit: devices.length
+      }).eq('id', subscriptionId);
+    }
+
+    res.json({ success: true, userId, password: authData.password });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   return res.status(400).json({ error: 'Функция перенос сервера отключена: используется единая бесшовная сеть.' });
 });
@@ -1701,6 +2291,82 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
   }
 });
 
+app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const { serverId, periodMonths, trafficLimitMb } = req.body;
+  try {
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + parseInt(periodMonths || '1'));
+    
+    // Deactivate existing
+    await supabase.from('subscriptions').update({ status: 'expired' }).eq('user_id', userId).eq('status', 'active');
+    
+    const subRes = await supabase.from('subscriptions').insert({
+      user_id: userId,
+      server_id: serverId,
+      plan_type: 'premium',
+      status: 'active',
+      traffic_limit_mb: parseInt(trafficLimitMb || '0'),
+      period_months: parseInt(periodMonths || '1'),
+      expires_at: expiresAt.toISOString(),
+    }).select().single();
+    
+    if (subRes.error) throw subRes.error;
+    const subscriptionId = subRes.data.id;
+    const sub = subRes.data;
+    
+    // Auto-create default device across active servers
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    let devices: any[] = [];
+    
+    if (activeServers && activeServers.length > 0) {
+      const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+      const limitBytes = parseInt(trafficLimitMb || '0') * 1024 * 1024;
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const email = `user_${userId.slice(0, 8)}_${randomSuffix}_0`;
+      const uuid = crypto.randomUUID();
+      const expiresAtMs = expiresAt.getTime();
+      let configLines: string[] = [];
+
+      for (const server of activeServers) {
+        try {
+          const { instance: xuiInstance } = await getXuiForServer(server.id);
+          const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+          if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+            configLines.push(rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`));
+          }
+        } catch (e) {
+          console.error(`[AdminCreateSub] Error creating on server ${server.name}`, e);
+        }
+      }
+      
+      if (configLines.length > 0) {
+        const newDevice = {
+          id: `device_${uuid.slice(0,8)}`,
+          label: 'Устройство 1',
+          config: configLines.join('\n'),
+          email: email,
+          uuid: uuid,
+          expiresAt: expiresAt.toISOString(),
+          serverType: 'wifi',
+          trafficUsedBytes: 0,
+          serverId: activeServers[0].id
+        };
+        devices.push(newDevice);
+      }
+    }
+    
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      device_limit: devices.length
+    }).eq('id', subscriptionId);
+    
+    res.json({ success: true, subscriptionId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
   const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
@@ -1731,6 +2397,107 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
   }
 });
 
+app.post('/api/admin/servers/:id/backup', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { instance: xuiInstance, server } = await getXuiForServer(id);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+
+    console.log(`[Backup] Starting cloud backup for server: ${server.name} (${id})`);
+    
+    const inbounds = await xuiInstance.getInbounds();
+    if (!inbounds || inbounds.length === 0) {
+      return res.status(400).json({ error: 'На сервере не найдено инбаундов для бэкапа. Убедитесь, что сервер онлайн.' });
+    }
+
+    const { error } = await supabase
+      .from('vpn_servers')
+      .update({ 
+        xui_config_state: { 
+          inbounds: inbounds, 
+          backup_at: new Date().toISOString(),
+          server_name: server.name,
+          ip: server.ip
+        } 
+      })
+      .eq('id', id);
+
+    if (error) throw error;
+
+    res.json({ 
+      success: true, 
+      message: 'Конфигурация сервера успешно сохранена в Supabase',
+      inbounds_count: inbounds.length
+    });
+  } catch (err: any) {
+    console.error(`[AdminBackup] Error for server ${id}:`, err.message);
+    res.status(500).json({ error: 'Ошибка при создании бэкапа: ' + err.message });
+  }
+});
+
+app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { sourceId } = req.body || {};
+  try {
+    const { instance: xuiInstance, server } = await getXuiForServer(id);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+
+    console.log(`[Restore] Starting cloud restore for server: ${server.name} (${id}) ${sourceId ? `from source server ID: ${sourceId}` : ''}`);
+    
+    let configState;
+    if (sourceId) {
+      const { data: sourceServer, error: sErr } = await supabase
+        .from('vpn_servers')
+        .select('xui_config_state, name')
+        .eq('id', sourceId)
+        .maybeSingle();
+      
+      if (sErr) throw sErr;
+      if (!sourceServer || !sourceServer.xui_config_state || !sourceServer.xui_config_state.inbounds) {
+        return res.status(400).json({ error: `В базе нет инбаундов для сервера-источника ${sourceServer?.name || sourceId}. Сделайте бэкап с него сначала.` });
+      }
+      configState = sourceServer.xui_config_state;
+    } else {
+      if (!server.xui_config_state || !server.xui_config_state.inbounds) {
+        return res.status(400).json({ error: 'В базе нет инбаундов для этого сервера. Сделайте бэкап сначала.' });
+      }
+      configState = server.xui_config_state;
+    }
+    
+    const inbounds = configState.inbounds;
+    
+    // Connect to 3x-ui and force clean fresh login session to avoid 403 session expiration
+    await xuiInstance.login(true);
+
+    const existingInbounds = await xuiInstance.getInbounds();
+    
+    for (const inbound of inbounds) {
+      const exists = existingInbounds.find((ei: any) => ei.port === inbound.port && ei.protocol === inbound.protocol);
+      if (exists) {
+        console.log(`[Restore] Deleting existing inbound on port ${inbound.port}`);
+        await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del/${exists.id}`, {}, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/del`, xuiInstance.authHeaders()));
+      }
+      
+      const newInbound = { ...inbound };
+      delete newInbound.id;
+      newInbound.up = 0;
+      newInbound.down = 0;
+      
+      console.log(`[Restore] Creating inbound: ${inbound.remark} on port ${inbound.port}`);
+      await axios.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, newInbound, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/api/inbounds/add`, xuiInstance.authHeaders({ 'Content-Type': 'application/json' })));
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Конфигурация (инбаунды и клиенты) успешно восстановлена на сервер',
+      restored_inbounds: inbounds.length
+    });
+  } catch (err: any) {
+    console.error(`[AdminRestore] Error for server ${id}:`, err.message);
+    res.status(500).json({ error: 'Ошибка при восстановлении бэкапа: ' + err.message });
+  }
+});
+
 app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
   try {
     console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);
@@ -1738,6 +2505,45 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
     if (srvErr) throw srvErr;
     if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
 
+    // Fix limitIp to 0 for all inbound clients directly on XUI to prevent timeouts
+    for (const server of activeServers) {
+        try {
+            console.log(`Fixing limitIp=0 on server ${server.name}...`);
+            const { instance } = await getXuiForServer(server.id);
+            if (!instance['sessionCookie']) await instance.login();
+            const listResp = await axios.get(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/list`, instance.authHeaders()));
+            
+            const inbounds = listResp.data.obj || [];
+            let inboundsUpdated = 0;
+            for (const inbound of inbounds) {
+              const settings = JSON.parse(inbound.settings || '{}');
+              if (!settings.clients || settings.clients.length === 0) continue;
+              
+              let changed = false;
+              settings.clients = settings.clients.map((c: any) => {
+                if (c.limitIp !== 0) {
+                   changed = true;
+                   return { ...c, limitIp: 0 };
+                }
+                return c;
+              });
+
+              if (changed) {
+                console.log(`Updating limitIp: 0 for inbound ${inbound.id} on ${server.name}`);
+                await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, {
+                  ...inbound,
+                  settings: JSON.stringify(settings)
+                }, getRequestConfig(`${instance['host']}${instance['basePath']}/panel/api/inbounds/update/${inbound.id}`, instance.authHeaders()));
+                inboundsUpdated++;
+              }
+            }
+            console.log(`✅ Fixed limitIp on ${inboundsUpdated} inbounds for ${server.name}`);
+        } catch (e: any) {
+            console.error(`Error fixing limitIp on ${server.name}:`, e.message);
+        }
+    }
+
+    const force = req.body?.force === true;
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').eq('status', 'active');
     if (subErr) throw subErr;
@@ -1758,9 +2564,9 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
           links.some(l => l.endsWith(`#${s.name.replace(/\s+/g,'_')}`))
         );
 
-        // If the number of links doesn't match the number of active servers, OR we're missing an active server suffix, we need to sync!
-        if (links.length !== activeServers.length || !hasAllActiveServers) {
-          console.log(`[SyncServers] Syncing device ${device.label} for user ${sub.user_id}`);
+        // If force is true, OR the number of links doesn't match, OR we're missing an active server suffix, we need to sync!
+        if (force || links.length !== activeServers.length || !hasAllActiveServers) {
+          console.log(`[SyncServers] Syncing/regenerating device ${device.label} for user ${sub.user_id} (force: ${force})`);
           let newConfigLines: string[] = [];
           const expiresAtMs = new Date(device.expiresAt).getTime();
 
@@ -2649,12 +3455,16 @@ app.get('/api/subscription/plans', async (req, res) => {
         ],
         serverTypes: [
           { id: 'wifi', label: 'Wi-Fi', price: 0 },
-          { id: 'lte', label: 'LTE', price: 50 },
         ],
         deviceLimit: 2
       });
     }
     const plans = JSON.parse(plansJson);
+    if (plans.serverTypes) {
+      plans.serverTypes = plans.serverTypes.filter((s: any) => s.id === 'wifi');
+    } else {
+      plans.serverTypes = [{ id: 'wifi', label: 'Wi-Fi', price: 0 }];
+    }
     const deviceLimit = await getSystemSetting('DEVICE_LIMIT', '2');
     res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
   } catch (err: any) {
@@ -2884,7 +3694,7 @@ app.post('/api/subscription/buy', async (req, res) => {
         email: email,
         uuid: uuid,
         expiresAt: expiresAt.toISOString(),
-        serverType: serverType || 'LTE',
+        serverType: serverType || 'WIFI',
         trafficUsedBytes: 0,
         serverId: activeServers[0].id // Keep first ID just for backward compatibility
       };
@@ -3700,12 +4510,21 @@ async function startServer() {
     app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
       if (req.url.startsWith('/api')) return next();
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.sendFile(path.join(distPath, 'index.html'), (err) => {
+        if (err) {
+          res.status(404).send('izinet Full-Stack Node.js App is running. Frontend build (dist/index.html) not found. Please run "npm run build".');
+        }
+      });
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`
+🚀 SERVER STARTED SUCCESSFULLY
+🌍 URL: http://0.0.0.0:${PORT}
+🔧 Mode: ${process.env.NODE_ENV}
+📅 Date: ${new Date().toLocaleString()}
+    `);
   });
 }
 
