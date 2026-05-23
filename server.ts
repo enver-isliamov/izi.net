@@ -1381,7 +1381,7 @@ app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
   console.log('🔄 [AdminAPI] Starting Git Pull & Rebuild deployment...');
   
   // Выполняем git pull и сборку приложения
-  const cmd = 'git pull && npm install && npm run build';
+  const cmd = 'git stash && git pull && npm install && npm run build';
   
   exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
     console.log('[AdminAPI] Git pull & build completed.');

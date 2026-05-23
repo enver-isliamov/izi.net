@@ -244,7 +244,7 @@ export default function AdminSettings() {
           window.location.reload();
         }, 4000);
       } else {
-        toast.error('Сборка завершилась ошибкой', { id: 'sys-redeploy' });
+        toast.error('Ошибка сборки. Проверьте логи в терминале выше.', { id: 'sys-redeploy', duration: 10000 });
       }
     } catch (e: any) {
       const errMsg = e.response?.data?.error || e.message;
