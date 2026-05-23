@@ -108,11 +108,12 @@ export default function AdminSettings() {
     try {
       setIsRedeploying(true);
       setSystemLogs([
-        '[Старт] Запуск развертывания новой версии с GitHub...',
-        '[Сборка] Выполнение сборки контейнеров docker compose up --build...',
+        '[Старт] Запуск развертывания новой версии с GitHub (git pull)...',
+        '[Сборка] Установка новых npm зависимостей (npm install)...',
+        '[Компиляция] Сборка фронтенда и бэкенда (npm run build)...',
         '[Система] Пожалуйста подождите, сборка в среднем занимает от 30 до 90 секунд...'
       ]);
-      toast.loading('Деплой кода из GitHub...', { id: 'sys-redeploy' });
+      toast.loading('Деплой и сборка кода из GitHub...', { id: 'sys-redeploy' });
       
       const { data } = await axios.post('/api/admin/system/git-pull-redeploy', {}, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
