@@ -1937,6 +1937,118 @@ app.get('/api/admin/servers/diag', adminOnly, async (req, res) => {
   res.json(results);
 });
 
+app.post('/api/admin/users/create', adminOnly, async (req, res) => {
+  const { email, password, initialBalance, createSubscription, serverId, trafficLimitMb, periodMonths } = req.body;
+  
+  try {
+    const authData: any = {
+      email,
+      email_confirm: true,
+    };
+    if (password) {
+      authData.password = password;
+    } else {
+      authData.password = Math.random().toString(36).substring(2, 12);
+    }
+    
+    // Create auth user
+    const { data: authUser, error: authError } = await supabase.auth.admin.createUser(authData);
+    
+    if (authError) {
+      return res.status(400).json({ error: authError.message });
+    }
+
+    const userId = authUser.user.id;
+
+    // Wait for the on_auth_user_created trigger to insert user & balance
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Update balance
+    if (initialBalance && parseFloat(initialBalance) > 0) {
+      await supabase.from('balances').update({ amount: parseFloat(initialBalance) }).eq('user_id', userId);
+      // Log transaction
+      await supabase.from('transactions').insert({
+        user_id: userId,
+        amount: parseFloat(initialBalance),
+        type: 'deposit',
+        status: 'completed',
+        description: 'Initial balance transfer (Admin)'
+      });
+    }
+
+    // Create Subscription if checked
+    if (createSubscription && serverId) {
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + parseInt(periodMonths || '1'));
+      
+      const subRes = await supabase.from('subscriptions').insert({
+        user_id: userId,
+        server_id: serverId,
+        plan_type: 'premium',
+        status: 'active',
+        traffic_limit_mb: parseInt(trafficLimitMb || '0'),
+        period_months: parseInt(periodMonths || '1'),
+        expires_at: expiresAt.toISOString(),
+      }).select().single();
+      
+      if (subRes.error) {
+        console.error('Sub creation array:', subRes.error);
+        return res.status(500).json({ error: 'Пользователь создан, но ошибка создания подписки' });
+      }
+      const subscriptionId = subRes.data.id;
+      const sub = subRes.data;
+      
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      let devices: any[] = [];
+      if (activeServers && activeServers.length > 0) {
+        const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+        const limitBytes = parseInt(trafficLimitMb || '0') * 1024 * 1024;
+        const randomSuffix = Math.random().toString(36).substring(2, 6);
+        const email = `user_${userId.slice(0, 8)}_${randomSuffix}_0`;
+        const uuid = crypto.randomUUID();
+        const expiresAtMs = expiresAt.getTime();
+        let configLines: string[] = [];
+
+        for (const server of activeServers) {
+          try {
+            const { instance: xuiInstance } = await getXuiForServer(server.id);
+            const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+            if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+              configLines.push(rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`));
+            }
+          } catch (e) {
+            console.error(`[AdminCreateSub] Error creating on server ${server.name}`, e);
+          }
+        }
+        
+        if (configLines.length > 0) {
+          const newDevice = {
+            id: `device_${uuid.slice(0,8)}`,
+            label: 'Устройство 1',
+            config: configLines.join('\n'),
+            email: email,
+            uuid: uuid,
+            expiresAt: expiresAt.toISOString(),
+            serverType: 'wifi',
+            trafficUsedBytes: 0,
+            serverId: activeServers[0].id
+          };
+          devices.push(newDevice);
+        }
+      }
+      
+      await supabase.from('subscriptions').update({ 
+        v2ray_config: JSON.stringify(devices),
+        device_limit: devices.length
+      }).eq('id', subscriptionId);
+    }
+
+    res.json({ success: true, userId, password: authData.password });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/admin/users/move-server', adminOnly, async (req, res) => {
   return res.status(400).json({ error: 'Функция перенос сервера отключена: используется единая бесшовная сеть.' });
 });
@@ -2174,6 +2286,82 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
     }).eq('id', sub.id);
 
     res.json({ success: true, message: 'Устройство добавлено', device: newDevice });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const { serverId, periodMonths, trafficLimitMb } = req.body;
+  try {
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + parseInt(periodMonths || '1'));
+    
+    // Deactivate existing
+    await supabase.from('subscriptions').update({ status: 'expired' }).eq('user_id', userId).eq('status', 'active');
+    
+    const subRes = await supabase.from('subscriptions').insert({
+      user_id: userId,
+      server_id: serverId,
+      plan_type: 'premium',
+      status: 'active',
+      traffic_limit_mb: parseInt(trafficLimitMb || '0'),
+      period_months: parseInt(periodMonths || '1'),
+      expires_at: expiresAt.toISOString(),
+    }).select().single();
+    
+    if (subRes.error) throw subRes.error;
+    const subscriptionId = subRes.data.id;
+    const sub = subRes.data;
+    
+    // Auto-create default device across active servers
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    let devices: any[] = [];
+    
+    if (activeServers && activeServers.length > 0) {
+      const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+      const limitBytes = parseInt(trafficLimitMb || '0') * 1024 * 1024;
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const email = `user_${userId.slice(0, 8)}_${randomSuffix}_0`;
+      const uuid = crypto.randomUUID();
+      const expiresAtMs = expiresAt.getTime();
+      let configLines: string[] = [];
+
+      for (const server of activeServers) {
+        try {
+          const { instance: xuiInstance } = await getXuiForServer(server.id);
+          const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+          if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
+            configLines.push(rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`));
+          }
+        } catch (e) {
+          console.error(`[AdminCreateSub] Error creating on server ${server.name}`, e);
+        }
+      }
+      
+      if (configLines.length > 0) {
+        const newDevice = {
+          id: `device_${uuid.slice(0,8)}`,
+          label: 'Устройство 1',
+          config: configLines.join('\n'),
+          email: email,
+          uuid: uuid,
+          expiresAt: expiresAt.toISOString(),
+          serverType: 'wifi',
+          trafficUsedBytes: 0,
+          serverId: activeServers[0].id
+        };
+        devices.push(newDevice);
+      }
+    }
+    
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      device_limit: devices.length
+    }).eq('id', subscriptionId);
+    
+    res.json({ success: true, subscriptionId });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
