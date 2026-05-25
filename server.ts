@@ -3366,17 +3366,37 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
 // 🌐 Supabase API Bypassing Proxy for Russian clients
 app.all('/api/supabase-proxy/*', async (req, res) => {
   if (!supabaseUrl) {
+    console.error('❌ [Supabase Proxy] Supabase URL is not configured in process.env!');
     return res.status(500).json({ error: 'Supabase URL is not configured' });
   }
 
+  // Gracefully handle trailing slash in supabaseUrl
+  const cleanSupabaseUrl = supabaseUrl.endsWith('/') ? supabaseUrl.slice(0, -1) : supabaseUrl;
+  
   // Extract resource path and query string from proxy request URL
-  const pathWithQuery = req.url.replace('/api/supabase-proxy/', '');
-  const targetUrl = `${supabaseUrl}/${pathWithQuery}`;
+  const pathWithQuery = req.url.startsWith('/api/supabase-proxy/')
+    ? req.url.slice('/api/supabase-proxy/'.length)
+    : req.url.replace(/^\/?api\/supabase-proxy\//, '');
+    
+  const targetUrl = `${cleanSupabaseUrl}/${pathWithQuery}`;
 
-  // Mirror headers, omitting original Host and adjusting Access Control policy
+  console.log(`🌐 [Supabase Proxy] Proxying ${req.method} request to: ${targetUrl}`);
+
+  // Mirror headers, strictly omitting original Content-Length, Host, Accept-Encoding and other protocol headers 
+  // to avoid payload mismatch hangs/failures (502 Gateway errors)
   const headers: Record<string, string> = {};
+  const forbiddenHeaders = [
+    'host',
+    'content-length',
+    'connection',
+    'accept-encoding',
+    'content-encoding',
+    'transfer-encoding',
+    'keep-alive'
+  ];
+  
   for (const [key, value] of Object.entries(req.headers)) {
-    if (value && key.toLowerCase() !== 'host') {
+    if (value && !forbiddenHeaders.includes(key.toLowerCase())) {
       headers[key] = Array.isArray(value) ? value.join(', ') : value;
     }
   }
@@ -3397,7 +3417,9 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
 
     const responseData = await response.text();
 
-    // Mirror back Supabase's response headers, bypassing connection and compression ones
+    console.log(`🌐 [Supabase Proxy] Received response with status ${response.status} from ${targetUrl}`);
+
+    // Mirror back Supabase's response headers, bypassing connection, compression and length ones
     const avoidHeaders = ['content-encoding', 'transfer-encoding', 'connection', 'keep-alive', 'content-length', 'access-control-allow-origin'];
     response.headers.forEach((value, key) => {
       if (!avoidHeaders.includes(key.toLowerCase())) {
@@ -3407,8 +3429,8 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
 
     res.status(response.status).send(responseData);
   } catch (err: any) {
-    console.error('⚠️ Supabase Proxy Error:', err);
-    res.status(502).json({ error: 'Supabase Proxy Error', details: err.message });
+    console.error('⚠️ [Supabase Proxy Error]:', err);
+    res.status(502).json({ error: 'Supabase Proxy Error', details: err.message, stack: err.stack });
   }
 });
 
