@@ -3363,6 +3363,55 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   console.log(`✅ Balance successfully updated for user ${userId}. New total: ${currentAmount + amount}`);
 }
 
+// 🌐 Supabase API Bypassing Proxy for Russian clients
+app.all('/api/supabase-proxy/*', async (req, res) => {
+  if (!supabaseUrl) {
+    return res.status(500).json({ error: 'Supabase URL is not configured' });
+  }
+
+  // Extract resource path and query string from proxy request URL
+  const pathWithQuery = req.url.replace('/api/supabase-proxy/', '');
+  const targetUrl = `${supabaseUrl}/${pathWithQuery}`;
+
+  // Mirror headers, omitting original Host and adjusting Access Control policy
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value && key.toLowerCase() !== 'host') {
+      headers[key] = Array.isArray(value) ? value.join(', ') : value;
+    }
+  }
+
+  let requestBody: any = undefined;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (req.body && Object.keys(req.body).length > 0) {
+      requestBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    }
+  }
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers: headers,
+      body: requestBody
+    });
+
+    const responseData = await response.text();
+
+    // Mirror back Supabase's response headers, bypassing connection and compression ones
+    const avoidHeaders = ['content-encoding', 'transfer-encoding', 'connection', 'keep-alive', 'content-length', 'access-control-allow-origin'];
+    response.headers.forEach((value, key) => {
+      if (!avoidHeaders.includes(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    });
+
+    res.status(response.status).send(responseData);
+  } catch (err: any) {
+    console.error('⚠️ Supabase Proxy Error:', err);
+    res.status(502).json({ error: 'Supabase Proxy Error', details: err.message });
+  }
+});
+
 // Health check and configuration status
 app.get('/api/config', (req, res) => {
   res.json({
