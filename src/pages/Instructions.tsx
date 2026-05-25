@@ -146,15 +146,19 @@ export default function Instructions() {
                 <CardTitle>INCY</CardTitle>
                 <CardDescription>Официальное приложение. Быстрое, простое и надежное.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из App Store." />
-                  <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
-                  <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
-                </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/incy/id6756943388', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
+              <CardContent className="space-y-4">
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/incy/id6756943388', '_blank')} className="w-full rounded-xl border-border hover:bg-muted font-bold group">
                   <Download className="mr-2 h-4 w-4 text-primary group-hover:scale-110 transition-transform" /> Скачать в App Store
                 </Button>
+
+                <div className="pt-2 border-t border-border/30">
+                  <p className="text-xs font-bold text-primary mb-2 uppercase tracking-wider">Инструкция по подключению:</p>
+                  <div className="space-y-1">
+                    <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из App Store." />
+                    <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
+                    <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -166,15 +170,19 @@ export default function Instructions() {
                 <CardTitle>Hiddify (Бесплатно)</CardTitle>
                 <CardDescription>Ультимативное решение для обхода любых блокировок.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Установите Hiddify" description="Найдите в App Store и скачайте." />
-                  <Step number={2} title="Добавьте профиль" description="Нажмите '+' и выберите 'Добавить из буфера'." />
-                  <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
-                </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
+              <CardContent className="space-y-4">
+                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532', '_blank')} className="w-full rounded-xl border-border hover:bg-muted font-bold">
                   <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
                 </Button>
+
+                <div className="pt-2 border-t border-border/30">
+                  <p className="text-xs font-bold text-primary mb-2 uppercase tracking-wider">Инструкция по подключению:</p>
+                  <div className="space-y-1">
+                    <Step number={1} title="Установите Hiddify" description="Найдите в App Store и скачайте." />
+                    <Step number={2} title="Добавьте профиль" description="Нажмите '+' и выберите 'Добавить из буфера'." />
+                    <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -193,15 +201,19 @@ export default function Instructions() {
                 <CardTitle>INCY</CardTitle>
                 <CardDescription>Официальное приложение. Быстрое, простое и надежное.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из Google Play." />
-                  <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
-                  <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
-                </div>
-                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=llc.itdev.incy', '_blank')} className="w-full mt-6 rounded-xl bg-primary text-black font-bold group">
+              <CardContent className="space-y-4">
+                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=llc.itdev.incy', '_blank')} className="w-full rounded-xl bg-primary text-black font-bold group">
                   <Download className="mr-2 h-4 w-4 text-black group-hover:scale-110 transition-transform" /> Скачать в Google Play
                 </Button>
+
+                <div className="pt-2 border-t border-border/30">
+                  <p className="text-xs font-bold text-primary mb-2 uppercase tracking-wider">Инструкция по подключению:</p>
+                  <div className="space-y-1">
+                    <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из Google Play." />
+                    <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
+                    <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -213,15 +225,19 @@ export default function Instructions() {
                 <CardTitle>Hiddify</CardTitle>
                 <CardDescription>Ультимативное решение для обхода любых блокировок.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Установите Hiddify" description="Найдите в Google Play и скачайте." />
-                  <Step number={2} title="Добавьте профиль" description="Нажмите '+ Новая конфигурация' -> 'Из буфера'." />
-                  <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
-                </div>
-                <Button variant="outline" onClick={() => window.open('https://play.google.com/store/apps/details?id=app.hiddify.com', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
+              <CardContent className="space-y-4">
+                <Button variant="outline" onClick={() => window.open('https://play.google.com/store/apps/details?id=app.hiddify.com', '_blank')} className="w-full rounded-xl border-border hover:bg-muted font-bold">
                   <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
                 </Button>
+
+                <div className="pt-2 border-t border-border/30">
+                  <p className="text-xs font-bold text-primary mb-2 uppercase tracking-wider">Инструкция по подключению:</p>
+                  <div className="space-y-1">
+                    <Step number={1} title="Установите Hiddify" description="Найдите в Google Play и скачайте." />
+                    <Step number={2} title="Добавьте профиль" description="Нажмите '+ Новая конфигурация' -> 'Из буфера'." />
+                    <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -233,21 +249,36 @@ export default function Instructions() {
               <Card className="bg-card/50 border-border/40">
                 <CardHeader>
                   <CardTitle>Windows (Hiddify)</CardTitle>
+                  <CardDescription>Приложение Hiddify для персональных компьютеров.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <Step number={1} title="Установка для ПК" description="Перейдите на GitHub и скачайте Hiddify-Windows-Setup." />
-                  <Step number={2} title="Импорт" description="Ткните на плюс справа вверху и выберите 'Добавить из буфера'." />
                   <Button variant="outline" onClick={() => window.open('https://github.com/hiddify/hiddify-next/releases', '_blank')} className="w-full rounded-xl border-border">Скачать Hiddify для Windows</Button>
+                  
+                  <div className="pt-2 border-t border-border/30">
+                    <p className="text-xs font-bold text-primary mb-2 uppercase tracking-wider">Инструкция по подключению:</p>
+                    <div className="space-y-1">
+                      <Step number={1} title="Установка для ПК" description="Перейдите на GitHub и скачайте Hiddify-Windows-Setup." />
+                      <Step number={2} title="Импорт" description="Ткните на плюс справа вверху и выберите 'Добавить из буфера'." />
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
+
               <Card className="bg-card/50 border-border/40">
                 <CardHeader>
                   <CardTitle>macOS (Hiddify)</CardTitle>
+                  <CardDescription>Приложение Hiddify для устройств на macOS.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <Step number={1} title="Установка для Mac" description="Скачайте .dmg с GitHub или установите из App Store." />
-                  <Step number={2} title="Настройка" description="Разрешите VPN в настройках системы и добавьте конфиг." />
                   <Button variant="outline" onClick={() => window.open('https://github.com/hiddify/hiddify-next/releases', '_blank')} className="w-full rounded-xl border-border">Скачать Hiddify для macOS</Button>
+                  
+                  <div className="pt-2 border-t border-border/30">
+                    <p className="text-xs font-bold text-primary mb-2 uppercase tracking-wider">Инструкция по подключению:</p>
+                    <div className="space-y-1">
+                      <Step number={1} title="Установка для Mac" description="Скачайте .dmg с GitHub или установите из App Store." />
+                      <Step number={2} title="Настройка" description="Разрешите VPN в настройках системы и добавьте конфиг." />
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>

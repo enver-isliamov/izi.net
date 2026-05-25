@@ -17,9 +17,6 @@ export default function AdminSettings() {
     ENOT_MERCHANT_ID: '',
     ENOT_SECRET_KEY: '',
     ENOT_SECRET_KEY2: '',
-    CLOUDFLARE_EMAIL: '',
-    CLOUDFLARE_API_KEY: '',
-    CLOUDFLARE_API_TOKEN: '',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,9 +70,6 @@ export default function AdminSettings() {
         ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim(),
         ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim(),
         ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim(),
-        CLOUDFLARE_EMAIL: settings.CLOUDFLARE_EMAIL?.trim(),
-        CLOUDFLARE_API_KEY: settings.CLOUDFLARE_API_KEY?.trim(),
-        CLOUDFLARE_API_TOKEN: settings.CLOUDFLARE_API_TOKEN?.trim(),
       };
       
       const payload = Object.entries(cleanSettings).map(([key, value]) => ({ key, value }));

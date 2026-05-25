@@ -146,38 +146,6 @@ export function Header() {
         <DropdownMenu>
           <DropdownMenuTrigger 
             render={
-              <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary relative">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full neon-glow" />
-              </Button>
-            } 
-          />
-          <DropdownMenuContent align="end" className="w-72 bg-card border-border p-0 overflow-hidden">
-            <div className="p-4 border-b border-border bg-muted/30">
-              <h4 className="font-bold text-sm">Уведомления</h4>
-            </div>
-            <div className="p-4 space-y-4 max-h-[300px] overflow-y-auto">
-              <div className="flex gap-3 text-xs">
-                <div className="w-2 h-2 bg-primary rounded-full mt-1 shrink-0" />
-                <div>
-                  <p className="font-bold text-white mb-0.5">Добро пожаловать в izinet!</p>
-                  <p className="text-muted-foreground">Настройте ваше первое устройство в разделе "Установка".</p>
-                </div>
-              </div>
-              <div className="flex gap-3 text-xs opacity-50">
-                <div className="w-2 h-2 bg-muted rounded-full mt-1 shrink-0" />
-                <div>
-                  <p className="font-bold mb-0.5">Обновление серверов</p>
-                  <p className="text-muted-foreground">Мы добавили новые локации в Европе.</p>
-                </div>
-              </div>
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        
-        <DropdownMenu>
-          <DropdownMenuTrigger 
-            render={
               <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 border border-border ml-2">
                 <User className="w-5 h-5" />
               </Button>
