@@ -389,7 +389,7 @@ export default function Dashboard() {
   }
 
   const activeDeviceCount = vpnDevices.length;
-  // deviceLimit is now fetched from globalDeviceLimit directly
+  const userDeviceLimit = subscription?.device_limit || globalDeviceLimit || 2;
 
   let daysLeft = 0;
   if (subscription?.expires_at) {
@@ -457,7 +457,7 @@ export default function Dashboard() {
           { icon: Wallet, label: 'Баланс', value: `${Number(currentBalance).toFixed(0)}`, sub: '₽', onClick: () => navigate('/wallet') },
           { icon: Users, label: 'Рефералы', value: refCount, onClick: () => navigate('/referrals') },
           { icon: Clock, label: 'Осталось', value: subscription ? `${daysLeft}д.` : '—', color: daysLeft <= 3 ? "text-red-400" : "text-foreground" },
-          { icon: Smartphone, label: 'Устройства', value: String(activeDeviceCount), sub: `из ${globalDeviceLimit}` }
+          { icon: Smartphone, label: 'Устройства', value: String(activeDeviceCount), sub: `из ${userDeviceLimit}` }
         ].map((stat, i) => (
           <motion.div
             key={i}
@@ -484,7 +484,6 @@ export default function Dashboard() {
                   </span>
                 </div>
               </div>
-              {stat.onClick && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/30 shrink-0" />}
             </Card>
           </motion.div>
         ))}
@@ -496,7 +495,7 @@ export default function Dashboard() {
           <h2 className="text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
             <Smartphone className="w-4 h-4 text-primary" /> Ваши Устройства
           </h2>
-          {vpnDevices.length < globalDeviceLimit && (
+          {vpnDevices.length < userDeviceLimit && (
             <Button 
               variant="outline" 
               size="sm" 
