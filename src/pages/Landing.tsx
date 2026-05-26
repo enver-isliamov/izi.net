@@ -50,7 +50,7 @@ export default function Landing() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              Стабильно работает в 2024
+              Стабильно работает в {new Date().getFullYear()}
             </div>
             
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-black text-white tracking-tighter leading-[1.1] mb-6">
@@ -168,7 +168,7 @@ export default function Landing() {
       <footer className="border-t border-white/5 py-8 text-center text-muted-foreground text-sm flex flex-col md:flex-row items-center justify-between max-w-6xl mx-auto w-full px-4 gap-4">
         <div className="flex items-center gap-2">
             <span className="font-extrabold uppercase tracking-wide text-white">izinet</span>
-            <span className="opacity-50">© 2024</span>
+            <span className="opacity-50">© {new Date().getFullYear()}</span>
         </div>
         <div className="flex gap-6">
             <a href="/terms" className="hover:text-white transition-colors">Пользовательское соглашение</a>
