@@ -1825,13 +1825,26 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
     }
 
-    const { data, error } = await query;
+    const [usersResult, proSettingsResult] = await Promise.all([
+      query,
+      supabase.from('settings').select('key, value').like('key', 'PRO_USER_%')
+    ]);
+
+    const { data, error } = usersResult;
     if (error) {
        console.error(`[AdminAPI][${requestId}] Supabase error:`, error.message);
        return res.status(500).json({ error: error.message });
     }
 
     if (!data) return res.json([]);
+
+    const proUsersMap: Record<string, boolean> = {};
+    if (proSettingsResult.data) {
+      proSettingsResult.data.forEach((setting: any) => {
+        const userId = setting.key.replace('PRO_USER_', '');
+        proUsersMap[userId] = setting.value === 'true';
+      });
+    }
 
     const transformed = data.map((u: any) => {
       let subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
@@ -1849,6 +1862,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
       return {
         ...u,
+        is_pro: !!proUsersMap[u.id],
         balance: balance,
         active_subscription: activeSub ? {
           ...activeSub,
@@ -2386,7 +2400,7 @@ app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) =>
 
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { role, balance } = req.body;
+  const { role, balance, is_pro } = req.body;
   
   try {
     let updatedUser: any = null;
@@ -2413,6 +2427,22 @@ app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
 
     if (!updatedUser) {
       return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // Update Pro Status in settings if defined
+    if (is_pro !== undefined) {
+      const { error: proErr } = await supabase
+        .from('settings')
+        .upsert({
+          key: `PRO_USER_${id}`,
+          value: is_pro ? 'true' : 'false',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+      
+      if (proErr) {
+        console.error('⚠️ Failed to save user Pro status in settings:', proErr.message);
+      }
+      updatedUser.is_pro = !!is_pro;
     }
 
     // 2. Update balance & log transaction if balance is defined
@@ -3636,6 +3666,35 @@ app.get('/api/subscription/plans', async (req, res) => {
     res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/subscription/universal-link-visible', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const universalLinkStatus = await getSystemSetting('UNIVERSAL_LINK_STATUS', 'all'); // 'all' | 'pro' | 'none'
+    
+    if (universalLinkStatus === 'none') {
+      return res.json({ visible: false });
+    }
+    
+    if (universalLinkStatus === 'pro') {
+      // Check if user is Pro
+      const { data: proSetting } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', `PRO_USER_${userId}`)
+        .maybeSingle();
+      
+      const isPro = proSetting?.value === 'true';
+      return res.json({ visible: isPro });
+    }
+    
+    // Status is 'all' (default)
+    res.json({ visible: true });
+  } catch (err: any) {
+    console.error('Error fetching universal-link-visible:', err);
+    res.json({ visible: false });
   }
 });
 

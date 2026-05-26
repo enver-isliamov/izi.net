@@ -62,6 +62,7 @@ export default function Dashboard() {
   const [qrData, setQrData] = useState<{ value: string; key?: string; sub?: string; title: string; subtitle: string } | null>(null);
   const [qrMode, setQrMode] = useState<'key' | 'sub'>('sub');
   const [isQrOpen, setIsQrOpen] = useState(false);
+  const [showUniversalLink, setShowUniversalLink] = useState(false);
 
   const fetchDashboardData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
@@ -73,12 +74,15 @@ export default function Dashboard() {
     isFetching.current = true;
     
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
       const [
         { data: userRes },
         balanceResult,
         { data: subRes },
         { data: refRes },
-        plansData
+        plansData,
+        universalLinkRes
       ] = await Promise.all([
         supabase.from('users').select('*').eq('id', user.id).single(),
         supabase.from('balances').select('*').eq('user_id', user.id).maybeSingle(),
@@ -90,7 +94,12 @@ export default function Dashboard() {
           .limit(1)
           .maybeSingle(),
         supabase.from('referrals').select('commission_earned').eq('referrer_id', user.id),
-        fetch('/api/subscription/plans').then(res => res.json()).catch(() => ({ deviceLimit: 2 }))
+        fetch('/api/subscription/plans').then(res => res.json()).catch(() => ({ deviceLimit: 2 })),
+        fetch('/api/subscription/universal-link-visible', {
+          headers: {
+            'Authorization': `Bearer ${session?.access_token}`
+          }
+        }).then(res => res.json()).catch(() => ({ visible: false }))
       ]);
 
       const balanceRes = balanceResult.data;
@@ -111,6 +120,7 @@ export default function Dashboard() {
       setReferrals(refRes || []);
       setActiveServer(serverData);
       setGlobalDeviceLimit(plansData?.deviceLimit || 2);
+      setShowUniversalLink(!!universalLinkRes?.visible);
       
       if (subRes?.id) {
         setSubUrl(`${window.location.origin}/api/sub/${subRes.id}`);
@@ -412,20 +422,20 @@ export default function Dashboard() {
           >
             <Card 
               className={cn(
-                "glass-card p-2 md:p-3 flex items-center justify-between hover:border-primary/30 transition-colors",
+                "glass-card p-2 md:p-3 flex items-center justify-between gap-1 hover:border-primary/30 transition-colors h-14 md:h-16",
                 stat.onClick && "cursor-pointer"
               )} 
               onClick={stat.onClick}
             >
-              <div className="flex flex-col">
-                <span className="text-[8px] md:text-[9px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1">
+              <div className="flex flex-col min-w-0 pr-1 flex-1">
+                <span className="text-[8px] md:text-[9px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1 truncate">
                   <stat.icon className="w-2.5 h-2.5 text-primary shrink-0" /> {stat.label}
                 </span>
-                <span className={cn("text-xs md:text-sm font-black mt-0.5", stat.color)}>
+                <span className={cn("text-xs md:text-sm font-black mt-0.5 truncate", stat.color)}>
                   {stat.value} {stat.sub && <span className="text-[9px] md:text-xs font-bold text-muted-foreground">{stat.sub}</span>}
                 </span>
               </div>
-              {stat.onClick && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40" />}
+              {stat.onClick && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />}
             </Card>
           </motion.div>
         ))}
@@ -449,7 +459,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {subscription && (
+        {subscription && showUniversalLink && (
            <div className="bg-primary/5 border border-primary/25 rounded-xl p-2 md:p-2.5 flex items-center justify-between gap-3 text-xs">
              <div className="flex items-center gap-2">
                <Globe className="w-4 h-4 text-primary shrink-0 animate-pulse" />

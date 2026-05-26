@@ -19,6 +19,7 @@ export default function AdminSettings() {
     ENOT_SECRET_KEY2: '',
     PROMO_CODES_ENABLED: 'true',
     PROMO_CODES_LIST: '',
+    UNIVERSAL_LINK_STATUS: 'all',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -74,6 +75,7 @@ export default function AdminSettings() {
         ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim() || '',
         PROMO_CODES_ENABLED: settings.PROMO_CODES_ENABLED || 'true',
         PROMO_CODES_LIST: settings.PROMO_CODES_LIST?.trim() || '',
+        UNIVERSAL_LINK_STATUS: settings.UNIVERSAL_LINK_STATUS || 'all',
       };
       
       const payload = Object.entries(cleanSettings).map(([key, value]) => ({ key, value }));
@@ -433,6 +435,57 @@ export default function AdminSettings() {
                   Если промокод валиден и пользователь еще никогда не использовал пробный период через промокод, <br />
                   для него автоматически за пару секунд генерируется VLESS подписка на 24 часа. <br />
                   По окончании пробного периода пользователь сможет продлить подписку стандартным способом, пополнив баланс.
+                </p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Universal Link Visibility Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+            <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+              <Globe size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Универсальная ссылка подписки у юзеров</h2>
+              <p className="text-xs text-muted-foreground">Настройка видимости общей ссылки (одна ссылка на все устройства) во избежание обхода оплаты за доп. устройства</p>
+            </div>
+          </div>
+
+          <div className="grid gap-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-white">Статус отображения ссылки</p>
+                <p className="text-xs text-muted-foreground">Кто будет видеть общую ссылку v2ray/vless подписки на дашборде</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={settings.UNIVERSAL_LINK_STATUS || 'all'}
+                  onChange={(e) => setSettings({ ...settings, UNIVERSAL_LINK_STATUS: e.target.value })}
+                  className="bg-secondary/50 border border-white/15 text-white text-xs font-bold rounded-lg px-3 py-2 outline-none focus:border-purple-500 transition-all font-mono"
+                >
+                  <option value="all">Показывать всем (All Users)</option>
+                  <option value="pro">Только Pro-пользователям (Pro Only)</option>
+                  <option value="none">Скрыть для всех (No/Hidden)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-4 bg-purple-500/5 rounded-xl border border-purple-500/10">
+              <AlertCircle className="text-purple-400 shrink-0 mt-0.5" size={16} />
+              <div className="space-y-1">
+                <p className="text-[11px] text-purple-200">Монетизация на несколько устройств</p>
+                <p className="text-[10px] text-purple-200/60 leading-relaxed">
+                  По умолчанию пользователи получают универсальный URL подписки, который включает в себя ключи для ВСЕХ их добавленных устройств. <br />
+                  Если вы хотите монетизировать каждое устройство отдельно (чтобы пользователь платил за каждое дополнительное устройство отдельно и не мог поделиться одной ссылкой на все девайсы): <br />
+                  1. Выберите режим <b>"Только Pro-пользователям"</b> или <b>"Скрыть для всех"</b>. <br />
+                  2. Пользователи без Pro статуса вынуждены будут копировать и настраивать конфигурации индивидуально для каждого устройства, а администратор сможет брать плату за доп. слоты. <br />
+                  3. Вы можете даровать право "Pro" отдельным надежным пользователям через панель "Пользователи".
                 </p>
               </div>
             </div>
