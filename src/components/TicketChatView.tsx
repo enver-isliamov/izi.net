@@ -98,6 +98,13 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
         }
       } else {
         setInputText('');
+        if (data) {
+          setMessages(prev => {
+            // Prevent duplicates if realtime fires
+            if (prev.some(m => m.id === data.id)) return prev;
+            return [...prev, data];
+          });
+        }
       }
     } catch(e) {
       console.error(e);

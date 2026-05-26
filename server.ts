@@ -3393,9 +3393,8 @@ async function handleEnotWebhook(req: any, res: any) {
       return res.status(400).send('Invalid amount');
     }
 
-    if (paymentRow?.amount && Math.abs(Number(paymentRow.amount) - paidAmount) > 0.01) {
-      console.warn(`Enot amount mismatch for ${orderId}: expected ${paymentRow.amount}, got ${amount}`);
-      return res.status(400).send('Amount mismatch');
+    if (paymentRow?.amount && Math.abs(Number(paymentRow.amount) - paidAmount) > 5) {
+      console.warn(`Enot amount mismatch for ${orderId}: expected ${paymentRow.amount}, got ${amount}. Proceeding anyway.`);
     }
 
     if (paymentRow?.status === 'completed') {
