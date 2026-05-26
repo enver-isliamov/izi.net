@@ -17,6 +17,8 @@ export default function AdminSettings() {
     ENOT_MERCHANT_ID: '',
     ENOT_SECRET_KEY: '',
     ENOT_SECRET_KEY2: '',
+    PROMO_CODES_ENABLED: 'true',
+    PROMO_CODES_LIST: '',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,9 +69,11 @@ export default function AdminSettings() {
       setSaving(true);
       // Clean values
       const cleanSettings = {
-        ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim(),
-        ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim(),
-        ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim(),
+        ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim() || '',
+        ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim() || '',
+        ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim() || '',
+        PROMO_CODES_ENABLED: settings.PROMO_CODES_ENABLED || 'true',
+        PROMO_CODES_LIST: settings.PROMO_CODES_LIST?.trim() || '',
       };
       
       const payload = Object.entries(cleanSettings).map(([key, value]) => ({ key, value }));
@@ -353,6 +357,82 @@ export default function AdminSettings() {
                   1. В поле Shop ID укажите идентификатор кассы из Enot.io. <br />
                   2. В первое поле ключа вставьте <b>секретный ключ кассы</b> для заголовка x-api-key. <br />
                   3. Во второе поле вставьте <b>дополнительный ключ</b> для проверки HMAC-подписи webhook.
+                </p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Promo Codes Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+              <Key size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Промокоды на пробный период (24ч)</h2>
+              <p className="text-xs text-muted-foreground">Настройка промокодов для активации бесплатного теста на 24 часа для новых пользователей</p>
+            </div>
+          </div>
+
+          <div className="grid gap-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-white">Активность функции промокодов</p>
+                <p className="text-xs text-muted-foreground">Включить или полностью отключить поле ввода промокодов у пользователей</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, PROMO_CODES_ENABLED: 'true' })}
+                  className={`px-4 py-2 text-xs font-bold uppercase rounded-lg border transition-all ${
+                    settings.PROMO_CODES_ENABLED === 'true'
+                      ? 'bg-blue-500 border-blue-500 text-white'
+                      : 'bg-white/5 border-white/5 text-muted-foreground hover:bg-white/10'
+                  }`}
+                >
+                  Включено
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, PROMO_CODES_ENABLED: 'false' })}
+                  className={`px-4 py-2 text-xs font-bold uppercase rounded-lg border transition-all ${
+                    settings.PROMO_CODES_ENABLED === 'false'
+                      ? 'bg-red-500 border-red-500 text-white'
+                      : 'bg-white/5 border-white/5 text-muted-foreground hover:bg-white/10'
+                  }`}
+                >
+                  Отключено
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Список промокодов (слов/кодов)</label>
+              <textarea
+                value={settings.PROMO_CODES_LIST || ''}
+                onChange={(e) => setSettings({ ...settings, PROMO_CODES_LIST: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm min-h-[100px]"
+                placeholder="PROMO24&#10;FREE24&#10;IZINET24"
+              />
+              <p className="text-[10px] text-muted-foreground ml-1">
+                Введите промокоды, каждый с новой строки или через запятую. Регистр букв игнорируется (все будет приведено к верхнему регистру).
+              </p>
+            </div>
+
+            <div className="flex items-start gap-3 p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
+              <AlertCircle className="text-blue-400 shrink-0 mt-0.5" size={16} />
+              <div className="space-y-1">
+                <p className="text-[11px] text-blue-200">Как это работает для пользователей</p>
+                <p className="text-[10px] text-blue-200/60 leading-relaxed">
+                  Пользователь заходит в раздел подписок и в поле промокода вводит одно из указанных ключевых слов. <br />
+                  Если промокод валиден и пользователь еще никогда не использовал пробный период через промокод, <br />
+                  для него автоматически за пару секунд генерируется VLESS подписка на 24 часа. <br />
+                  По окончании пробного периода пользователь сможет продлить подписку стандартным способом, пополнив баланс.
                 </p>
               </div>
             </div>

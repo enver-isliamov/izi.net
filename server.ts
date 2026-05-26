@@ -4002,6 +4002,209 @@ app.post('/api/subscription/buy', async (req, res) => {
   }
 });
 
+// Apply Promo Code for 24-hour Trial Subscription
+app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
+  const { code } = req.body;
+  
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Пожалуйста, введите промокод.' });
+  }
+
+  const inputCode = code.trim().toUpperCase();
+  const userId = req.user.id;
+
+  try {
+    // 1. Check if promo codes are enabled globally
+    const promoCodesEnabled = await getSystemSetting('PROMO_CODES_ENABLED', 'true');
+    if (promoCodesEnabled === 'false') {
+      return res.status(400).json({ error: 'Функция промокодов временно отключена администратором.' });
+    }
+
+    // 2. Fetch list of allowed promo codes
+    const promoCodesListStr = await getSystemSetting('PROMO_CODES_LIST', '');
+    const validCodes = promoCodesListStr
+      .split(/[\n,;]/)
+      .map((c: string) => c.trim().toUpperCase())
+      .filter((c: string) => c.length > 0);
+
+    if (!validCodes.includes(inputCode)) {
+      return res.status(400).json({ error: 'Неверный или несуществующий промокод.' });
+    }
+
+    // 3. Check if user already used promo code before
+    const { data: alreadyUsedSetting, error: usedFetchErr } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', `USED_PROMO_${userId}`)
+      .maybeSingle();
+
+    if (alreadyUsedSetting) {
+      return res.status(400).json({ error: 'Вы уже использовали пробный период через промокод ранее.' });
+    }
+
+    // 4. Check if user currently has an active subscription
+    const { data: activeSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (activeSub) {
+      return res.status(400).json({ error: 'Промокод на пробный период доступен только пользователям без активной подписки.' });
+    }
+
+    // 5. Fetch all active servers for client provisioning
+    const { data: activeServers, error: serversErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+
+    if (serversErr || !activeServers || activeServers.length === 0) {
+      return res.status(500).json({ error: 'Нет доступных активных VPN серверов для настройки.' });
+    }
+
+    // 6. Provision trial client on all servers with 24 hours expiry
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const trafficLimitMb = 10 * 1024; // 10 GB
+    const limitBytes = trafficLimitMb * 1024 * 1024;
+
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    const email = `user_${userId.slice(0, 8)}_trial_${randomSuffix}_0`;
+    const uuid = crypto.randomUUID();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24); // exactly 24 hours
+
+    let configLines: string[] = [];
+    let isFirstNodeValid = false;
+
+    for (const server of activeServers) {
+      try {
+        console.log(`🆕 Creating VPN client ${email} on server [${server.name}] (PROMO)...`);
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+        
+        if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+          console.error(`[VPN-PROMO] Invalid config received for ${email} on ${server.name}`);
+          continue;
+        }
+        
+        const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+        configLines.push(configWithSuffix);
+        isFirstNodeValid = true;
+      } catch (e: any) {
+        console.error(`❌ Failed to propagate ${email} to server ${server.name} (PROMO):`, e.message);
+      }
+    }
+
+    if (!isFirstNodeValid) {
+      return res.status(500).json({ error: 'Не удалось сгенерировать VPN-конфигурации на серверах. Обратитесь к администратору.' });
+    }
+
+    const existingDevices: VpnDevice[] = [{
+      id: 'primary',
+      label: 'Пробный VPN (24ч)',
+      config: configLines.join('\n'),
+      email: email,
+      uuid: uuid,
+      expiresAt: expiresAt.toISOString(),
+      serverType: 'WIFI',
+      trafficUsedBytes: 0,
+      serverId: activeServers[0].id
+    }];
+
+    const finalConfigJson = JSON.stringify(existingDevices);
+
+    // 7. Insert or update the subscription row to 'trial'
+    const { data: lastSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let subData, subErr;
+    if (lastSub) {
+      const { data: updatedSub, error: updateErr } = await supabase
+        .from('subscriptions')
+        .update({
+          status: 'active',
+          expires_at: expiresAt.toISOString(),
+          plan_type: 'trial',
+          period_months: 1,
+          device_limit: 1,
+          v2ray_config: finalConfigJson,
+          server_id: activeServers[0].id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lastSub.id)
+        .select()
+        .single();
+      subData = updatedSub; subErr = updateErr;
+    } else {
+      const { data: newSub, error: insertErr } = await supabase
+        .from('subscriptions')
+        .insert({
+          user_id: userId,
+          plan_type: 'trial',
+          status: 'active',
+          expires_at: expiresAt.toISOString(),
+          v2ray_config: finalConfigJson,
+          server_type: 'WIFI',
+          period_months: 1,
+          device_limit: 1,
+          traffic_limit_mb: trafficLimitMb,
+          traffic_used_mb: 0,
+          server_id: activeServers[0].id
+        })
+        .select()
+        .single();
+      subData = newSub; subErr = insertErr;
+    }
+
+    if (subErr) {
+      console.error('❌ Supabase sub operation error (PROMO):', subErr);
+      throw subErr;
+    }
+
+    // 8. Log the custom setting representing this user having used a promocode
+    const { error: logErr } = await supabase
+      .from('settings')
+      .insert({
+        key: `USED_PROMO_${userId}`,
+        value: JSON.stringify({
+          code: inputCode,
+          applied_at: new Date().toISOString()
+        })
+      });
+
+    if (logErr) {
+      console.error('⚠️ Failed to save promo code usage log:', logErr);
+    }
+
+    // 9. Log zero-amount transaction
+    await supabase
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        amount: 0.00,
+        currency: 'RUB',
+        type: 'withdrawal',
+        status: 'completed',
+        description: `Активация пробного периода 24ч по промокоду: ${inputCode}`
+      });
+
+    res.json({ success: true, message: 'Промокод успешно активирован! Вам предоставлена пробная подписка на 24 часа.', subscription: subData });
+
+  } catch (error: any) {
+    console.error('❌ Promo code activation error:', error);
+    res.status(500).json({ error: error.message || 'Ошибка сервера при активации промокода.' });
+  }
+});
+
 // Get user's own transaction history
 app.get('/api/transactions', async (req, res) => {
   const authHeader = req.headers.authorization;
