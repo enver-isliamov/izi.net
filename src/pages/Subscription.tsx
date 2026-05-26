@@ -491,7 +491,7 @@ export default function Subscription() {
                   placeholder="Введите промокод..."
                   value={promoCode}
                   onChange={(e) => setPromoCode(e.target.value)}
-                  className="w-full bg-muted/30 border border-border focus:border-primary rounded-xl py-2 px-3 text-xs uppercase font-mono tracking-wider outline-none transition-all"
+                  className="w-full bg-muted/30 border border-border focus:border-primary rounded-xl py-2 px-3 text-base md:text-xs uppercase font-mono tracking-wider outline-none transition-all"
                   disabled={isApplyingPromo}
                 />
                 <Button 

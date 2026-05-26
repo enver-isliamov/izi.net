@@ -718,7 +718,7 @@ export default function Dashboard() {
                     placeholder="ВВЕДИТЕ ПРОМОКОД..."
                     value={promoCode}
                     onChange={(e) => setPromoCode(e.target.value)}
-                    className="flex-1 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary rounded-xl py-2 px-3 text-xs uppercase font-mono tracking-wider outline-none text-white transition-all text-center"
+                    className="flex-1 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary rounded-xl py-2 px-3 text-base md:text-xs uppercase font-mono tracking-wider outline-none text-white transition-all text-center"
                     disabled={isApplyingPromo}
                   />
                   <Button 
