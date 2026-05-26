@@ -979,7 +979,7 @@ class PaymentService {
       success_url: `${origin}/dashboard`,
       fail_url: `${origin}/wallet`,
       hook_url: `${origin}/api/pay/webhook/enot`,
-      expire: 300
+      expire: 3600
     };
 
     if (email) {
@@ -1007,6 +1007,46 @@ class PaymentService {
       invoiceId: response.data.data.id,
       expired: response.data.data.expired
     };
+  }
+
+  async checkEnotStatus(invoiceId: string) {
+    const { merchantId, secretKey } = await this.getEnotConfig();
+
+    const payload = {
+      invoice_id: invoiceId,
+      shop_id: merchantId
+    };
+
+    console.log(`[Enot.io] Checking status for invoice: ${invoiceId} in shop: ${merchantId}`);
+
+    const response = await axios.post('https://api.enot.io/invoice/info', payload, {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'x-api-key': secretKey
+      },
+      timeout: 10000,
+      httpsAgent: sharedHttpsAgent,
+      validateStatus: () => true
+    });
+
+    console.log('[Enot.io] Status check response:', JSON.stringify(response.data));
+
+    if (response.data && response.data.status_check) {
+      const info = response.data.data;
+      return {
+        enotStatus: info?.status || 'unknown',
+        amount: info?.amount,
+        enotResponse: response.data
+      };
+    } else {
+      const errorMsg = response.data?.error || response.data?.message || 'Enot.io API error';
+      return {
+        enotStatus: 'error',
+        message: typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg),
+        enotResponse: response.data
+      };
+    }
   }
 
   async verifyEnotWebhook(body: any, headerSignature: string | undefined) {
@@ -1381,7 +1421,7 @@ app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
   console.log('🔄 [AdminAPI] Starting Git Pull & Rebuild deployment...');
   
   // Выполняем git pull и сборку приложения
-  const cmd = 'git pull && npm install && npm run build';
+  const cmd = 'git stash && git pull && npm install && npm run build';
   
   exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
     console.log('[AdminAPI] Git pull & build completed.');
@@ -1725,9 +1765,26 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
 
 app.get('/api/admin/payments', adminOnly, async (req, res) => {
   try {
+    const nowIso = new Date().toISOString();
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    // 1. Auto-fail expired pending payments where expires_at is past
+    await supabase
+      .from('payments')
+      .update({ status: 'failed' })
+      .eq('status', 'pending')
+      .lt('expires_at', nowIso);
+
+    // 2. Auto-fail stale pending payments with null expires_at or older than 1 hour
+    await supabase
+      .from('payments')
+      .update({ status: 'failed' })
+      .eq('status', 'pending')
+      .lt('created_at', oneHourAgo);
+
     const { data, error } = await supabase
       .from('payments')
-      .select('*')
+      .select('*, users(email)')
       .order('created_at', { ascending: false })
       .limit(200);
 
@@ -1774,6 +1831,44 @@ app.post('/api/admin/payments/confirm', adminOnly, async (req, res) => {
   }
 });
 
+app.post('/api/admin/payments/check-enot', adminOnly, async (req, res) => {
+  const { paymentId } = req.body;
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Missing paymentId' });
+  }
+
+  try {
+    const { data: payRow, error: fetchErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+
+    if (fetchErr || !payRow) {
+      return res.status(404).json({ error: 'Платеж не найден' });
+    }
+
+    if (!payRow.invoice_id) {
+      return res.json({ 
+        success: true, 
+        internalStatus: payRow.status,
+        enotStatus: 'none', 
+        message: 'У платежа отсутствует ID счета в Enot.io (возможно, прямой или ручной)' 
+      });
+    }
+
+    const checkResult = await payment.checkEnotStatus(payRow.invoice_id);
+    res.json({ 
+      success: true, 
+      internalStatus: payRow.status,
+      ...checkResult 
+    });
+  } catch (err: any) {
+    console.error('❌ Admin check Enot status error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const { search } = req.query;
   const requestId = Math.random().toString(36).substring(7);
@@ -1808,13 +1903,26 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
       query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,telegram_id.ilike.%${search}%`);
     }
 
-    const { data, error } = await query;
+    const [usersResult, proSettingsResult] = await Promise.all([
+      query,
+      supabase.from('settings').select('key, value').like('key', 'PRO_USER_%')
+    ]);
+
+    const { data, error } = usersResult;
     if (error) {
        console.error(`[AdminAPI][${requestId}] Supabase error:`, error.message);
        return res.status(500).json({ error: error.message });
     }
 
     if (!data) return res.json([]);
+
+    const proUsersMap: Record<string, boolean> = {};
+    if (proSettingsResult.data) {
+      proSettingsResult.data.forEach((setting: any) => {
+        const userId = setting.key.replace('PRO_USER_', '');
+        proUsersMap[userId] = setting.value === 'true';
+      });
+    }
 
     const transformed = data.map((u: any) => {
       let subscriptions = Array.isArray(u.subscriptions) ? u.subscriptions : (u.subscriptions ? [u.subscriptions] : []);
@@ -1832,6 +1940,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
 
       return {
         ...u,
+        is_pro: !!proUsersMap[u.id],
         balance: balance,
         active_subscription: activeSub ? {
           ...activeSub,
@@ -2369,14 +2478,109 @@ app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) =>
 
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
+  const { role, balance, is_pro } = req.body;
   
-  const { data, error } = await supabase.from('users').update({
-    role
-  }).eq('id', id).select().single();
+  try {
+    let updatedUser: any = null;
+    
+    // 1. Update role if defined to avoid 'Cannot coerce' error when empty
+    if (role !== undefined) {
+      const { data: u, error: uErr } = await supabase
+        .from('users')
+        .update({ role })
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+      if (uErr) throw uErr;
+      updatedUser = u;
+    } else {
+      const { data: u, error: uErr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (uErr) throw uErr;
+      updatedUser = u;
+    }
 
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // Update Pro Status in settings if defined
+    if (is_pro !== undefined) {
+      const { error: proErr } = await supabase
+        .from('settings')
+        .upsert({
+          key: `PRO_USER_${id}`,
+          value: is_pro ? 'true' : 'false',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+      
+      if (proErr) {
+        console.error('⚠️ Failed to save user Pro status in settings:', proErr.message);
+      }
+      updatedUser.is_pro = !!is_pro;
+    }
+
+    // 2. Update balance & log transaction if balance is defined
+    if (balance !== undefined) {
+      const val = parseFloat(balance);
+      if (isNaN(val)) {
+        return res.status(400).json({ error: 'Некорректное значение баланса' });
+      }
+
+      // Fetch current balance to calculate diff
+      const { data: balData, error: balFetchErr } = await supabase
+        .from('balances')
+        .select('amount')
+        .eq('user_id', id)
+        .maybeSingle();
+
+      if (balFetchErr) throw balFetchErr;
+      
+      const oldBalance = balData?.amount ? parseFloat(balData.amount) : 0;
+      const difference = val - oldBalance;
+
+      // Update balance
+      const { error: balErr } = await supabase
+        .from('balances')
+        .upsert({
+          user_id: id,
+          amount: val,
+          currency: 'RUB',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      if (balErr) throw balErr;
+
+      // Log transaction if balance was actually changed
+      if (Math.abs(difference) > 0.001) {
+        const type = difference >= 0 ? 'deposit' : 'withdrawal';
+        const absDiff = Math.abs(difference);
+        
+        const { error: txErr } = await supabase
+          .from('transactions')
+          .insert({
+            user_id: id,
+            amount: absDiff,
+            currency: 'RUB',
+            type: type,
+            status: 'completed',
+            description: `Корректировка баланса администратором: c ${oldBalance.toFixed(2)} ₽ до ${val.toFixed(2)} ₽`
+          });
+          
+        if (txErr) {
+          console.error('⚠️ Failed to insert adjustment transaction log:', txErr.message);
+        }
+      }
+    }
+
+    res.json(updatedUser);
+  } catch (err: any) {
+    console.error('❌ Error in PUT /api/admin/users/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
@@ -2940,7 +3144,8 @@ app.post('/api/pay/create', async (req, res) => {
       throw new Error(`Could not create pending payment: ${paymentErr.message}`);
     }
 
-    const origin = req.headers.origin || `https://${req.headers.host}`;
+    const publicUrlSetting = await getSystemSetting('PUBLIC_URL', process.env.PUBLIC_URL || process.env.VITE_API_URL || '');
+    const origin = publicUrlSetting.replace(/\/$/, '') || req.headers.origin || `https://${req.headers.host}`;
 
     let url = '';
     let invoiceId = '';
@@ -3188,9 +3393,8 @@ async function handleEnotWebhook(req: any, res: any) {
       return res.status(400).send('Invalid amount');
     }
 
-    if (paymentRow?.amount && Math.abs(Number(paymentRow.amount) - paidAmount) > 0.01) {
-      console.warn(`Enot amount mismatch for ${orderId}: expected ${paymentRow.amount}, got ${amount}`);
-      return res.status(400).send('Amount mismatch');
+    if (paymentRow?.amount && Math.abs(Number(paymentRow.amount) - paidAmount) > 5) {
+      console.warn(`Enot amount mismatch for ${orderId}: expected ${paymentRow.amount}, got ${amount}. Proceeding anyway.`);
     }
 
     if (paymentRow?.status === 'completed') {
@@ -3363,6 +3567,77 @@ async function processSuccessfulPayment(userId: string, amount: number, orderId:
   console.log(`✅ Balance successfully updated for user ${userId}. New total: ${currentAmount + amount}`);
 }
 
+// 🌐 Supabase API Bypassing Proxy for Russian clients
+app.all('/api/supabase-proxy/*', async (req, res) => {
+  if (!supabaseUrl) {
+    console.error('❌ [Supabase Proxy] Supabase URL is not configured in process.env!');
+    return res.status(500).json({ error: 'Supabase URL is not configured' });
+  }
+
+  // Gracefully handle trailing slash in supabaseUrl
+  const cleanSupabaseUrl = supabaseUrl.endsWith('/') ? supabaseUrl.slice(0, -1) : supabaseUrl;
+  
+  // Extract resource path and query string from proxy request URL
+  const pathWithQuery = req.url.startsWith('/api/supabase-proxy/')
+    ? req.url.slice('/api/supabase-proxy/'.length)
+    : req.url.replace(/^\/?api\/supabase-proxy\//, '');
+    
+  const targetUrl = `${cleanSupabaseUrl}/${pathWithQuery}`;
+
+  console.log(`🌐 [Supabase Proxy] Proxying ${req.method} request to: ${targetUrl}`);
+
+  // Mirror headers, strictly omitting original Content-Length, Host, Accept-Encoding and other protocol headers 
+  // to avoid payload mismatch hangs/failures (502 Gateway errors)
+  const headers: Record<string, string> = {};
+  const forbiddenHeaders = [
+    'host',
+    'content-length',
+    'connection',
+    'accept-encoding',
+    'content-encoding',
+    'transfer-encoding',
+    'keep-alive'
+  ];
+  
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value && !forbiddenHeaders.includes(key.toLowerCase())) {
+      headers[key] = Array.isArray(value) ? value.join(', ') : value;
+    }
+  }
+
+  let requestBody: any = undefined;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (req.body && Object.keys(req.body).length > 0) {
+      requestBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    }
+  }
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers: headers,
+      body: requestBody
+    });
+
+    const responseData = await response.text();
+
+    console.log(`🌐 [Supabase Proxy] Received response with status ${response.status} from ${targetUrl}`);
+
+    // Mirror back Supabase's response headers, bypassing connection, compression and length ones
+    const avoidHeaders = ['content-encoding', 'transfer-encoding', 'connection', 'keep-alive', 'content-length', 'access-control-allow-origin'];
+    response.headers.forEach((value, key) => {
+      if (!avoidHeaders.includes(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    });
+
+    res.status(response.status).send(responseData);
+  } catch (err: any) {
+    console.error('⚠️ [Supabase Proxy Error]:', err);
+    res.status(502).json({ error: 'Supabase Proxy Error', details: err.message, stack: err.stack });
+  }
+});
+
 // Health check and configuration status
 app.get('/api/config', (req, res) => {
   res.json({
@@ -3469,6 +3744,35 @@ app.get('/api/subscription/plans', async (req, res) => {
     res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/subscription/universal-link-visible', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const universalLinkStatus = await getSystemSetting('UNIVERSAL_LINK_STATUS', 'all'); // 'all' | 'pro' | 'none'
+    
+    if (universalLinkStatus === 'none') {
+      return res.json({ visible: false });
+    }
+    
+    if (universalLinkStatus === 'pro') {
+      // Check if user is Pro
+      const { data: proSetting } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', `PRO_USER_${userId}`)
+        .maybeSingle();
+      
+      const isPro = proSetting?.value === 'true';
+      return res.json({ visible: isPro });
+    }
+    
+    // Status is 'all' (default)
+    res.json({ visible: true });
+  } catch (err: any) {
+    console.error('Error fetching universal-link-visible:', err);
+    res.json({ visible: false });
   }
 });
 
@@ -3832,6 +4136,209 @@ app.post('/api/subscription/buy', async (req, res) => {
       error: error.message || 'Internal server error',
       details: error.details || error.hint || null
     });
+  }
+});
+
+// Apply Promo Code for 24-hour Trial Subscription
+app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
+  const { code } = req.body;
+  
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Пожалуйста, введите промокод.' });
+  }
+
+  const inputCode = code.trim().toUpperCase();
+  const userId = req.user.id;
+
+  try {
+    // 1. Check if promo codes are enabled globally
+    const promoCodesEnabled = await getSystemSetting('PROMO_CODES_ENABLED', 'true');
+    if (promoCodesEnabled === 'false') {
+      return res.status(400).json({ error: 'Функция промокодов временно отключена администратором.' });
+    }
+
+    // 2. Fetch list of allowed promo codes
+    const promoCodesListStr = await getSystemSetting('PROMO_CODES_LIST', '');
+    const validCodes = promoCodesListStr
+      .split(/[\n,;]/)
+      .map((c: string) => c.trim().toUpperCase())
+      .filter((c: string) => c.length > 0);
+
+    if (!validCodes.includes(inputCode)) {
+      return res.status(400).json({ error: 'Неверный или несуществующий промокод.' });
+    }
+
+    // 3. Check if user already used promo code before
+    const { data: alreadyUsedSetting, error: usedFetchErr } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', `USED_PROMO_${userId}`)
+      .maybeSingle();
+
+    if (alreadyUsedSetting) {
+      return res.status(400).json({ error: 'Вы уже использовали пробный период через промокод ранее.' });
+    }
+
+    // 4. Check if user currently has an active subscription
+    const { data: activeSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (activeSub) {
+      return res.status(400).json({ error: 'Промокод на пробный период доступен только пользователям без активной подписки.' });
+    }
+
+    // 5. Fetch all active servers for client provisioning
+    const { data: activeServers, error: serversErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+
+    if (serversErr || !activeServers || activeServers.length === 0) {
+      return res.status(500).json({ error: 'Нет доступных активных VPN серверов для настройки.' });
+    }
+
+    // 6. Provision trial client on all servers with 24 hours expiry
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const trafficLimitMb = 10 * 1024; // 10 GB
+    const limitBytes = trafficLimitMb * 1024 * 1024;
+
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    const email = `user_${userId.slice(0, 8)}_trial_${randomSuffix}_0`;
+    const uuid = crypto.randomUUID();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24); // exactly 24 hours
+
+    let configLines: string[] = [];
+    let isFirstNodeValid = false;
+
+    for (const server of activeServers) {
+      try {
+        console.log(`🆕 Creating VPN client ${email} on server [${server.name}] (PROMO)...`);
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        const rawConfig = await xuiInstance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+        
+        if (!rawConfig || rawConfig.includes('security=none') || rawConfig.trim() === '') {
+          console.error(`[VPN-PROMO] Invalid config received for ${email} on ${server.name}`);
+          continue;
+        }
+        
+        const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+        configLines.push(configWithSuffix);
+        isFirstNodeValid = true;
+      } catch (e: any) {
+        console.error(`❌ Failed to propagate ${email} to server ${server.name} (PROMO):`, e.message);
+      }
+    }
+
+    if (!isFirstNodeValid) {
+      return res.status(500).json({ error: 'Не удалось сгенерировать VPN-конфигурации на серверах. Обратитесь к администратору.' });
+    }
+
+    const existingDevices: VpnDevice[] = [{
+      id: 'primary',
+      label: 'Пробный VPN (24ч)',
+      config: configLines.join('\n'),
+      email: email,
+      uuid: uuid,
+      expiresAt: expiresAt.toISOString(),
+      serverType: 'WIFI',
+      trafficUsedBytes: 0,
+      serverId: activeServers[0].id
+    }];
+
+    const finalConfigJson = JSON.stringify(existingDevices);
+
+    // 7. Insert or update the subscription row to 'trial'
+    const { data: lastSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let subData, subErr;
+    if (lastSub) {
+      const { data: updatedSub, error: updateErr } = await supabase
+        .from('subscriptions')
+        .update({
+          status: 'active',
+          expires_at: expiresAt.toISOString(),
+          plan_type: 'trial',
+          period_months: 1,
+          device_limit: 1,
+          v2ray_config: finalConfigJson,
+          server_id: activeServers[0].id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lastSub.id)
+        .select()
+        .single();
+      subData = updatedSub; subErr = updateErr;
+    } else {
+      const { data: newSub, error: insertErr } = await supabase
+        .from('subscriptions')
+        .insert({
+          user_id: userId,
+          plan_type: 'trial',
+          status: 'active',
+          expires_at: expiresAt.toISOString(),
+          v2ray_config: finalConfigJson,
+          server_type: 'WIFI',
+          period_months: 1,
+          device_limit: 1,
+          traffic_limit_mb: trafficLimitMb,
+          traffic_used_mb: 0,
+          server_id: activeServers[0].id
+        })
+        .select()
+        .single();
+      subData = newSub; subErr = insertErr;
+    }
+
+    if (subErr) {
+      console.error('❌ Supabase sub operation error (PROMO):', subErr);
+      throw subErr;
+    }
+
+    // 8. Log the custom setting representing this user having used a promocode
+    const { error: logErr } = await supabase
+      .from('settings')
+      .insert({
+        key: `USED_PROMO_${userId}`,
+        value: JSON.stringify({
+          code: inputCode,
+          applied_at: new Date().toISOString()
+        })
+      });
+
+    if (logErr) {
+      console.error('⚠️ Failed to save promo code usage log:', logErr);
+    }
+
+    // 9. Log zero-amount transaction
+    await supabase
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        amount: 0.00,
+        currency: 'RUB',
+        type: 'withdrawal',
+        status: 'completed',
+        description: `Активация пробного периода 24ч по промокоду: ${inputCode}`
+      });
+
+    res.json({ success: true, message: 'Промокод успешно активирован! Вам предоставлена пробная подписка на 24 часа.', subscription: subData });
+
+  } catch (error: any) {
+    console.error('❌ Promo code activation error:', error);
+    res.status(500).json({ error: error.message || 'Ошибка сервера при активации промокода.' });
   }
 });
 

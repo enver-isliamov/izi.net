@@ -34,7 +34,7 @@ export default function AdminUsers() {
   const [subCreateData, setSubCreateData] = useState({
     serverId: '',
     periodMonths: '1',
-    trafficLimitMb: '0'
+    trafficLimitGb: '0'
   });
 
   useEffect(() => {
@@ -46,7 +46,11 @@ export default function AdminUsers() {
   const handleCreateSub = async () => {
     if (!subCreateUser) return;
     try {
-      await axios.post(`/api/admin/users/${subCreateUser.id}/subscription`, subCreateData, {
+      const payload = {
+        ...subCreateData,
+        trafficLimitMb: subCreateData.trafficLimitGb ? String(parseFloat(subCreateData.trafficLimitGb) * 1024) : '0'
+      };
+      await axios.post(`/api/admin/users/${subCreateUser.id}/subscription`, payload, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       toast.success('Подписка успешно выдана');
@@ -145,6 +149,18 @@ export default function AdminUsers() {
       fetchData();
     } catch (e) {
       toast.error('Ошибка обновления роли');
+    }
+  };
+
+  const toggleUserProStatus = async (userId: string, currentProStatus: boolean) => {
+    try {
+      await axios.put(`/api/admin/users/${userId}`, { is_pro: !currentProStatus }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success(currentProStatus ? 'Pro статус снят' : 'Pro статус выдан');
+      fetchData();
+    } catch (e) {
+      toast.error('Ошибка обновления Pro статуса');
     }
   };
 
@@ -345,6 +361,20 @@ export default function AdminUsers() {
                         ) : user.role === 'admin' ? (
                           <button onClick={() => updateUserRole(user.id, 'user')} className="text-[10px] text-yellow-500 hover:text-yellow-400 transition-colors">Снять админа</button>
                         ) : null}
+
+                        <div className="mt-2 pt-2 border-t border-white/5 w-full space-y-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            user.is_pro ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-white/5 text-muted-foreground'
+                          }`}>
+                            {user.is_pro ? '👑 Pro Аккаунт' : 'Обычный'}
+                          </span>
+                          <button 
+                            onClick={() => toggleUserProStatus(user.id, !!user.is_pro)} 
+                            className="block text-[10px] text-purple-400 hover:text-purple-300 transition-colors font-semibold"
+                          >
+                            {user.is_pro ? 'Снять Pro' : 'Сделать Pro'}
+                          </button>
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 align-top">
@@ -358,83 +388,67 @@ export default function AdminUsers() {
                             const isOnlineDevice = device.trafficUsedBytes > 0 && !devIsExpired;
                             
                             return (
-                               <div key={device.id} className="flex flex-col gap-2 p-3 bg-black/20 rounded-lg group border border-white/5 relative">
-                                <div className="flex justify-between items-start">
-                                  <div className="flex items-center gap-2.5 overflow-hidden">
+                              <div key={device.id} className="flex flex-col gap-1.5 p-2 bg-black/20 rounded-lg group border border-white/5 relative">
+                                <div className="flex justify-between items-center w-full">
+                                  <div className="flex items-center gap-2 overflow-hidden flex-[1] min-w-[70px]">
                                     <span className="relative flex h-2.5 w-2.5 shrink-0">
                                       {devIsExpired ? (
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 mt-0.5 shadow-[0_0_5px_red]"></span>
+                                        <span className="relative inline-flex rounded-full h-full w-full bg-red-500 shadow-[0_0_5px_red]"></span>
                                       ) : isOnlineDevice ? (
                                         <>
                                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 mt-0.5 shadow-[0_0_5px_rgba(0,255,0,0.5)]"></span>
+                                          <span className="relative inline-flex rounded-full h-full w-full bg-green-500 shadow-[0_0_5px_rgba(0,255,0,0.5)]"></span>
                                         </>
                                       ) : (
-                                        <span className="relative inline-flex rounded-full h-2 w-2 border border-blue-400 bg-blue-500/20 mt-0.5" title="Offline"></span>
+                                        <span className="relative inline-flex rounded-full h-full w-full border border-blue-400 bg-blue-500/20" title="Offline"></span>
                                       )}
                                     </span>
-                                    <div className="flex flex-col overflow-hidden">
-                                      <span className="text-xs font-bold text-white truncate max-w-[150px]" title={device.email || device.id}>{device.label || 'Устройство'}</span>
-                                      <span className="text-[10px] text-muted-foreground truncate">{devExpiry.toLocaleDateString()}</span>
+                                    <span className="text-xs font-bold text-white truncate w-full pr-1" title={device.email || device.id}>{device.label || 'Устройство'}</span>
+                                  </div>
+                                  
+                                  <div className="flex flex-col flex-[1.5] min-w-[80px] shrink-0 mx-1 gap-1">
+                                    <div className="flex justify-between items-center text-[9px] font-mono leading-none">
+                                      <span className={cn("text-white/80", devIsExpired && "text-red-400")} title={`${deviceUsedGB.toFixed(2)} GB / ${trafficLimitGB} GB`}>
+                                        {deviceUsedGB.toFixed(1)}<span className="text-muted-foreground text-[8px]">/{trafficLimitGB}</span>
+                                      </span>
+                                      <span className="text-[8px] text-muted-foreground break-keep">{devExpiry.toLocaleDateString()}</span>
+                                    </div>
+                                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                      <div 
+                                        className={`h-full transition-all duration-500 ${
+                                          devIsExpired ? 'bg-red-500' : (deviceUsedGB / Number(trafficLimitGB)) > 0.9 ? 'bg-yellow-500' : 'bg-primary'
+                                        }`}
+                                        style={{ width: `${trafficLimitGB !== "0.0" ? Math.min(100, (deviceUsedGB / Number(trafficLimitGB)) * 100) : 0}%` }}
+                                      />
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all absolute top-2 right-2">
+
+                                  <div className="flex items-center gap-0.5 shrink-0 ml-1">
                                     <button
                                       onClick={() => {
                                         const deviceSubUrl = `${window.location.origin}/api/sub/${sub.id}?deviceId=${device.id}`;
-                                        setQrInfo({
-                                          key: device.config,
-                                          sub: deviceSubUrl
-                                        });
-                                        setQrType('device');
-                                        setQrMode('sub');
-                                        setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
+                                        setQrInfo({ key: device.config, sub: deviceSubUrl });
+                                        setQrType('device'); setQrMode('sub'); setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
                                         setIsQrOpen(true);
                                       }}
-                                      className="text-muted-foreground hover:text-primary p-1 rounded transition-all shrink-0"
-                                      title="QR Ключ"
+                                      className="text-muted-foreground hover:text-primary p-1 rounded-md hover:bg-white/10 transition-colors" title="QR Ключ"
                                     >
                                       <QrCode size={12} />
                                     </button>
                                     <button
                                       onClick={() => handleRegenerateDevice(user.id, device.id)}
-                                      className="text-muted-foreground hover:text-green-400 p-1 rounded transition-all shrink-0"
-                                      title="Перегенерировать ключ"
+                                      className="text-muted-foreground hover:text-green-400 p-1 rounded-md hover:bg-white/10 transition-colors" title="Перегенерировать ключ"
                                     >
                                       <RefreshCw size={12} />
                                     </button>
                                     <button
                                       onClick={() => deleteDevice(user.id, device.id)}
-                                      className="text-muted-foreground hover:text-red-400 p-1 rounded transition-all shrink-0"
-                                      title="Удалить устройство"
+                                      className="text-muted-foreground hover:text-red-400 p-1 rounded-md hover:bg-white/10 transition-colors" title="Удалить устройство"
                                     >
                                       <Trash2 size={12} />
                                     </button>
                                   </div>
                                 </div>
-                                <div className="flex flex-col gap-1 w-full mt-1">
-                                  <div className="flex justify-between items-center text-[9px] font-mono">
-                                    <span className={cn("text-white/80", devIsExpired && "text-red-400")}>{deviceUsedGB.toFixed(1)} GB</span>
-                                    <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
-                                  </div>
-                                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                                    <div 
-                                      className={`h-full transition-all duration-500 ${
-                                        devIsExpired ? 'bg-red-500' : (deviceUsedGB / Number(trafficLimitGB)) > 0.9 ? 'bg-yellow-500' : 'bg-primary'
-                                      }`}
-                                      style={{ width: `${Math.min(100, (deviceUsedGB / Number(trafficLimitGB)) * 100)}%` }}
-                                    />
-                                  </div>
-                                </div>
-                                <select 
-                                  className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-[9px] outline-none text-blue-400 focus:border-blue-500/50 w-full mt-1"
-                                  value={device.serverId || sub.server_id || ''}
-                                  onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
-                                >
-                                  {servers.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
-                                  ))}
-                                </select>
                               </div>
                             );
                           })}
@@ -551,7 +565,7 @@ export default function AdminUsers() {
                       </button>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1.5">
+                  <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
                     <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
                       user.role === 'superadmin' ? 'bg-red-500/10 text-red-500' : 
                       user.role === 'admin' ? 'bg-blue-500/10 text-blue-500' : 'bg-white/10 text-muted-foreground'
@@ -563,6 +577,20 @@ export default function AdminUsers() {
                     ) : user.role === 'admin' ? (
                       <button onClick={() => updateUserRole(user.id, 'user')} className="text-[10px] text-yellow-500 hover:text-yellow-400">Снять админа</button>
                     ) : null}
+
+                    <div className="mt-1.5 pt-1.5 border-t border-white/5 flex flex-col items-end gap-1">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                        user.is_pro ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-white/5 text-muted-foreground'
+                      }`}>
+                        {user.is_pro ? '👑 Pro' : 'Обычный'}
+                      </span>
+                      <button 
+                        onClick={() => toggleUserProStatus(user.id, !!user.is_pro)} 
+                        className="text-[9px] text-purple-400 hover:text-purple-300 transition-colors font-semibold"
+                      >
+                        {user.is_pro ? 'Снять Pro' : 'Сделать Pro'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -600,82 +628,67 @@ export default function AdminUsers() {
                             const isOnlineDevice = device.trafficUsedBytes > 0 && !devIsExpired;
                             
                             return (
-                              <div key={device.id} className="flex flex-col gap-2 bg-[#0a0c10] p-2.5 rounded-lg border border-white/5 relative">
-                                <div className="flex justify-between items-start">
-                                  <div className="flex items-center gap-2.5 overflow-hidden">
+                              <div key={device.id} className="flex flex-col gap-1.5 p-2 bg-[#0a0c10] rounded-lg group border border-white/5 relative">
+                                <div className="flex justify-between items-center w-full">
+                                  <div className="flex items-center gap-2 overflow-hidden flex-[1] min-w-[70px]">
                                     <span className="relative flex h-2.5 w-2.5 shrink-0">
                                       {devIsExpired ? (
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 mt-0.5 shadow-[0_0_5px_red]"></span>
+                                        <span className="relative inline-flex rounded-full h-full w-full bg-red-500 shadow-[0_0_5px_red]"></span>
                                       ) : isOnlineDevice ? (
                                         <>
                                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 mt-0.5 shadow-[0_0_5px_rgba(0,255,0,0.5)]"></span>
+                                          <span className="relative inline-flex rounded-full h-full w-full bg-green-500 shadow-[0_0_5px_rgba(0,255,0,0.5)]"></span>
                                         </>
                                       ) : (
-                                        <span className="relative inline-flex rounded-full h-2 w-2 border border-blue-400 bg-blue-500/20 mt-0.5" title="Offline"></span>
+                                        <span className="relative inline-flex rounded-full h-full w-full border border-blue-400 bg-blue-500/20" title="Offline"></span>
                                       )}
                                     </span>
-                                    <div className="flex flex-col">
-                                      <span className="text-xs font-bold text-white truncate max-w-[150px]">{device.label || 'Устройство'}</span>
-                                      <span className="text-[10px] text-muted-foreground">{devExpiry.toLocaleDateString()}</span>
+                                    <span className="text-xs font-bold text-white truncate w-full pr-1" title={device.email || device.id}>{device.label || 'Устройство'}</span>
+                                  </div>
+                                  
+                                  <div className="flex flex-col flex-[1.5] min-w-[80px] shrink-0 mx-1 gap-1">
+                                    <div className="flex justify-between items-center text-[9px] font-mono leading-none">
+                                      <span className={cn("text-white/80", devIsExpired && "text-red-400")} title={`${deviceUsedGB.toFixed(2)} GB / ${trafficLimitGB} GB`}>
+                                        {deviceUsedGB.toFixed(1)}<span className="text-muted-foreground text-[8px]">/{trafficLimitGB}</span>
+                                      </span>
+                                      <span className="text-[8px] text-muted-foreground break-keep">{devExpiry.toLocaleDateString()}</span>
+                                    </div>
+                                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                      <div 
+                                        className={`h-full transition-all duration-500 ${
+                                          devIsExpired ? 'bg-red-500' : (deviceUsedGB / Number(trafficLimitGB)) > 0.9 ? 'bg-yellow-500' : 'bg-primary'
+                                        }`}
+                                        style={{ width: `${trafficLimitGB !== "0.0" ? Math.min(100, (deviceUsedGB / Number(trafficLimitGB)) * 100) : 0}%` }}
+                                      />
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2 absolute top-2 right-2">
+
+                                  <div className="flex items-center gap-0.5 shrink-0 ml-1">
                                     <button
                                       onClick={() => {
                                         const deviceSubUrl = `${window.location.origin}/api/sub/${sub.id}?deviceId=${device.id}`;
-                                        setQrInfo({
-                                          key: device.config,
-                                          sub: deviceSubUrl
-                                        });
-                                        setQrType('device');
-                                        setQrMode('sub');
-                                        setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
+                                        setQrInfo({ key: device.config, sub: deviceSubUrl });
+                                        setQrType('device'); setQrMode('sub'); setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
                                         setIsQrOpen(true);
                                       }}
-                                      className="text-muted-foreground hover:text-primary p-1.5 rounded-lg bg-white/5 transition-colors"
+                                      className="text-muted-foreground hover:text-primary p-1.5 rounded-md hover:bg-white/10 transition-colors" title="QR Ключ"
                                     >
-                                      <QrCode size={14} />
+                                      <QrCode size={12} />
                                     </button>
                                     <button
                                       onClick={() => handleRegenerateDevice(user.id, device.id)}
-                                      className="text-muted-foreground hover:text-green-400 p-1.5 rounded-lg bg-white/5 transition-colors"
-                                      title="Перегенерировать ключ"
+                                      className="text-muted-foreground hover:text-green-400 p-1.5 rounded-md hover:bg-white/10 transition-colors" title="Перегенерировать ключ"
                                     >
-                                      <RefreshCw size={14} />
+                                      <RefreshCw size={12} />
                                     </button>
                                     <button
                                       onClick={() => deleteDevice(user.id, device.id)}
-                                      className="text-muted-foreground hover:text-red-400 p-1.5 rounded-lg bg-white/5 transition-colors shrink-0"
-                                      title="Удалить устройство"
+                                      className="text-muted-foreground hover:text-red-400 p-1.5 rounded-md hover:bg-white/10 transition-colors" title="Удалить устройство"
                                     >
-                                      <Trash2 size={14} />
+                                      <Trash2 size={12} />
                                     </button>
                                   </div>
                                 </div>
-                                <div className="flex flex-col gap-1 w-full mt-1">
-                                  <div className="flex justify-between items-center text-[9px] font-mono">
-                                    <span className={cn("text-white/80", devIsExpired && "text-red-400")}>{deviceUsedGB.toFixed(1)} GB</span>
-                                    <span className="text-muted-foreground">/ {trafficLimitGB} GB</span>
-                                  </div>
-                                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                                    <div 
-                                      className={`h-full transition-all duration-500 ${
-                                        devIsExpired ? 'bg-red-500' : (deviceUsedGB / Number(trafficLimitGB)) > 0.9 ? 'bg-yellow-500' : 'bg-primary'
-                                      }`}
-                                      style={{ width: `${Math.min(100, (deviceUsedGB / Number(trafficLimitGB)) * 100)}%` }}
-                                    />
-                                  </div>
-                                </div>
-                                <select 
-                                  className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-[10px] outline-none text-blue-400 focus:border-blue-500/50 w-full mt-1"
-                                  value={device.serverId || sub.server_id || ''}
-                                  onChange={(e) => moveDeviceServer(user.id, device.id, e.target.value)}
-                                >
-                                  {servers.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name} ({s.location_code})</option>
-                                  ))}
-                                </select>
                               </div>
                             );
                           })}
@@ -754,13 +767,14 @@ export default function AdminUsers() {
                    />
                  </div>
                  <div className="space-y-2">
-                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (МБ)</label>
+                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (ГБ)</label>
                    <input
                      type="number"
-                     value={subCreateData.trafficLimitMb}
-                     onChange={(e) => setSubCreateData(prev => ({ ...prev, trafficLimitMb: e.target.value }))}
+                     value={subCreateData.trafficLimitGb}
+                     onChange={(e) => setSubCreateData(prev => ({ ...prev, trafficLimitGb: e.target.value }))}
                      className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
                      min="0"
+                     step="0.1"
                      placeholder="0 = безлимит"
                    />
                  </div>

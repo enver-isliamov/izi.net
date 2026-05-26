@@ -10,7 +10,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
-  Trash2
+  Trash2,
+  Gift
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -42,6 +43,45 @@ export default function Subscription() {
   const [wizardMode, setWizardMode] = useState<'extend' | 'new'>('extend');
   const [targetDevice, setTargetDevice] = useState<string | undefined>(undefined);
   const [targetDeviceName, setTargetDeviceName] = useState<string | undefined>(undefined);
+
+  // Promo code states
+  const [promoCode, setPromoCode] = useState('');
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
+
+  const handleApplyPromo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!promoCode.trim()) {
+      toast.error('Введите промокод');
+      return;
+    }
+
+    setIsApplyingPromo(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/promocode/apply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ code: promoCode })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Не удалось активировать промокод');
+      }
+
+      toast.success(result.message || 'Промокод успешно активирован!');
+      setPromoCode('');
+      fetchSubscriptionData(true);
+    } catch (err: any) {
+      console.error('Promo error:', err);
+      toast.error(err.message || 'Ошибка при активации промокода');
+    } finally {
+      setIsApplyingPromo(false);
+    }
+  };
 
   const fetchSubscriptionData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
@@ -218,7 +258,7 @@ export default function Subscription() {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-8 animate-in fade-in duration-500 max-w-4xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Управление подпиской</h1>
@@ -430,6 +470,43 @@ export default function Subscription() {
                   Все серверы работают в штатном режиме. Средняя задержка: 45ms.
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Promo Code Card */}
+          <Card className="glass-card border-primary/20">
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Gift className="w-4 h-4 text-primary" />
+                У вас есть промокод?
+              </CardTitle>
+              <CardDescription className="text-[11px] leading-relaxed">
+                Введите промокод для активации бесплатного пробного периода подписки на 24 часа. Доступно только новым пользователям без активного тарифа.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleApplyPromo} className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="Введите промокод..."
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value)}
+                  className="w-full bg-muted/30 border border-border focus:border-primary rounded-xl py-2 px-3 text-base md:text-xs uppercase font-mono tracking-wider outline-none transition-all"
+                  disabled={isApplyingPromo}
+                />
+                <Button 
+                  type="submit" 
+                  disabled={isApplyingPromo} 
+                  className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl text-xs font-bold"
+                >
+                  {isApplyingPromo ? (
+                    <>
+                      <Loader2 className="animate-spin w-3 h-3 mr-1.5" />
+                      Активация...
+                    </>
+                  ) : 'Активировать'}
+                </Button>
+              </form>
             </CardContent>
           </Card>
         </div>

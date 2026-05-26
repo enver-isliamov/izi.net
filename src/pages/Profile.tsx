@@ -6,11 +6,20 @@ import {
   Shield, 
   Copy, 
   ChevronRight,
-  Loader2
+  Loader2,
+  Lock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription
+} from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -24,7 +33,47 @@ export default function Profile() {
   const { telegramBotName } = useAppConfig();
   const [userData, setUserData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
+  const [hasActiveSub, setHasActiveSub] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Password change states
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || !confirmNewPassword) {
+      toast.error('Пожалуйста, заполните все поля');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('Пароли не совпадают');
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error('Пароль должен содержать не менее 6 символов');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      if (error) throw error;
+      toast.success('Пароль успешно обновлен!');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setIsPasswordModalOpen(false);
+    } catch (err: any) {
+      console.error('Password change error:', err);
+      toast.error(err.message || 'Ошибка при смене пароля');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -32,10 +81,18 @@ export default function Profile() {
       try {
         const [
           { data: userRes, error: userErr },
-          { data: settingsRes, error: settingsErr }
+          { data: settingsRes, error: settingsErr },
+          { data: subRes, error: subErr }
         ] = await Promise.all([
           supabase.from('users').select('*').eq('id', user.id).single(),
-          supabase.from('notification_settings').select('*').eq('user_id', user.id).single()
+          supabase.from('notification_settings').select('*').eq('user_id', user.id).single(),
+          supabase.from('subscriptions')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
         ]);
           
         if (userErr && userErr.code !== 'PGRST116') {
@@ -48,6 +105,14 @@ export default function Profile() {
           console.error('Error fetching settings:', settingsErr);
         } else {
           setSettings(settingsRes);
+        }
+
+        if (subErr) {
+          console.error('Error fetching subscription:', subErr);
+        } else if (subRes) {
+          // Check if active and not expired
+          const isNotExpired = !subRes.expires_at || new Date(subRes.expires_at) > new Date();
+          setHasActiveSub(isNotExpired);
         }
       } catch (error) {
         console.error('Profile fetch error:', error);
@@ -162,15 +227,34 @@ export default function Profile() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center gap-6">
-                <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center relative">
                   <User className="w-10 h-10 text-primary" />
+                  {hasActiveSub && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-md shadow-yellow-500/20 uppercase tracking-widest select-none animate-pulse">
+                      PRO
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-xl font-bold">{userData?.name || user?.email?.split('@')?.[0] || 'User'}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-bold">{userData?.name || user?.email?.split('@')?.[0] || 'User'}</h3>
+                    {hasActiveSub && (
+                      <span className="hidden sm:inline bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 text-[9px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
+                        PRO-АККАУНТ
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground">ID: {user?.id?.substring(0, 8)}...</p>
-                  <Badge className="bg-primary/20 text-primary border-primary/30 mt-1">
-                    {(userData?.email_verified || userData?.telegram_linked) ? 'Активен' : 'Ожидает подтверждения'}
-                  </Badge>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30">
+                      {(userData?.email_verified || userData?.telegram_linked) ? 'Активен' : 'Ожидает подтверждения'}
+                    </Badge>
+                    {hasActiveSub && (
+                      <Badge className="bg-yellow-500/20 hover:bg-yellow-500/35 text-yellow-500 border-yellow-500/30 font-bold uppercase text-[9px] tracking-wide">
+                        PRO ДОСТУП
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -282,9 +366,55 @@ export default function Profile() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button variant="ghost" className="w-full justify-between rounded-xl text-xs h-10">
-                Сменить пароль <ChevronRight className="w-4 h-4" />
-              </Button>
+              <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" className="w-full justify-between rounded-xl text-xs h-10 text-left">
+                    Сменить пароль <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-[400px] bg-card border-border p-5 shadow-2xl rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-lg font-bold">Смена пароля</DialogTitle>
+                    <DialogDescription className="text-xs text-muted-foreground">
+                      Задайте новый надежный пароль для вашего аккаунта
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleChangePassword} className="space-y-4 mt-2">
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input 
+                          type="password" 
+                          placeholder="Новый пароль" 
+                          className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input 
+                          type="password" 
+                          placeholder="Подтвердите пароль" 
+                          className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl"
+                          value={confirmNewPassword}
+                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <Button 
+                      type="submit" 
+                      disabled={isUpdatingPassword} 
+                      className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl"
+                    >
+                      {isUpdatingPassword ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : null}
+                      Сохранить новый пароль
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
               <Button onClick={signOut} variant="ghost" className="w-full justify-between rounded-xl text-xs h-10 text-destructive hover:text-destructive hover:bg-destructive/10">
                 Выйти из аккаунта <ChevronRight className="w-4 h-4" />
               </Button>

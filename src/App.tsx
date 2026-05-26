@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 
 // Real Pages
+import Landing from '@/pages/Landing';
 import Dashboard from '@/pages/Dashboard';
 import Subscription from '@/pages/Subscription';
 import Instructions from '@/pages/Instructions';
@@ -73,11 +74,13 @@ export default function App() {
       <TooltipProvider>
         <Router>
           <Routes>
+            <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/update-password" element={<UpdatePassword />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/refund" element={<RefundPolicy />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/ref/:refCode" element={<NavigateWithRef />} />
             
             {/* Admin Routes */}
             <Route 
@@ -111,8 +114,8 @@ export default function App() {
                       <Route path="/referrals" element={<Referrals />} />
                       <Route path="/wallet" element={<Wallet />} />
                       <Route path="/faq" element={<FAQ />} />
-                      <Route path="/ref/:refCode" element={<NavigateWithRef />} />
                       <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                      <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                   </PageContainer>
                 </ProtectedRoute>

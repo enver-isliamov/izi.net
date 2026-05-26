@@ -1,37 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Smartphone, 
   Monitor, 
   Apple, 
-  ChevronRight, 
-  Download, 
-  Copy, 
-  Check, 
+  ArrowLeft,
+  Globe,
+  Copy,
   Info,
-  Shield,
-  Zap,
-  Globe
+  QrCode,
+  CheckCircle2,
+  Settings,
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { motion } from 'motion/react';
-import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-
-import { useNavigate } from 'react-router-dom';
 import { copyToClipboard } from '@/lib/utils';
+import { toast } from 'sonner';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function Instructions() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [copied, setCopied] = useState(false);
   const [subscription, setSubscription] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [showQr, setShowQr] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [selectedApp, setSelectedApp] = useState<'incy' | 'hiddify' | 'happ' | 'v2rayng'>('incy');
 
-  React.useEffect(() => {
+  useEffect(() => {
     async function fetchSub() {
       if (!user) return;
       const { data } = await supabase
@@ -39,17 +39,14 @@ export default function Instructions() {
         .select('*')
         .eq('user_id', user.id)
         .eq('status', 'active')
-        .single();
+        .maybeSingle();
       
       setSubscription(data);
-      setLoading(false);
     }
     fetchSub();
   }, [user]);
 
-  const vpnKey = subscription 
-    ? `${window.location.origin}/api/sub/${subscription.id}`
-    : 'Сначала активируйте подписку';
+  const vpnKey = subscription?.v2ray_config || 'Сначала активируйте подписку на главном экране';
 
   const handleCopy = async () => {
     if (!subscription) {
@@ -59,218 +56,255 @@ export default function Instructions() {
     const success = await copyToClipboard(vpnKey);
     if (success) {
       setCopied(true);
-      toast.success('Ключ скопирован!');
+      toast.success('Персональный VPN-ключ скопирован!');
       setTimeout(() => setCopied(false), 2000);
     } else {
-      toast.error('Не удалось скопировать ключ. Скопируйте вручную.');
+      toast.error('Не удалось скопировать. Вы можете скопировать текст вручную.');
     }
   };
 
-  const Step = ({ number, title, description, badge }: { number: number, title: string, description: string, badge?: string }) => (
-    <div className="flex gap-4 items-start py-4 border-b border-border/40 last:border-0 relative">
-      <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center font-bold text-primary shrink-0">
-        {number}
-      </div>
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <h4 className="font-semibold">{title}</h4>
-          {badge && <Badge variant="secondary" className="text-[10px] uppercase h-4 px-1.5">{badge}</Badge>}
-        </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
-      <div className="text-center space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight neon-text">Как подключиться?</h1>
-        <p className="text-muted-foreground">Настройка VPN займет меньше минуты. Выберите ваше устройство:</p>
+    <div className="space-y-4 md:space-y-6 animate-in fade-in duration-300 max-w-4xl mx-auto pb-10">
+      {/* Header */}
+      <div className="flex items-center gap-2 pb-1">
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="rounded-xl h-8 w-8 text-muted-foreground hover:text-primary shrink-0"
+          onClick={() => navigate('/dashboard')}
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </Button>
+        <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Назад на главную</span>
       </div>
 
-      {/* Subscription Key Widget */}
-      <Card className="glass-card border-primary/20 overflow-hidden relative group">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-        <CardContent className="p-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="space-y-2 text-center md:text-left">
-              <div className="flex items-center justify-center md:justify-start gap-2">
-                <Shield className="w-5 h-5 text-primary" />
-                <span className="font-bold text-lg">Ваш персональный ключ</span>
-              </div>
-              <p className="text-sm text-muted-foreground">Используйте этот ключ для автоматической настройки в любом приложении</p>
+      <div className="text-center space-y-1 py-1">
+        <h1 className="text-xl md:text-3xl font-black tracking-tight text-white uppercase">Установка и настройка</h1>
+        <p className="text-[11px] md:text-xs text-muted-foreground">Простые краткие шаги до безопасного интернета</p>
+      </div>
+
+      {/* Subscription Key section */}
+      {subscription ? (
+        <Card className="glass-card border-primary/20 p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-black uppercase tracking-widest text-primary flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5" /> Ваш личный VPN-ключ
+            </span>
+            <span className="text-[9px] text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
+              Подписка активна
+            </span>
+          </div>
+          
+          <div className="p-2.5 rounded-lg bg-black/60 border border-white/5 space-y-2">
+            <div className="font-mono text-[9px] break-all leading-normal text-muted-foreground line-clamp-2 select-all">
+              {vpnKey}
             </div>
-            <div className="flex items-center gap-2 w-full md:w-auto">
-              <div className="relative flex-1 md:w-64">
-                <input 
-                  readOnly 
-                  value={vpnKey}
-                  onClick={handleCopy}
-                  className="w-full bg-background/50 border border-border rounded-xl px-4 py-2.5 text-xs font-mono pr-10 focus:outline-none cursor-pointer hover:bg-background/80 transition-colors"
-                />
-                <div className="absolute right-2 top-2">
-                  <div className={`w-2 h-2 rounded-full ${subscription ? 'bg-primary' : 'bg-destructive'} animate-pulse`} />
-                </div>
-              </div>
-              <Button onClick={handleCopy} className="rounded-xl h-10 px-4 bg-primary text-black hover:bg-primary/90">
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            <div className="flex gap-2.5 pt-1">
+              <Button 
+                onClick={handleCopy}
+                className="flex-1 bg-primary text-black hover:bg-primary/90 rounded-xl h-8 text-[11px] font-bold gap-1.5"
+              >
+                <Copy className="w-3 h-3" />
+                {copied ? 'Скопировано!' : 'Копировать ключ'}
+              </Button>
+              <Button 
+                onClick={() => setShowQr(!showQr)}
+                variant="outline"
+                className="rounded-xl border-border hover:bg-white/5 h-8 w-11 shrink-0 p-0"
+                title="Показать QR-код"
+              >
+                <QrCode className="w-4 h-4 text-primary" />
               </Button>
             </div>
           </div>
-        </CardContent>
+
+          {showQr && (
+            <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl border border-white animate-in zoom-in-95 duration-200 w-fit mx-auto">
+              <QRCodeSVG 
+                value={vpnKey} 
+                size={140}
+                level="M"
+                includeMargin={false}
+                bgColor="#FFFFFF"
+                fgColor="#000000"
+              />
+              <span className="text-[9px] text-black font-semibold mt-1.5 uppercase font-mono">Отсканируйте из приложения</span>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <Card className="glass-card border-white/5 p-4 text-center space-y-2">
+          <p className="text-xs text-muted-foreground">У вас пока нет активной подписки VPN.</p>
+          <Button 
+            onClick={() => navigate('/dashboard')}
+            className="w-full bg-primary text-black hover:bg-primary/90 text-xs font-bold rounded-xl h-9 animate-pulse"
+          >
+            Купить подписку
+          </Button>
+        </Card>
+      )}
+
+      {/* Краткая инструкция (Оптимизированная по ширине) */}
+      <Card className="glass-card border-white/5 p-3.5 space-y-2.5">
+        <h3 className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+          <Zap className="w-3.5 h-3.5 text-primary" /> Понятная инструкция за 30 секунд
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] md:text-xs text-muted-foreground leading-normal pl-0">
+          <div className="flex gap-2 p-2 rounded-xl bg-white/[0.01] border border-white/5">
+            <span className="text-primary font-black">1.</span>
+            <span>Скопируйте ваш **личный VPN-ключ** в панели выше.</span>
+          </div>
+          <div className="flex gap-2 p-2 rounded-xl bg-white/[0.01] border border-white/5">
+            <span className="text-primary font-black">2.</span>
+            <span>Выберите и скачайте приложение ниже.</span>
+          </div>
+          <div className="flex gap-2 p-2 rounded-xl bg-white/[0.01] border border-white/5">
+            <span className="text-primary font-black">3.</span>
+            <span>Импортируйте ключ через **«Добавить» / «+»** и нажмите подключить.</span>
+          </div>
+        </div>
       </Card>
 
-      <Tabs defaultValue="ios" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 bg-muted/30 p-1 rounded-2xl mb-8">
-          <TabsTrigger value="ios" className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-black">
-            <Apple className="w-4 h-4" /> <span className="hidden sm:inline">iOS / Apple</span>
-          </TabsTrigger>
-          <TabsTrigger value="android" className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-black">
-            <Smartphone className="w-4 h-4" /> <span className="hidden sm:inline">Android</span>
-          </TabsTrigger>
-          <TabsTrigger value="pc" className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-black">
-            <Monitor className="w-4 h-4" /> <span className="hidden sm:inline">PC / Desktop</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="ios" className="space-y-6 outline-none">
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card className="bg-card/50 border-primary/20 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4">
-                <Badge className="bg-primary/20 text-primary">Рекомендуем</Badge>
-              </div>
-              <CardHeader>
-                <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center mb-2 shadow-lg">
-                  <div className="font-black text-black">IN</div>
-                </div>
-                <CardTitle>INCY</CardTitle>
-                <CardDescription>Официальное приложение. Быстрое, простое и надежное.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из App Store." />
-                  <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
-                  <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
-                </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/incy/id6756943388', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold group">
-                  <Download className="mr-2 h-4 w-4 text-primary group-hover:scale-110 transition-transform" /> Скачать в App Store
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card/50 border-border/40">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center mb-2">
-                  <Zap className="text-primary w-6 h-6" />
-                </div>
-                <CardTitle>Hiddify (Бесплатно)</CardTitle>
-                <CardDescription>Ультимативное решение для обхода любых блокировок.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Установите Hiddify" description="Найдите в App Store и скачайте." />
-                  <Step number={2} title="Добавьте профиль" description="Нажмите '+' и выберите 'Добавить из буфера'." />
-                  <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
-                </div>
-                <Button variant="outline" onClick={() => window.open('https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
-                  <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="android" className="outline-none">
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card className="bg-card/50 border-primary/20 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4">
-                <Badge className="bg-primary/20 text-primary">Рекомендуем</Badge>
-              </div>
-              <CardHeader>
-                <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center mb-2 shadow-lg">
-                  <div className="font-black text-black">IN</div>
-                </div>
-                <CardTitle>INCY</CardTitle>
-                <CardDescription>Официальное приложение. Быстрое, простое и надежное.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Скачайте INCY" description="Установите официальное приложение из Google Play." />
-                  <Step number={2} title="Импорт ключа" description="Скопируйте ключ и добавьте его в приложении." />
-                  <Step number={3} title="Подключение" description="Включите VPN одним нажатием." />
-                </div>
-                <Button onClick={() => window.open('https://play.google.com/store/apps/details?id=llc.itdev.incy', '_blank')} className="w-full mt-6 rounded-xl bg-primary text-black font-bold group">
-                  <Download className="mr-2 h-4 w-4 text-black group-hover:scale-110 transition-transform" /> Скачать в Google Play
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card/50 border-border/40">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center mb-2">
-                  <Zap className="text-primary w-6 h-6" />
-                </div>
-                <CardTitle>Hiddify</CardTitle>
-                <CardDescription>Ультимативное решение для обхода любых блокировок.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  <Step number={1} title="Установите Hiddify" description="Найдите в Google Play и скачайте." />
-                  <Step number={2} title="Добавьте профиль" description="Нажмите '+ Новая конфигурация' -> 'Из буфера'." />
-                  <Step number={3} title="Подключитесь" description="Нажмите центральную кнопку подключения." />
-                </div>
-                <Button variant="outline" onClick={() => window.open('https://play.google.com/store/apps/details?id=app.hiddify.com', '_blank')} className="w-full mt-6 rounded-xl border-border hover:bg-muted font-bold">
-                  <Globe className="mr-2 h-4 w-4 text-primary" /> Скачать Hiddify
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="pc" className="outline-none">
-          <div className="flex flex-col gap-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              <Card className="bg-card/50 border-border/40">
-                <CardHeader>
-                  <CardTitle>Windows (Hiddify)</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Step number={1} title="Установка для ПК" description="Перейдите на GitHub и скачайте Hiddify-Windows-Setup." />
-                  <Step number={2} title="Импорт" description="Ткните на плюс справа вверху и выберите 'Добавить из буфера'." />
-                  <Button variant="outline" onClick={() => window.open('https://github.com/hiddify/hiddify-next/releases', '_blank')} className="w-full rounded-xl border-border">Скачать Hiddify для Windows</Button>
-                </CardContent>
-              </Card>
-              <Card className="bg-card/50 border-border/40">
-                <CardHeader>
-                  <CardTitle>macOS (Hiddify)</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Step number={1} title="Установка для Mac" description="Скачайте .dmg с GitHub или установите из App Store." />
-                  <Step number={2} title="Настройка" description="Разрешите VPN в настройках системы и добавьте конфиг." />
-                  <Button variant="outline" onClick={() => window.open('https://github.com/hiddify/hiddify-next/releases', '_blank')} className="w-full rounded-xl border-border">Скачать Hiddify для macOS</Button>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <div className="rounded-3xl bg-muted/10 border border-border/50 p-8 flex flex-col md:flex-row items-center gap-6">
-        <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-          <Globe className="w-8 h-8 text-primary" />
+      {/* Выбор приложения */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-[10px] md:text-xs font-black uppercase tracking-widest text-muted-foreground">Шаг 2. Выберите приложение</h3>
+          <Badge variant="outline" className="border-primary/20 text-primary text-[8px] md:text-[9px] uppercase font-bold">4 варианта</Badge>
         </div>
-        <div className="space-y-1 flex-1 text-center md:text-left">
-          <h3 className="text-xl font-bold">Нужна помощь с настройкой?</h3>
-          <p className="text-muted-foreground text-sm">Наши специалисты поддержки помогут вам установить VPN на любое устройство 24/7.</p>
+
+        {/* Элегантные табы-плитки выбора */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {[
+            { id: 'incy', name: 'INCY', sub: 'Рекомендуем', icon: 'IN', labelIcon: true, platforms: 'iOS & Android' },
+            { id: 'hiddify', name: 'Hiddify', sub: 'Мультиплатформа', icon: Globe, labelIcon: false, platforms: 'iOS, Android, PC, Mac' },
+            { id: 'happ', name: 'Happ', sub: 'Красивый для iOS', icon: Apple, labelIcon: false, platforms: 'iOS Client' },
+            { id: 'v2rayng', name: 'v2rayNG', sub: 'Легкий для Android', icon: Smartphone, labelIcon: false, platforms: 'Android Client' }
+          ].map((app) => {
+            const isSelected = selectedApp === app.id;
+            return (
+              <button
+                key={app.id}
+                onClick={() => setSelectedApp(app.id as any)}
+                className={`flex flex-col items-center justify-center p-3.5 rounded-2xl border transition-all text-center relative overflow-hidden ${
+                  isSelected 
+                    ? 'border-primary bg-primary/[0.02] shadow-[0_0_20px_-10px_rgba(0,255,136,0.15)]' 
+                    : 'border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]'
+                }`}
+              >
+                {/* Icon wrapper */}
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2.5 shadow ${
+                  isSelected ? 'bg-primary text-black' : 'bg-white/5 text-muted-foreground'
+                }`}>
+                  {app.labelIcon ? (
+                    <span className="font-black text-xs tracking-tighter">IN</span>
+                  ) : (
+                    React.createElement(app.icon as any, { className: "w-4.5 h-4.5" })
+                  )}
+                </div>
+
+                <span className="text-xs font-extrabold text-white uppercase">{app.name}</span>
+                <span className="text-[9px] text-muted-foreground line-clamp-1 mt-0.5">{app.sub}</span>
+                
+                {app.id === 'incy' && (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full animate-ping" />
+                )}
+              </button>
+            );
+          })}
         </div>
-        <Button 
-          variant="secondary" 
-          className="rounded-xl px-8 h-12"
-          onClick={() => navigate('/support')}
-        >
-          Написать в поддержку
-        </Button>
       </div>
+
+      {/* Карточка выбранного приложения с авто-кнопками для скачивания */}
+      {(() => {
+        const appDetails = {
+          incy: {
+            name: 'INCY',
+            badge: 'Рекомендуем',
+            desc: 'Наше флагманское официальное приложение. Идеально сбалансировано, не нагружает батарею, содержит автоматический умный обход блокировок и РФ сайтов.',
+            downloads: [
+              { name: 'App Store (iOS)', url: 'https://apps.apple.com/us/app/incy/id6756943388', icon: Apple },
+              { name: 'Google Play (Android)', url: 'https://play.google.com/store/apps/details?id=llc.itdev.incy', icon: Smartphone }
+            ],
+            russiaRule: 'Обход РФ настроен автоматически с коробки! Российские государственные сервисы, банки (Сбер, Т-банк), Кинопоиск и локальные ресурсы всегда работают напрямую без выключения VPN.'
+          },
+          hiddify: {
+            name: 'Hiddify',
+            badge: 'Универсальный клиент',
+            desc: 'Отличное мощное приложение с открытым исходным кодом. Имеет встроенные тесты пинга и прекрасно поддерживает раздельный обход трафика.',
+            downloads: [
+              { name: 'App Store (iOS)', url: 'https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532', icon: Apple },
+              { name: 'Google Play (Android)', url: 'https://play.google.com/store/apps/details?id=app.hiddify.com', icon: Smartphone },
+              { name: 'Скачать для Windows', url: 'https://github.com/hiddify/hiddify-next/releases/latest/download/Hiddify-Windows-Setup-x64.exe', icon: Monitor },
+              { name: 'Скачать для macOS', url: 'https://github.com/hiddify/hiddify-next/releases', icon: Apple }
+            ],
+            russiaRule: 'Для обхода РФ: перейдите в «Параметры» (иконка шестерёнки) ➔ выберите раздел «Маршрутизация» ➔ в меню «Режим маршрутизации» переключите на Bypass (Обход локальной сети и РФ).'
+          },
+          happ: {
+            name: 'Happ',
+            badge: 'iOS Лучший выбор',
+            desc: 'Прекрасный современный лаконичный дизайн для iOS с очень удобной нативной настройкой умной маршрутизации под Российскую Федерацию.',
+            downloads: [
+              { name: 'Скачать из App Store', url: 'https://apps.apple.com/us/app/happ-v2ray-client/id6477161741', icon: Apple }
+            ],
+            russiaRule: 'Для обхода РФ: перейдите в нижнюю вкладку «Rule» (Правила) на навигационном баре ➔ Выберите режим правил: «Bypass LAN and Russia».'
+          },
+          v2rayng: {
+            name: 'v2rayNG',
+            badge: 'Android Классика',
+            desc: 'Самый популярный и стабильный V2Ray клиент общего пользования со встроенным анализом трафика и полной кастомизацией на Android.',
+            downloads: [
+              { name: 'Скачать из Google Play', url: 'https://play.google.com/store/apps/details?id=com.v2ray.ang', icon: Smartphone },
+              { name: 'Скачать напрямую (APK)', url: 'https://github.com/2dust/v2rayNG/releases', icon: Smartphone }
+            ],
+            russiaRule: 'Для обхода РФ: откройте левое меню ➔ выберите «Настройки» ➔ включите галочку «Раздельное туннелирование» ➔ найдите системные приложения банков, госуслуг и снимите с них галки.'
+          }
+        }[selectedApp];
+
+        return (
+          <Card className="glass-card border-primary/20 p-4 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-white/5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider">{appDetails.name}</h4>
+                  <Badge className="bg-primary/10 text-primary border-primary/10 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0">
+                    {appDetails.badge}
+                  </Badge>
+                </div>
+                <p className="text-[10px] md:text-xs text-muted-foreground mt-0.5 leading-normal">{appDetails.desc}</p>
+              </div>
+            </div>
+
+            {/* Ссылки для скачивания (Специально под выбранное приложение) */}
+            <div className="space-y-2">
+              <span className="text-[9px] font-black uppercase text-muted-foreground tracking-widest block px-0.5">Ссылки для скачивания:</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {appDetails.downloads.map((download, idx) => (
+                  <Button
+                    key={idx}
+                    variant="outline"
+                    onClick={() => window.open(download.url, '_blank')}
+                    className="rounded-xl border-border hover:bg-white/5 text-xs font-bold h-9.5 gap-2 w-full justify-start px-3.5"
+                  >
+                    {React.createElement(download.icon, { className: "w-4 h-4 text-primary shrink-0" })}
+                    <span>{download.name}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Маршрутизация конкретно под выбранное приложение */}
+            <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1.5">
+              <span className="text-[9px] font-black uppercase tracking-wider text-primary flex items-center gap-1.5">
+                <Settings className="w-3.5 h-3.5" /> Настройка умного обхода РФ в {appDetails.name}
+              </span>
+              <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+                {appDetails.russiaRule}
+              </p>
+            </div>
+          </Card>
+        );
+      })()}
     </div>
   );
 }
+

@@ -22,7 +22,7 @@ export function CreateUserModal({ isOpen, onClose, onSuccess, servers }: CreateU
     initialBalance: '0',
     createSubscription: false,
     serverId: servers[0]?.id || '',
-    trafficLimitMb: '0',
+    trafficLimitGb: '0',
     periodMonths: '1'
   });
 
@@ -32,7 +32,11 @@ export function CreateUserModal({ isOpen, onClose, onSuccess, servers }: CreateU
     
     try {
       setLoading(true);
-      const res = await axios.post('/api/admin/users/create', formData, {
+      const payload = {
+        ...formData,
+        trafficLimitMb: formData.trafficLimitGb ? String(parseFloat(formData.trafficLimitGb) * 1024) : '0'
+      };
+      const res = await axios.post('/api/admin/users/create', payload, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       toast.success(`Успешно! Пароль: ${res.data.password}`, { duration: 10000 });
@@ -150,13 +154,14 @@ export function CreateUserModal({ isOpen, onClose, onSuccess, servers }: CreateU
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (МБ)</label>
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (ГБ)</label>
                         <input
                           type="number"
-                          value={formData.trafficLimitMb}
-                          onChange={(e) => setFormData(prev => ({ ...prev, trafficLimitMb: e.target.value }))}
+                          value={formData.trafficLimitGb}
+                          onChange={(e) => setFormData(prev => ({ ...prev, trafficLimitGb: e.target.value }))}
                           className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
                           min="0"
+                          step="0.1"
                           placeholder="0 = безлимит"
                         />
                       </div>

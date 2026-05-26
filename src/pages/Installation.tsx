@@ -28,9 +28,9 @@ const platforms = [
     icon: Apple, 
     color: 'text-white',
     apps: [
+      { name: 'Happ', url: 'https://apps.apple.com/us/app/happ-v2ray-client/id6477161741', recommended: true },
       { name: 'Hiddify', url: 'https://apps.apple.com/us/app/hiddify/id6473777532', recommended: true },
-      { name: 'Streisand', url: 'https://apps.apple.com/us/app/streisand/id6450534064' },
-      { name: 'V2Box', url: 'https://apps.apple.com/us/app/v2box-v2ray-client/id1640151303' }
+      { name: 'Streisand', url: 'https://apps.apple.com/us/app/streisand/id6450534064' }
     ]
   },
   { 
@@ -173,9 +173,13 @@ export default function Installation() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  {app.recommended 
-                    ? "Самый простой и надежный способ подключения. Поддерживает автоматическое обновление." 
-                    : "Альтернативный клиент для продвинутых пользователей."}
+                  {app.name === 'Happ' && "Прекрасный современный дизайн для iOS с очень удобной нативной настройкой раздельного обхода блокировок РФ."}
+                  {app.name === 'Hiddify' && "Самый универсальный мультиплатформенный клиент. Поддерживает автоматические профили обхода."}
+                  {app.name === 'v2rayNG' && "Классический надежный клиент для Android с гибким ручным управлением маршрутизацией."}
+                  {app.name !== 'Happ' && app.name !== 'Hiddify' && app.name !== 'v2rayNG' && (app.recommended 
+                    ? "Удобный и быстрый клиент безопасности с поддержкой автоматического обновления конфигурации." 
+                    : "Альтернативный клиент для продвинутых пользователей.")
+                  }
                 </p>
               </div>
               
@@ -274,6 +278,61 @@ export default function Installation() {
               </div>
             </CardContent>
           </Card>
+        </div>
+      </section>
+
+      {/* Шаг 4: Настройка раздельного обхода (Маршрутизации) */}
+      <section className="space-y-6">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">4</div>
+          <div className="space-y-0.5">
+            <h2 className="text-xl font-bold uppercase tracking-wider text-muted-foreground">Раздельный обход (Маршрутизация)</h2>
+            <p className="text-xs text-muted-foreground">Настройка, чтобы Яндекс, Сбербанк, Т-Банк и Госуслуги работали без VPN напрямую, а заблокированные сайты (Instagram, X и т.д.) через VPN</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Happ iOS */}
+          <div className="p-6 rounded-3xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-colors space-y-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-white/5">
+              <span className="font-bold text-base text-primary">Happ</span>
+              <span className="text-[10px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded font-bold uppercase">iOS</span>
+            </div>
+            <ol className="text-xs text-muted-foreground space-y-2.5 list-decimal pl-4 leading-relaxed">
+              <li>Добавьте вашу ссылку подписки в приложение и обновите её.</li>
+              <li>Перейдите во вкладку <b>«Rule»</b> (Правила) на нижнем навигационном баре или в правом верхнем углу.</li>
+              <li>Выберите режим правил: <b>«Bypass LAN and Russia»</b> (Обход локальной сети и РФ).</li>
+              <li>Теперь российские банки и другие сервисы будут открываться мгновенно напрямую через вашего провайдера.</li>
+            </ol>
+          </div>
+
+          {/* Hiddify */}
+          <div className="p-6 rounded-3xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-colors space-y-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-white/5">
+              <span className="font-bold text-base text-primary">Hiddify</span>
+              <span className="text-[10px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded font-bold uppercase">Все платформы</span>
+            </div>
+            <ol className="text-xs text-muted-foreground space-y-2.5 list-decimal pl-4 leading-relaxed">
+              <li>Откройте боковое или нижнее меню и нажмите на <b>шестеренку (Параметры)</b>.</li>
+              <li>Перейдите в раздел <b>«Маршрутизация»</b> (Routing).</li>
+              <li>В строке «Режим маршрутизации» выберите <b>«Bypass» (Обход РФ / Китая / Локальной сети)</b>.</li>
+              <li>Приложение автоматически скачивает GEO-базы и пускает весь локальный трафик в обход туннеля VPN.</li>
+            </ol>
+          </div>
+
+          {/* v2rayNG */}
+          <div className="p-6 rounded-3xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-colors space-y-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-white/5">
+              <span className="font-bold text-base text-primary">v2rayNG</span>
+              <span className="text-[10px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded font-bold uppercase">Android</span>
+            </div>
+            <ol className="text-xs text-muted-foreground space-y-2.5 list-decimal pl-4 leading-relaxed">
+              <li>Откройте левое меню, выберите <b>«Настройки»</b> (Settings).</li>
+              <li>Найдите пункт <b>«Раздельное туннелирование»</b> (Per-app proxy). По умолчанию VPN работает для всех приложений.</li>
+              <li>Вы можете включить разделение и <b>снять галочки</b> с банковских приложений (Сбербанк, Т-Банк, ГосУслуги).</li>
+              <li>Они будут полностью игнорировать VPN и работать через обычный интернет, сохраняя максимальную скорость.</li>
+            </ol>
+          </div>
         </div>
       </section>
 
