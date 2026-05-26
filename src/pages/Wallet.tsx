@@ -108,9 +108,9 @@ export default function Wallet() {
   };
 
   return (
-    <div className="space-y-3 animate-in fade-in duration-500 max-w-md mx-auto w-full h-full flex flex-col min-h-0 pb-2">
+    <div className="space-y-3 animate-in fade-in duration-500 max-w-4xl mx-auto w-full h-full flex flex-col min-h-0 pb-2">
       {/* Compact Header */}
-      <div className="flex items-center justify-between pb-1 shrink-0">
+      <div className="flex items-center justify-between pb-1 shrink-0 w-full max-w-md mx-auto">
         <div className="flex items-center gap-1.5">
           <Button 
             variant="ghost" 
@@ -181,7 +181,7 @@ export default function Wallet() {
         </Sheet>
       </div>
 
-      <Card className="glass-card border-primary/20 p-4 space-y-4 overflow-y-auto flex-1 min-h-0 scrollbar-hide">
+      <Card className="glass-card border-primary/20 p-4 space-y-4 overflow-y-auto flex-1 min-h-0 scrollbar-hide w-full max-w-md mx-auto">
         {/* Sum Header */}
         <div className="space-y-0.5">
           <CardTitle className="text-xs font-black uppercase text-primary tracking-widest">1. Сумма пополнения</CardTitle>

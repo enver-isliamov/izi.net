@@ -74,7 +74,7 @@ export default function Support() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full w-full max-w-3xl mx-auto space-y-3 animate-in fade-in duration-500 pb-2">
+    <div className="flex-1 flex flex-col min-h-0 h-full w-full max-w-4xl mx-auto space-y-3 animate-in fade-in duration-500 pb-2">
       <div className="flex justify-end mb-1 shrink-0">
         <Button 
           className="bg-[#0088cc] text-white hover:bg-[#0088cc]/90 rounded-xl px-5 h-9 text-xs gap-2 shrink-0" 
