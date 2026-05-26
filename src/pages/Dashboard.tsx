@@ -15,7 +15,8 @@ import {
   Copy,
   Trash2,
   QrCode,
-  RefreshCw
+  RefreshCw,
+  Gift
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,6 +64,46 @@ export default function Dashboard() {
   const [qrMode, setQrMode] = useState<'key' | 'sub'>('sub');
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [showUniversalLink, setShowUniversalLink] = useState(false);
+
+  // Promo code states
+  const [promoCode, setPromoCode] = useState('');
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
+
+  const handleApplyPromo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!promoCode.trim()) {
+      toast.error('Введите промокод');
+      return;
+    }
+
+    setIsApplyingPromo(true);
+    const toastId = toast.loading('Активация промокода...');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/promocode/apply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ code: promoCode })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Не удалось активировать промокод');
+      }
+
+      toast.success(result.message || 'Промокод успешно активирован!', { id: toastId });
+      setPromoCode('');
+      fetchDashboardData(true);
+    } catch (err: any) {
+      console.error('Promo error:', err);
+      toast.error(err.message || 'Ошибка при активации промокода', { id: toastId });
+    } finally {
+      setIsApplyingPromo(false);
+    }
+  };
 
   const fetchDashboardData = async (forceLoading = false) => {
     if (!user || isFetching.current) return;
@@ -649,15 +690,50 @@ export default function Dashboard() {
               </motion.div>
             );
           }) : (
-            <div className="md:col-span-2 flex flex-col items-center justify-center p-12 border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
+            <div className="md:col-span-2 flex flex-col items-center justify-center p-8 md:p-12 border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
               <Smartphone className="w-12 h-12 text-muted-foreground mb-4 opacity-20" />
               <h3 className="font-bold text-lg">Нет активных устройств</h3>
               <p className="text-sm text-muted-foreground text-center max-w-xs mt-2">
                 Активируйте подписку, чтобы получить доступ к безопасному интернету.
               </p>
-              <Button onClick={() => openWizard('extend')} className="mt-6 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 neon-glow">
-                Активировать прямо сейчас
-              </Button>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full max-w-md justify-center">
+                <Button onClick={() => openWizard('extend')} className="bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 h-10 neon-glow w-full sm:w-auto">
+                  Активировать прямо сейчас
+                </Button>
+              </div>
+
+              {/* Promo Code Input section for new users */}
+              <div className="mt-8 pt-6 border-t border-white/5 w-full max-w-sm flex flex-col items-center">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 font-semibold">
+                  <Gift className="w-3.5 h-3.5 text-primary" />
+                  <span>У вас есть промокод?</span>
+                </div>
+                <form onSubmit={handleApplyPromo} className="flex gap-2 w-full">
+                  <input
+                    type="text"
+                    placeholder="ВВЕДИТЕ ПРОМОКОД..."
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    className="flex-1 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary rounded-xl py-2 px-3 text-xs uppercase font-mono tracking-wider outline-none text-white transition-all text-center"
+                    disabled={isApplyingPromo}
+                  />
+                  <Button 
+                    type="submit" 
+                    disabled={isApplyingPromo}
+                    className="bg-primary hover:bg-primary/90 text-black text-xs font-bold rounded-xl px-5 h-9 shrink-0 transition-all font-sans"
+                  >
+                    {isApplyingPromo ? (
+                      <Loader2 className="animate-spin w-3 h-3" />
+                    ) : (
+                      'Ок'
+                    )}
+                  </Button>
+                </form>
+                <span className="text-[10px] text-muted-foreground/60 text-center mt-2 leading-tight">
+                  Активирует бесплатный тестовый период на 24 часа. Доступно раз в аккаунт.
+                </span>
+              </div>
             </div>
           )}
         </div>
