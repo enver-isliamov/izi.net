@@ -70,6 +70,7 @@ export default function AdminSettings() {
       setSaving(true);
       // Clean values
       const cleanSettings = {
+        PUBLIC_URL: settings.PUBLIC_URL?.trim() || '',
         ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim() || '',
         ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim() || '',
         ENOT_SECRET_KEY2: settings.ENOT_SECRET_KEY2?.trim() || '',

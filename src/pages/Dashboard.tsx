@@ -39,6 +39,8 @@ import {
 import { SubscriptionWizard } from '@/components/subscription/SubscriptionWizard';
 import { QRCodeSVG } from 'qrcode.react';
 
+import { WelcomeWizard } from '@/components/WelcomeWizard';
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -401,6 +403,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-3 md:space-y-4 animate-in fade-in duration-500 max-w-4xl mx-auto">
+      <WelcomeWizard />
       {/* Simplified Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 md:gap-3">
         <div>
