@@ -404,8 +404,11 @@ export default function Dashboard() {
       {/* Simplified Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 md:gap-3">
         <div>
-          <h1 className="text-lg md:text-xl font-bold tracking-tight">
+          <h1 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2">
              Привет, {userData?.name || user?.email?.split('@')?.[0]}!
+             {subscription && (
+               <span className="inline-flex items-center gap-1 bg-gradient-to-r from-yellow-500/20 to-amber-500/20 text-yellow-500 border border-yellow-500/30 text-[10px] md:text-xs font-black uppercase px-2 py-0.5 rounded-lg shadow-lg shadow-yellow-500/5 select-none tracking-wider animate-pulse">PRO</span>
+             )}
           </h1>
           <p className="text-[10px] md:text-xs text-muted-foreground mt-0.5">
             {activeDeviceCount > 0 ? (

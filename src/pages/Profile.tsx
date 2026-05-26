@@ -33,6 +33,7 @@ export default function Profile() {
   const { telegramBotName } = useAppConfig();
   const [userData, setUserData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
+  const [hasActiveSub, setHasActiveSub] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   // Password change states
@@ -80,10 +81,18 @@ export default function Profile() {
       try {
         const [
           { data: userRes, error: userErr },
-          { data: settingsRes, error: settingsErr }
+          { data: settingsRes, error: settingsErr },
+          { data: subRes, error: subErr }
         ] = await Promise.all([
           supabase.from('users').select('*').eq('id', user.id).single(),
-          supabase.from('notification_settings').select('*').eq('user_id', user.id).single()
+          supabase.from('notification_settings').select('*').eq('user_id', user.id).single(),
+          supabase.from('subscriptions')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
         ]);
           
         if (userErr && userErr.code !== 'PGRST116') {
@@ -96,6 +105,14 @@ export default function Profile() {
           console.error('Error fetching settings:', settingsErr);
         } else {
           setSettings(settingsRes);
+        }
+
+        if (subErr) {
+          console.error('Error fetching subscription:', subErr);
+        } else if (subRes) {
+          // Check if active and not expired
+          const isNotExpired = !subRes.expires_at || new Date(subRes.expires_at) > new Date();
+          setHasActiveSub(isNotExpired);
         }
       } catch (error) {
         console.error('Profile fetch error:', error);
@@ -210,15 +227,34 @@ export default function Profile() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center gap-6">
-                <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center relative">
                   <User className="w-10 h-10 text-primary" />
+                  {hasActiveSub && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-md shadow-yellow-500/20 uppercase tracking-widest select-none animate-pulse">
+                      PRO
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-xl font-bold">{userData?.name || user?.email?.split('@')?.[0] || 'User'}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-bold">{userData?.name || user?.email?.split('@')?.[0] || 'User'}</h3>
+                    {hasActiveSub && (
+                      <span className="hidden sm:inline bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 text-[9px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
+                        PRO-АККАУНТ
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground">ID: {user?.id?.substring(0, 8)}...</p>
-                  <Badge className="bg-primary/20 text-primary border-primary/30 mt-1">
-                    {(userData?.email_verified || userData?.telegram_linked) ? 'Активен' : 'Ожидает подтверждения'}
-                  </Badge>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30">
+                      {(userData?.email_verified || userData?.telegram_linked) ? 'Активен' : 'Ожидает подтверждения'}
+                    </Badge>
+                    {hasActiveSub && (
+                      <Badge className="bg-yellow-500/20 hover:bg-yellow-500/35 text-yellow-500 border-yellow-500/30 font-bold uppercase text-[9px] tracking-wide">
+                        PRO ДОСТУП
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
 
