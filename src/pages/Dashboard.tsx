@@ -422,20 +422,25 @@ export default function Dashboard() {
           >
             <Card 
               className={cn(
-                "glass-card p-2 md:p-3 flex items-center justify-between gap-1 hover:border-primary/30 transition-colors h-14 md:h-16",
+                "glass-card p-2 md:p-3 flex items-center justify-between gap-2 hover:border-primary/30 transition-colors h-14 md:h-16",
                 stat.onClick && "cursor-pointer"
               )} 
               onClick={stat.onClick}
             >
-              <div className="flex flex-col min-w-0 pr-1 flex-1">
-                <span className="text-[8px] md:text-[9px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1 truncate">
-                  <stat.icon className="w-2.5 h-2.5 text-primary shrink-0" /> {stat.label}
-                </span>
-                <span className={cn("text-xs md:text-sm font-black mt-0.5 truncate", stat.color)}>
-                  {stat.value} {stat.sub && <span className="text-[9px] md:text-xs font-bold text-muted-foreground">{stat.sub}</span>}
-                </span>
+              <div className="flex items-center gap-2 md:gap-2.5 min-w-0 flex-1">
+                <div className="p-1.5 md:p-2 bg-primary/10 rounded-xl text-primary shrink-0">
+                  <stat.icon className="w-4 h-4 md:w-5 md:h-5" />
+                </div>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[8px] md:text-[9px] uppercase font-bold text-muted-foreground tracking-wider truncate">
+                    {stat.label}
+                  </span>
+                  <span className={cn("text-xs md:text-sm font-black leading-tight mt-0.5 truncate", stat.color)}>
+                    {stat.value} {stat.sub && <span className="text-[9px] md:text-xs font-bold text-muted-foreground">{stat.sub}</span>}
+                  </span>
+                </div>
               </div>
-              {stat.onClick && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />}
+              {stat.onClick && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/30 shrink-0" />}
             </Card>
           </motion.div>
         ))}
