@@ -1009,6 +1009,46 @@ class PaymentService {
     };
   }
 
+  async checkEnotStatus(invoiceId: string) {
+    const { merchantId, secretKey } = await this.getEnotConfig();
+
+    const payload = {
+      invoice_id: invoiceId,
+      shop_id: merchantId
+    };
+
+    console.log(`[Enot.io] Checking status for invoice: ${invoiceId} in shop: ${merchantId}`);
+
+    const response = await axios.post('https://api.enot.io/invoice/info', payload, {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'x-api-key': secretKey
+      },
+      timeout: 10000,
+      httpsAgent: sharedHttpsAgent,
+      validateStatus: () => true
+    });
+
+    console.log('[Enot.io] Status check response:', JSON.stringify(response.data));
+
+    if (response.data && response.data.status_check) {
+      const info = response.data.data;
+      return {
+        enotStatus: info?.status || 'unknown',
+        amount: info?.amount,
+        enotResponse: response.data
+      };
+    } else {
+      const errorMsg = response.data?.error || response.data?.message || 'Enot.io API error';
+      return {
+        enotStatus: 'error',
+        message: typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg),
+        enotResponse: response.data
+      };
+    }
+  }
+
   async verifyEnotWebhook(body: any, headerSignature: string | undefined) {
     const { secretKey2 } = await this.getEnotConfig();
     if (!secretKey2) {
@@ -1788,6 +1828,44 @@ app.post('/api/admin/payments/confirm', adminOnly, async (req, res) => {
   } catch (error: any) {
     console.error('❌ Admin payment confirm error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/payments/check-enot', adminOnly, async (req, res) => {
+  const { paymentId } = req.body;
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Missing paymentId' });
+  }
+
+  try {
+    const { data: payRow, error: fetchErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+
+    if (fetchErr || !payRow) {
+      return res.status(404).json({ error: 'Платеж не найден' });
+    }
+
+    if (!payRow.invoice_id) {
+      return res.json({ 
+        success: true, 
+        internalStatus: payRow.status,
+        enotStatus: 'none', 
+        message: 'У платежа отсутствует ID счета в Enot.io (возможно, прямой или ручной)' 
+      });
+    }
+
+    const checkResult = await payment.checkEnotStatus(payRow.invoice_id);
+    res.json({ 
+      success: true, 
+      internalStatus: payRow.status,
+      ...checkResult 
+    });
+  } catch (err: any) {
+    console.error('❌ Admin check Enot status error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

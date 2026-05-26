@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
 import { toast } from 'sonner';
-import { Search, Filter, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { Search, Filter, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw, Check, HelpCircle, ShieldAlert } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -15,6 +15,54 @@ export default function AdminPayments() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all'); // all, pending, completed, failed
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  
+  // Cache for Enot API statuses
+  const [enotStatuses, setEnotStatuses] = useState<Record<string, { status: string; info?: string; loading?: boolean }>>({});
+
+  const checkEnotStatus = async (paymentId: string) => {
+    setEnotStatuses(prev => ({ ...prev, [paymentId]: { status: 'checking', loading: true, info: 'Запрос к API Enot.io...' } }));
+    try {
+      const res = await axios.post('/api/admin/payments/check-enot', { paymentId }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      
+      if (res.data.success) {
+        let statusText = 'unknown';
+        let detail = '';
+        if (res.data.enotStatus === 'success') {
+          statusText = 'success';
+          detail = 'ОПЛАЧЕН (Успешно на стороне Enot.io)';
+        } else if (res.data.enotStatus === 'created') {
+          statusText = 'created';
+          detail = 'Создан (Оплата еще не вносилась)';
+        } else if (res.data.enotStatus === 'fail') {
+          statusText = 'fail';
+          detail = 'Истек / Отклонен на стороне Enot.io';
+        } else if (res.data.enotStatus === 'none') {
+          statusText = 'none';
+          detail = res.data.message || 'Прямой перевод или промокод';
+        } else {
+          statusText = 'error';
+          detail = res.data.message || 'Ошибка API';
+        }
+        setEnotStatuses(prev => ({ 
+          ...prev, 
+          [paymentId]: { status: statusText, info: detail, loading: false } 
+        }));
+      } else {
+        setEnotStatuses(prev => ({ 
+          ...prev, 
+          [paymentId]: { status: 'error', info: res.data.message || 'Ошибка проверки', loading: false } 
+        }));
+      }
+    } catch (e: any) {
+      console.error(e);
+      setEnotStatuses(prev => ({ 
+        ...prev, 
+        [paymentId]: { status: 'error', info: e.response?.data?.error || 'Сетевая ошибка API Enot.io', loading: false } 
+      }));
+    }
+  };
 
   const fetchPayments = async () => {
     try {
@@ -156,8 +204,36 @@ export default function AdminPayments() {
                           {p.user_id}
                         </div>
                         {p.provider && (
-                          <div className="text-[10px] uppercase text-blue-500/70 font-bold mt-1">
-                            Провайдер: {p.provider}
+                          <div className="flex flex-col gap-1 mt-1 text-[10px]">
+                            <span className="uppercase text-blue-500/70 font-semibold">
+                              Провайдер: {p.provider}
+                            </span>
+                            {p.provider === 'enot' && p.invoice_id && (
+                              <div className="flex flex-col gap-1 items-start mt-0.5">
+                                <button
+                                  onClick={() => checkEnotStatus(p.id)}
+                                  className="text-[9px] text-blue-400 hover:text-blue-300 font-mono underline cursor-pointer flex items-center gap-1"
+                                >
+                                  {enotStatuses[p.id]?.loading ? (
+                                    <RefreshCw size={10} className="animate-spin inline text-blue-400" />
+                                  ) : (
+                                    <HelpCircle size={10} className="inline text-blue-400" />
+                                  )}
+                                  Проверить в Enot.io
+                                </button>
+                                {enotStatuses[p.id]?.info && (
+                                  <div className={`text-[9px] font-medium leading-normal p-1 rounded mt-0.5 max-w-[200px] whitespace-normal ${
+                                    enotStatuses[p.id]?.status === 'success' 
+                                      ? 'bg-green-500/10 text-green-400 border border-green-500/20 font-bold' 
+                                      : enotStatuses[p.id]?.status === 'created'
+                                      ? 'bg-zinc-800 text-zinc-400 border border-white/5'
+                                      : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                  }`}>
+                                    {enotStatuses[p.id]?.info}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
                       </td>
@@ -174,40 +250,107 @@ export default function AdminPayments() {
                             </span>
                           ) : p.status === 'pending' ? (
                             isExpired ? (
-                              <span className="flex items-center gap-1 text-xs font-bold text-orange-400 bg-orange-400/10 px-2 py-1 rounded-md" title="Транзакция просрочена">
-                                <Clock size={12} /> Истек
+                              <span className="flex items-center gap-1 text-xs font-semibold text-neutral-500 bg-white/5 px-2 py-1 rounded-md" title="Пользователь покинул страницу оплаты">
+                                <Clock size={12} className="text-neutral-500" /> Брошен
                               </span>
                             ) : (
-                              <span className="flex items-center gap-1 text-xs font-bold text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-md">
+                              <span className="flex items-center gap-1 text-xs font-bold text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded-md animate-pulse">
                                 <Clock size={12} /> Ожидает
                               </span>
                             )
                           ) : (
-                            <span className="flex items-center gap-1 text-xs font-bold text-red-400 bg-red-400/10 px-2 py-1 rounded-md">
-                              <XCircle size={12} /> Ошибка
+                            <span className="flex items-center gap-1 text-xs font-semibold text-neutral-500 bg-neutral-500/5 px-2 py-1 rounded-md">
+                              <XCircle size={12} className="text-neutral-500" /> Не оплачен
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {p.status === 'pending' && (
-                          <button
-                            onClick={() => handleConfirm(p.id)}
-                            disabled={confirmingId === p.id}
-                            className={`flex items-center gap-2 px-3 py-1.5 disabled:opacity-50 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all ${
-                              isExpired 
-                                ? 'bg-orange-500 hover:bg-orange-600' 
-                                : 'bg-blue-500 hover:bg-blue-600'
-                            }`}
-                          >
-                            {confirmingId === p.id ? (
-                              <RefreshCw size={12} className="animate-spin" />
-                            ) : (
-                              <Check size={12} />
-                            )}
-                            {isExpired ? 'Провести (Истек)' : 'Подтвердить'}
-                          </button>
-                        )}
+                        {p.status === 'pending' && (() => {
+                          const enotState = enotStatuses[p.id];
+                          
+                          if (enotState) {
+                            if (enotState.status === 'created') {
+                              return (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="text-[9px] font-bold text-zinc-500 uppercase px-2 py-1 bg-zinc-800 rounded border border-white/5" title="Пользователь не оплатил счет">
+                                    Не оплачен
+                                  </span>
+                                  <button
+                                    onClick={() => handleConfirm(p.id)}
+                                    disabled={confirmingId === p.id}
+                                    className="text-[9px] text-blue-400 hover:text-blue-300 underline font-semibold"
+                                  >
+                                    Зачислить вручную
+                                  </button>
+                                </div>
+                              );
+                            }
+                            
+                            if (enotState.status === 'success') {
+                              return (
+                                <button
+                                  onClick={() => handleConfirm(p.id)}
+                                  disabled={confirmingId === p.id}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 text-black text-[10px] font-black uppercase tracking-wider rounded-lg transition-all shadow-lg shadow-green-500/10 animate-bounce"
+                                >
+                                  {confirmingId === p.id ? (
+                                    <RefreshCw size={12} className="animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 size={12} />
+                                  )}
+                                  Зачислить (ОПЛАЧЕН!)
+                                </button>
+                              );
+                            }
+
+                            if (enotState.status === 'fail') {
+                              return (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="text-[9px] font-bold text-red-400 uppercase px-2 py-1 bg-red-400/10 rounded">
+                                    Платеж отменен
+                                  </span>
+                                  <button
+                                    onClick={() => handleConfirm(p.id)}
+                                    disabled={confirmingId === p.id}
+                                    className="text-[9px] text-muted-foreground hover:text-white underline"
+                                  >
+                                    Все равно зачислить
+                                  </button>
+                                </div>
+                              );
+                            }
+                          }
+
+                          return (
+                            <div className="flex flex-col sm:flex-row gap-1.5 items-start">
+                              {p.provider === 'enot' && p.invoice_id && (
+                                <button
+                                  onClick={() => checkEnotStatus(p.id)}
+                                  className="px-2.5 py-1 text-[10px] font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-lg transition-all"
+                                >
+                                  Проверить статус
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleConfirm(p.id)}
+                                disabled={confirmingId === p.id}
+                                className={`flex items-center justify-center gap-1 px-3 py-1 text-[10px] font-bold uppercase rounded-lg transition-all ${
+                                  isExpired 
+                                    ? 'bg-neutral-800 text-neutral-400 border border-white/5 hover:bg-neutral-700 hover:text-white' 
+                                    : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/10'
+                                }`}
+                              >
+                                {confirmingId === p.id ? (
+                                  <RefreshCw size={10} className="animate-spin" />
+                                ) : (
+                                  <Check size={10} />
+                                )}
+                                {isExpired ? 'Провести' : 'Подтвердить'}
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );
@@ -229,6 +372,8 @@ export default function AdminPayments() {
           ) : (
              filtered.map((p) => {
                const isExpired = p.status === 'pending' && p.expires_at && new Date(p.expires_at) < new Date();
+               const enotState = enotStatuses[p.id];
+
                return (
                  <div key={p.id} className="p-4 space-y-3">
                    <div className="flex justify-between items-start">
@@ -251,35 +396,137 @@ export default function AdminPayments() {
                        </span>
                      ) : p.status === 'pending' ? (
                        isExpired ? (
-                         <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded-md">
-                           <Clock size={10} /> Истек
+                         <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-neutral-500 bg-white/5 px-2 py-0.5 rounded-md">
+                           <Clock size={10} className="text-neutral-500" /> Брошен
                          </span>
                        ) : (
-                         <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-md">
+                         <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded-md animate-pulse">
                            <Clock size={10} /> Ожидает
                          </span>
                        )
                      ) : (
-                       <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-md">
-                         <XCircle size={10} /> Ошибка
+                       <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-medium text-neutral-500 bg-neutral-500/5 px-2 py-0.5 rounded-md">
+                         <XCircle size={10} className="text-neutral-500" /> Не оплачен
                        </span>
                      )}
                    </div>
 
-                   {p.status === 'pending' && (
-                     <button
-                       onClick={() => handleConfirm(p.id)}
-                       disabled={confirmingId === p.id}
-                       className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 disabled:opacity-50 text-white text-xs font-bold transition-all rounded-lg ${
-                         isExpired 
-                           ? 'bg-orange-500 hover:bg-orange-600' 
-                           : 'bg-blue-500 hover:bg-blue-600'
-                       }`}
-                     >
-                       {confirmingId === p.id ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                       {isExpired ? 'Принудительно провести (Истек)' : 'Подтвердить платеж'}
-                     </button>
+                   {p.provider && (
+                     <div className="text-[10px] bg-white/[0.01] p-2 rounded-xl border border-white/5 space-y-1.5">
+                       <div className="flex justify-between items-center">
+                         <span className="text-muted-foreground uppercase font-semibold">Провайдер:</span>
+                         <span className="text-white font-mono">{p.provider}</span>
+                       </div>
+                       {p.provider === 'enot' && p.invoice_id && (
+                         <div className="pt-1.5 border-t border-white/5 space-y-1.5">
+                           <div className="flex justify-between items-center">
+                             <span className="text-muted-foreground">Enot.io ID:</span>
+                             <span className="text-blue-300 text-[9px] font-mono select-all">{p.invoice_id}</span>
+                           </div>
+                           <div className="flex gap-2 justify-end">
+                             <button
+                               onClick={() => checkEnotStatus(p.id)}
+                               className="text-[9px] text-blue-400 hover:text-blue-300 font-mono underline cursor-pointer flex items-center gap-1"
+                             >
+                               {enotState?.loading ? (
+                                 <RefreshCw size={10} className="animate-spin inline" />
+                               ) : (
+                                 <HelpCircle size={10} className="inline" />
+                               )}
+                               Проверить статус
+                             </button>
+                           </div>
+                           {enotState?.info && (
+                             <div className={`p-1.5 text-[9px] rounded text-center leading-normal ${
+                               enotState.status === 'success'
+                                 ? 'bg-green-500/10 text-green-400 border border-green-500/20 font-bold'
+                                 : enotState.status === 'created'
+                                 ? 'bg-zinc-800 text-zinc-400 border border-white/5'
+                                 : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                             }`}>
+                               {enotState.info}
+                             </div>
+                           )}
+                         </div>
+                       )}
+                     </div>
                    )}
+
+                   {p.status === 'pending' && (() => {
+                     if (enotState) {
+                       if (enotState.status === 'created') {
+                         return (
+                           <div className="space-y-2">
+                             <div className="w-full text-center py-2 bg-zinc-800 text-zinc-500 text-[10px] font-bold uppercase rounded-lg border border-white/5">
+                               Оплаты нет в Enot.io
+                             </div>
+                             <button
+                               onClick={() => handleConfirm(p.id)}
+                               disabled={confirmingId === p.id}
+                               className="w-full text-center py-1 text-[10px] text-muted-foreground hover:text-white underline transition-all"
+                             >
+                               Все равно подтвердить вручную
+                             </button>
+                           </div>
+                         );
+                       }
+                       
+                       if (enotState.status === 'success') {
+                         return (
+                           <button
+                             onClick={() => handleConfirm(p.id)}
+                             disabled={confirmingId === p.id}
+                             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-green-500 hover:bg-green-600 text-black text-xs font-black uppercase rounded-lg transition-all animate-bounce"
+                           >
+                             {confirmingId === p.id ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                             Зачислить (ОПЛАЧЕН!)
+                           </button>
+                         );
+                       }
+
+                       if (enotState.status === 'fail') {
+                         return (
+                           <div className="space-y-1 text-center">
+                             <span className="block text-[10px] text-red-400 font-bold uppercase py-1 bg-red-400/10 rounded">
+                               Платеж отменен Enot.io
+                             </span>
+                             <button
+                               onClick={() => handleConfirm(p.id)}
+                               disabled={confirmingId === p.id}
+                               className="text-[10px] text-muted-foreground hover:text-white underline"
+                             >
+                               Все равно провести
+                             </button>
+                           </div>
+                         );
+                       }
+                     }
+
+                     return (
+                       <div className="flex gap-2">
+                         {p.provider === 'enot' && p.invoice_id && (
+                           <button
+                             onClick={() => checkEnotStatus(p.id)}
+                             className="flex-1 py-2 text-[10px] font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-lg transition-all"
+                           >
+                             Проверить в платежке
+                           </button>
+                         )}
+                         <button
+                           onClick={() => handleConfirm(p.id)}
+                           disabled={confirmingId === p.id}
+                           className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 disabled:opacity-50 text-white text-xs font-bold transition-all rounded-lg ${
+                             isExpired 
+                               ? 'bg-neutral-800 text-neutral-400 border border-white/5 hover:bg-neutral-700 hover:text-white' 
+                               : 'bg-blue-500 hover:bg-blue-600 shadow-lg shadow-blue-500/10'
+                           }`}
+                         >
+                           {confirmingId === p.id ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                           {isExpired ? 'Провести' : 'Подтвердить'}
+                         </button>
+                       </div>
+                     );
+                   })()}
                  </div>
                );
              })
