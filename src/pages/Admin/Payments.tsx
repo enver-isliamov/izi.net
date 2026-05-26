@@ -194,13 +194,23 @@ export default function AdminPayments() {
                   return (
                     <tr key={p.id} className="hover:bg-white/5 transition-colors group">
                       <td className="px-6 py-4">
-                        <div className="text-sm font-mono text-blue-300 mb-1">{p.id.substring(0, 13)}...</div>
+                        <div className="text-sm font-mono text-blue-300 mb-1" title={p.id}>{p.id.substring(0, 13)}...</div>
+                        {p.invoice_id && (
+                          <div className="text-[10px] font-mono text-muted-foreground/70 mb-1" title={p.invoice_id}>
+                            Транзакция: {p.invoice_id}
+                          </div>
+                        )}
                         <div className="text-[10px] text-muted-foreground">
                           {p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy, HH:mm', { locale: ru }) : '---'}
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-sm font-mono text-muted-foreground opacity-60 truncate max-w-[150px]" title={p.user_id}>
+                        {p.users?.email ? (
+                          <div className="text-sm font-bold text-white mb-0.5">
+                            {p.users.email}
+                          </div>
+                        ) : null}
+                        <div className="text-[10px] font-mono text-muted-foreground opacity-60 truncate max-w-[150px]" title={p.user_id}>
                           {p.user_id}
                         </div>
                         {p.provider && (

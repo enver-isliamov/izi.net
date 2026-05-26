@@ -1784,7 +1784,7 @@ app.get('/api/admin/payments', adminOnly, async (req, res) => {
 
     const { data, error } = await supabase
       .from('payments')
-      .select('*')
+      .select('*, users(email)')
       .order('created_at', { ascending: false })
       .limit(200);
 
