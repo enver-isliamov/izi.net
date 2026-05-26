@@ -1725,6 +1725,23 @@ app.get('/api/admin/diag', adminOnly, async (req, res) => {
 
 app.get('/api/admin/payments', adminOnly, async (req, res) => {
   try {
+    const nowIso = new Date().toISOString();
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    // 1. Auto-fail expired pending payments where expires_at is past
+    await supabase
+      .from('payments')
+      .update({ status: 'failed' })
+      .eq('status', 'pending')
+      .lt('expires_at', nowIso);
+
+    // 2. Auto-fail stale pending payments with null expires_at or older than 1 hour
+    await supabase
+      .from('payments')
+      .update({ status: 'failed' })
+      .eq('status', 'pending')
+      .lt('created_at', oneHourAgo);
+
     const { data, error } = await supabase
       .from('payments')
       .select('*')
@@ -2369,14 +2386,93 @@ app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) =>
 
 app.put('/api/admin/users/:id', adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { role, balance } = req.body; // In a real app we'd have a balance field, assuming it exists or user wants it
+  const { role, balance } = req.body;
   
-  const { data, error } = await supabase.from('users').update({
-    role
-  }).eq('id', id).select().single();
+  try {
+    let updatedUser: any = null;
+    
+    // 1. Update role if defined to avoid 'Cannot coerce' error when empty
+    if (role !== undefined) {
+      const { data: u, error: uErr } = await supabase
+        .from('users')
+        .update({ role })
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+      if (uErr) throw uErr;
+      updatedUser = u;
+    } else {
+      const { data: u, error: uErr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (uErr) throw uErr;
+      updatedUser = u;
+    }
 
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // 2. Update balance & log transaction if balance is defined
+    if (balance !== undefined) {
+      const val = parseFloat(balance);
+      if (isNaN(val)) {
+        return res.status(400).json({ error: 'Некорректное значение баланса' });
+      }
+
+      // Fetch current balance to calculate diff
+      const { data: balData, error: balFetchErr } = await supabase
+        .from('balances')
+        .select('amount')
+        .eq('user_id', id)
+        .maybeSingle();
+
+      if (balFetchErr) throw balFetchErr;
+      
+      const oldBalance = balData?.amount ? parseFloat(balData.amount) : 0;
+      const difference = val - oldBalance;
+
+      // Update balance
+      const { error: balErr } = await supabase
+        .from('balances')
+        .upsert({
+          user_id: id,
+          amount: val,
+          currency: 'RUB',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      if (balErr) throw balErr;
+
+      // Log transaction if balance was actually changed
+      if (Math.abs(difference) > 0.001) {
+        const type = difference >= 0 ? 'deposit' : 'withdrawal';
+        const absDiff = Math.abs(difference);
+        
+        const { error: txErr } = await supabase
+          .from('transactions')
+          .insert({
+            user_id: id,
+            amount: absDiff,
+            currency: 'RUB',
+            type: type,
+            status: 'completed',
+            description: `Корректировка баланса администратором: c ${oldBalance.toFixed(2)} ₽ до ${val.toFixed(2)} ₽`
+          });
+          
+        if (txErr) {
+          console.error('⚠️ Failed to insert adjustment transaction log:', txErr.message);
+        }
+      }
+    }
+
+    res.json(updatedUser);
+  } catch (err: any) {
+    console.error('❌ Error in PUT /api/admin/users/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {

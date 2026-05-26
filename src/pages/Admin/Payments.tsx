@@ -38,7 +38,14 @@ export default function AdminPayments() {
   }, [session]);
 
   const handleConfirm = async (paymentId: string) => {
-    if (!window.confirm('Вы уверены, что хотите вручную подтвердить этот платеж и начислить баланс?')) return;
+    const paymentItem = payments.find(p => p.id === paymentId);
+    const isExpired = paymentItem?.status === 'pending' && paymentItem?.expires_at && new Date(paymentItem.expires_at) < new Date();
+    
+    const confirmMsg = isExpired
+      ? 'ВНИМАНИЕ: Срок действия этой ссылки ОПЛАТЫ ИСТЕК на стороне Enot! Вы точно уверены, что клиент перевел рубли, и вы хотите принудительно зачислить баланс просроченной транзакции?'
+      : 'Вы уверены, что хотите вручную подтвердить этот платеж и начислить баланс?';
+
+    if (!window.confirm(confirmMsg)) return;
     
     setConfirmingId(paymentId);
     try {
@@ -134,64 +141,77 @@ export default function AdminPayments() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-white/5 transition-colors group">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-mono text-blue-300 mb-1">{p.id.substring(0, 13)}...</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy, HH:mm', { locale: ru }) : '---'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-mono text-muted-foreground opacity-60 truncate max-w-[150px]" title={p.user_id}>
-                        {p.user_id}
-                      </div>
-                      {p.provider && (
-                        <div className="text-[10px] uppercase text-blue-500/70 font-bold mt-1">
-                          Провайдер: {p.provider}
+                filtered.map((p) => {
+                  const isExpired = p.status === 'pending' && p.expires_at && new Date(p.expires_at) < new Date();
+                  return (
+                    <tr key={p.id} className="hover:bg-white/5 transition-colors group">
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-mono text-blue-300 mb-1">{p.id.substring(0, 13)}...</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy, HH:mm', { locale: ru }) : '---'}
                         </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-white">
-                        {p.amount} <span className="text-[10px] font-normal text-muted-foreground">RUB</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        {p.status === 'completed' ? (
-                          <span className="flex items-center gap-1 text-xs font-bold text-green-400 bg-green-400/10 px-2 py-1 rounded-md">
-                            <CheckCircle2 size={12} /> Готово
-                          </span>
-                        ) : p.status === 'pending' ? (
-                          <span className="flex items-center gap-1 text-xs font-bold text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-md">
-                            <Clock size={12} /> Ожидает
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-xs font-bold text-red-400 bg-red-400/10 px-2 py-1 rounded-md">
-                            <XCircle size={12} /> Ошибка
-                          </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-mono text-muted-foreground opacity-60 truncate max-w-[150px]" title={p.user_id}>
+                          {p.user_id}
+                        </div>
+                        {p.provider && (
+                          <div className="text-[10px] uppercase text-blue-500/70 font-bold mt-1">
+                            Провайдер: {p.provider}
+                          </div>
                         )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {p.status === 'pending' && (
-                        <button
-                          onClick={() => handleConfirm(p.id)}
-                          disabled={confirmingId === p.id}
-                          className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all"
-                        >
-                          {confirmingId === p.id ? (
-                            <RefreshCw size={12} className="animate-spin" />
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-bold text-white">
+                          {p.amount} <span className="text-[10px] font-normal text-muted-foreground">RUB</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {p.status === 'completed' ? (
+                            <span className="flex items-center gap-1 text-xs font-bold text-green-400 bg-green-400/10 px-2 py-1 rounded-md">
+                              <CheckCircle2 size={12} /> Готово
+                            </span>
+                          ) : p.status === 'pending' ? (
+                            isExpired ? (
+                              <span className="flex items-center gap-1 text-xs font-bold text-orange-400 bg-orange-400/10 px-2 py-1 rounded-md" title="Транзакция просрочена">
+                                <Clock size={12} /> Истек
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-xs font-bold text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-md">
+                                <Clock size={12} /> Ожидает
+                              </span>
+                            )
                           ) : (
-                            <Check size={12} />
+                            <span className="flex items-center gap-1 text-xs font-bold text-red-400 bg-red-400/10 px-2 py-1 rounded-md">
+                              <XCircle size={12} /> Ошибка
+                            </span>
                           )}
-                          Подтвердить
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {p.status === 'pending' && (
+                          <button
+                            onClick={() => handleConfirm(p.id)}
+                            disabled={confirmingId === p.id}
+                            className={`flex items-center gap-2 px-3 py-1.5 disabled:opacity-50 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                              isExpired 
+                                ? 'bg-orange-500 hover:bg-orange-600' 
+                                : 'bg-blue-500 hover:bg-blue-600'
+                            }`}
+                          >
+                            {confirmingId === p.id ? (
+                              <RefreshCw size={12} className="animate-spin" />
+                            ) : (
+                              <Check size={12} />
+                            )}
+                            {isExpired ? 'Провести (Истек)' : 'Подтвердить'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -200,54 +220,69 @@ export default function AdminPayments() {
         <div className="md:hidden divide-y divide-white/5">
           {loading ? (
              Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="animate-pulse p-4 h-24 bg-white/5"></div>
+                <div key={i} className="animate-pulse p-4 h-24 bg-white/5" />
              ))
           ) : filtered.length === 0 ? (
              <div className="p-12 text-center text-muted-foreground text-sm">
                 Платежи не найдены
              </div>
           ) : (
-             filtered.map((p) => (
-               <div key={p.id} className="p-4 space-y-3">
-                 <div className="flex justify-between items-start">
-                   <div className="flex flex-col">
-                     <span className="text-xs font-mono text-blue-300">{p.id.substring(0, 13)}...</span>
-                     <span className="text-[10px] text-muted-foreground">{p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy, HH:mm', { locale: ru }) : '---'}</span>
+             filtered.map((p) => {
+               const isExpired = p.status === 'pending' && p.expires_at && new Date(p.expires_at) < new Date();
+               return (
+                 <div key={p.id} className="p-4 space-y-3">
+                   <div className="flex justify-between items-start">
+                     <div className="flex flex-col">
+                       <span className="text-xs font-mono text-blue-300">{p.id.substring(0, 13)}...</span>
+                       <span className="text-[10px] text-muted-foreground">
+                         {p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy, HH:mm', { locale: ru }) : '---'}
+                       </span>
+                     </div>
+                     <div className="text-right">
+                       <span className="text-sm font-bold text-white">{p.amount} ₽</span>
+                     </div>
                    </div>
-                   <div className="text-right">
-                     <span className="text-sm font-bold text-white">{p.amount} ₽</span>
+                   
+                   <div className="flex justify-between items-center text-xs">
+                     <span className="font-mono text-muted-foreground opacity-60 truncate max-w-[150px]">{p.user_id}</span>
+                     {p.status === 'completed' ? (
+                       <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-green-400 bg-green-400/10 px-2 py-0.5 rounded-md">
+                         <CheckCircle2 size={10} /> Готово
+                       </span>
+                     ) : p.status === 'pending' ? (
+                       isExpired ? (
+                         <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded-md">
+                           <Clock size={10} /> Истек
+                         </span>
+                       ) : (
+                         <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-md">
+                           <Clock size={10} /> Ожидает
+                         </span>
+                       )
+                     ) : (
+                       <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-md">
+                         <XCircle size={10} /> Ошибка
+                       </span>
+                     )}
                    </div>
-                 </div>
-                 
-                 <div className="flex justify-between items-center text-xs">
-                   <span className="font-mono text-muted-foreground opacity-60 truncate max-w-[150px]">{p.user_id}</span>
-                   {p.status === 'completed' ? (
-                     <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-green-400 bg-green-400/10 px-2 py-0.5 rounded-md">
-                       <CheckCircle2 size={10} /> Готово
-                     </span>
-                   ) : p.status === 'pending' ? (
-                     <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-md">
-                       <Clock size={10} /> Ожидает
-                     </span>
-                   ) : (
-                     <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-md">
-                       <XCircle size={10} /> Ошибка
-                     </span>
+
+                   {p.status === 'pending' && (
+                     <button
+                       onClick={() => handleConfirm(p.id)}
+                       disabled={confirmingId === p.id}
+                       className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 disabled:opacity-50 text-white text-xs font-bold transition-all rounded-lg ${
+                         isExpired 
+                           ? 'bg-orange-500 hover:bg-orange-600' 
+                           : 'bg-blue-500 hover:bg-blue-600'
+                       }`}
+                     >
+                       {confirmingId === p.id ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                       {isExpired ? 'Принудительно провести (Истек)' : 'Подтвердить платеж'}
+                     </button>
                    )}
                  </div>
-
-                 {p.status === 'pending' && (
-                   <button
-                     onClick={() => handleConfirm(p.id)}
-                     disabled={confirmingId === p.id}
-                     className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-bold transition-all rounded-lg"
-                   >
-                     {confirmingId === p.id ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                     Подтвердить платеж
-                   </button>
-                 )}
-               </div>
-             ))
+               );
+             })
           )}
         </div>
       </div>
