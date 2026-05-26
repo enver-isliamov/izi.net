@@ -266,7 +266,7 @@ export default function AdminPayments() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {p.status === 'pending' && (() => {
+                        {p.status !== 'completed' && (() => {
                           const enotState = enotStatuses[p.id];
                           
                           if (enotState) {

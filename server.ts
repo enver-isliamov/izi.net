@@ -979,7 +979,7 @@ class PaymentService {
       success_url: `${origin}/dashboard`,
       fail_url: `${origin}/wallet`,
       hook_url: `${origin}/api/pay/webhook/enot`,
-      expire: 300
+      expire: 3600
     };
 
     if (email) {
