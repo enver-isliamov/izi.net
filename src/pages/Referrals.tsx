@@ -165,7 +165,7 @@ export default function Referrals() {
               {/* Link 1: Clean/Short */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 gap-2 transition-all">
                 <div className="min-w-0 flex-1">
-                  <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide block">Короткая ссылка</span>
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide block">Ссылка на сайт</span>
                   <span className="text-[11px] font-mono text-primary truncate block">{cleanLink}</span>
                 </div>
                 <div className="flex gap-2">
@@ -179,24 +179,7 @@ export default function Referrals() {
                 </div>
               </div>
 
-              {/* Link 2: Site/Login */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 gap-2 transition-all">
-                <div className="min-w-0 flex-1">
-                  <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide block">Ссылка на сайт</span>
-                  <span className="text-[11px] font-mono text-white/70 truncate block">{siteLink}</span>
-                </div>
-                <div className="flex gap-2">
-                  <Button 
-                    onClick={() => handleCopy(siteLink)} 
-                    variant="outline" 
-                    className="h-7 text-[10px] font-bold px-2.5 rounded-lg gap-1 border-border shrink-0"
-                  >
-                    <Copy className="w-3 h-3 text-primary" /> Копировать
-                  </Button>
-                </div>
-              </div>
-
-              {/* Link 3: Bot Link */}
+              {/* Link 2: Bot Link */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 gap-2 transition-all">
                 <div className="min-w-0 flex-1">
                   <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide block">Telegram Бот</span>

@@ -108,9 +108,9 @@ export default function Wallet() {
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-500 max-w-md mx-auto">
+    <div className="space-y-3 animate-in fade-in duration-500 max-w-md mx-auto w-full h-full flex flex-col min-h-0 pb-2">
       {/* Compact Header */}
-      <div className="flex items-center justify-between pb-1">
+      <div className="flex items-center justify-between pb-1 shrink-0">
         <div className="flex items-center gap-1.5">
           <Button 
             variant="ghost" 
@@ -125,7 +125,7 @@ export default function Wallet() {
 
         <Sheet>
           <SheetTrigger render={
-            <Button variant="ghost" size="sm" className="rounded-xl h-8 px-2.5 border border-white/5 hover:bg-white/5 gap-1.5 text-[11px] text-muted-foreground">
+            <Button variant="ghost" size="sm" className="rounded-xl h-8 px-2.5 border border-white/5 hover:bg-white/5 gap-1.5 text-[11px] text-muted-foreground shrink-0">
               <History className="w-3.5 h-3.5" />
               <span>История</span>
             </Button>
@@ -181,7 +181,7 @@ export default function Wallet() {
         </Sheet>
       </div>
 
-      <Card className="glass-card border-primary/20 p-4 space-y-4">
+      <Card className="glass-card border-primary/20 p-4 space-y-4 overflow-y-auto flex-1 min-h-0 scrollbar-hide">
         {/* Sum Header */}
         <div className="space-y-0.5">
           <CardTitle className="text-xs font-black uppercase text-primary tracking-widest">1. Сумма пополнения</CardTitle>
@@ -215,7 +215,7 @@ export default function Wallet() {
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="pl-7 h-10 bg-muted/20 border-border text-xs font-bold rounded-xl focus-visible:ring-primary/50"
+            className="pl-7 h-10 bg-muted/20 border-border text-base md:text-sm font-bold rounded-xl focus-visible:ring-primary/50"
             placeholder="Другая сумма"
           />
         </div>
@@ -246,7 +246,7 @@ export default function Wallet() {
           >
             {isProcessing ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                <Loader2 className="w-4 h-4 animate-spin mr-1.5 animate-spin" />
                 Создание платежа...
               </>
             ) : (
