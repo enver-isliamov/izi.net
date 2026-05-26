@@ -70,7 +70,7 @@ export default function Landing() {
             
             <div className="mt-12 flex flex-wrap justify-center gap-x-8 gap-y-4 text-sm font-medium text-muted-foreground/60">
               <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-primary" /> Безлимитный трафик
+                <CheckCircle className="w-4 h-4 text-primary" /> Стабильно высокая скорость
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-primary" /> Умный обход блокировок
