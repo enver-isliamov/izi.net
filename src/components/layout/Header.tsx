@@ -97,27 +97,6 @@ export function Header() {
                   </Link>
                 );
               })}
-
-              {isAdmin && (
-                <div className="pt-2 mt-2 border-t border-white/5">
-                  <p className="px-4 mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Админ</p>
-                  <Link 
-                    to="/admin"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    <Button
-                      variant="ghost"
-                      className={cn(
-                        "w-full justify-start gap-3 h-12 px-4 rounded-xl transition-all duration-200 text-blue-400 hover:text-blue-300 hover:bg-blue-400/10",
-                        location.pathname.startsWith('/admin') && "bg-blue-400/10"
-                      )}
-                    >
-                      <Settings className="w-5 h-5" />
-                      <span className="font-medium">Панель управления</span>
-                    </Button>
-                  </Link>
-                </div>
-              )}
             </nav>
             <div className="absolute bottom-4 left-4 right-4 space-y-4">
               <div className="flex flex-col gap-2 px-4 text-[10px] text-muted-foreground w-full">
@@ -143,41 +122,32 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-        <DropdownMenu>
-          <DropdownMenuTrigger 
-            render={
-              <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 border border-border ml-2">
-                <User className="w-5 h-5" />
-              </Button>
-            } 
-          />
-          <DropdownMenuContent align="end" className="w-56 bg-card border-border">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Мой аккаунт</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/profile')}>
-                Профиль
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/profile')}>
-                Настройки
-              </DropdownMenuItem>
-              {isAdmin && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="cursor-pointer text-blue-400 font-medium" onClick={() => navigate('/admin')}>
-                    <Settings className="w-4 h-4 mr-2" />
-                    Панель управления
-                  </DropdownMenuItem>
-                </>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive cursor-pointer" onClick={handleLogout}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Выйти
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {isAdmin && (
+          <Button
+            variant="ghost"
+            onClick={() => navigate('/admin')}
+            className={cn(
+              "h-10 px-4 gap-2 text-xs font-bold uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 rounded-xl border border-blue-400/20 shadow-sm transition-all duration-200 cursor-pointer flex items-center",
+              location.pathname.startsWith('/admin') && "bg-blue-400/10 border-blue-400/40"
+            )}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span className="hidden sm:inline">Админ-панель</span>
+          </Button>
+        )}
+        
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={() => navigate('/profile')}
+          className={cn(
+            "rounded-full bg-muted/50 border border-border w-10 h-10 hover:bg-muted font-medium transition-all duration-200 cursor-pointer flex items-center justify-center",
+            location.pathname === '/profile' && "border-primary text-primary"
+          )}
+          title="Профиль"
+        >
+          <User className="w-5 h-5" />
+        </Button>
       </div>
     </header>
   );

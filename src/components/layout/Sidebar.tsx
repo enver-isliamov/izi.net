@@ -62,24 +62,6 @@ export function Sidebar() {
             </Link>
           );
         })}
-
-        {isAdmin && (
-          <div className="pt-4 mt-4 border-t border-white/5">
-            <p className="px-4 mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Админ</p>
-            <Link to="/admin">
-              <Button
-                variant="ghost"
-                className={cn(
-                  "w-full justify-start gap-3 h-12 px-4 rounded-xl transition-all duration-200 text-blue-400 hover:text-blue-300 hover:bg-blue-400/10",
-                  location.pathname.startsWith('/admin') && "bg-blue-400/10"
-                )}
-              >
-                <Settings className="w-5 h-5" />
-                <span className="font-medium">Панель управления</span>
-              </Button>
-            </Link>
-          </div>
-        )}
       </nav>
 
       <div className="p-4 border-t border-border space-y-4">

@@ -6,11 +6,20 @@ import {
   Shield, 
   Copy, 
   ChevronRight,
-  Loader2
+  Loader2,
+  Lock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription
+} from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -25,6 +34,45 @@ export default function Profile() {
   const [userData, setUserData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Password change states
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || !confirmNewPassword) {
+      toast.error('Пожалуйста, заполните все поля');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('Пароли не совпадают');
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error('Пароль должен содержать не менее 6 символов');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      if (error) throw error;
+      toast.success('Пароль успешно обновлен!');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setIsPasswordModalOpen(false);
+    } catch (err: any) {
+      console.error('Password change error:', err);
+      toast.error(err.message || 'Ошибка при смене пароля');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -282,9 +330,55 @@ export default function Profile() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button variant="ghost" className="w-full justify-between rounded-xl text-xs h-10">
-                Сменить пароль <ChevronRight className="w-4 h-4" />
-              </Button>
+              <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" className="w-full justify-between rounded-xl text-xs h-10 text-left">
+                    Сменить пароль <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-[400px] bg-card border-border p-5 shadow-2xl rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-lg font-bold">Смена пароля</DialogTitle>
+                    <DialogDescription className="text-xs text-muted-foreground">
+                      Задайте новый надежный пароль для вашего аккаунта
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleChangePassword} className="space-y-4 mt-2">
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input 
+                          type="password" 
+                          placeholder="Новый пароль" 
+                          className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input 
+                          type="password" 
+                          placeholder="Подтвердите пароль" 
+                          className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl"
+                          value={confirmNewPassword}
+                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <Button 
+                      type="submit" 
+                      disabled={isUpdatingPassword} 
+                      className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl"
+                    >
+                      {isUpdatingPassword ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : null}
+                      Сохранить новый пароль
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
               <Button onClick={signOut} variant="ghost" className="w-full justify-between rounded-xl text-xs h-10 text-destructive hover:text-destructive hover:bg-destructive/10">
                 Выйти из аккаунта <ChevronRight className="w-4 h-4" />
               </Button>
