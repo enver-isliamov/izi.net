@@ -266,6 +266,44 @@ export default function AdminSettings() {
       )}
 
       <form onSubmit={handleSave} className="space-y-8">
+        {/* Core Platform config Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
+              <Globe size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Домен платформы</h2>
+              <p className="text-xs text-muted-foreground">Настройки основного домена для генерации ссылок на оплату и подписки</p>
+            </div>
+          </div>
+
+          <div className="grid gap-6">
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">PUBLIC_URL (Домен приложения)</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-emerald-400 transition-colors">
+                  <Globe size={18} />
+                </div>
+                <input
+                  type="text"
+                  value={settings.PUBLIC_URL || ''}
+                  onChange={(e) => setSettings({ ...settings, PUBLIC_URL: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                  placeholder="https://izinet.online"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground ml-1">
+                Укажите точный домен (вместе с https://), на котором размещен сайт. Этот URL будет использоваться для корректного редиректа после оплаты Enot.io, а также для копирования ссылок.
+              </p>
+            </div>
+          </div>
+        </motion.div>
+
         {/* Enot.io Section */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}

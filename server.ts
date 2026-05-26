@@ -3144,7 +3144,8 @@ app.post('/api/pay/create', async (req, res) => {
       throw new Error(`Could not create pending payment: ${paymentErr.message}`);
     }
 
-    const origin = req.headers.origin || `https://${req.headers.host}`;
+    const publicUrlSetting = await getSystemSetting('PUBLIC_URL', process.env.PUBLIC_URL || process.env.VITE_API_URL || '');
+    const origin = publicUrlSetting.replace(/\/$/, '') || req.headers.origin || `https://${req.headers.host}`;
 
     let url = '';
     let invoiceId = '';
