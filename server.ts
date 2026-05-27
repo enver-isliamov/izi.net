@@ -221,18 +221,18 @@ class XUIService {
     } catch (_) {}
 
     // Internal routing optimization:
-    // If the server connects to the LOCAL server, we talk directly to 'x3-ui:2053' in the Docker network.
+    // If the server connects to the LOCAL server, we talk directly to '127.0.0.1' on the host network.
     // This solves loopback blocks (NAT loopback), port blockage, and UFW issues perfectly.
-    const isDocker = require('fs').existsSync('/.dockerenv');
-    if (host && isDocker) {
+    if (host) {
       try {
         const parsedUrl = new URL(host);
         const hn = parsedUrl.hostname;
         // Strict exact match to avoid breaking secondary servers (e.g. one.izinet.online)
         if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
           const originalHost = host;
-          host = `http://x3-ui:2053${parsedUrl.pathname}`;
-          console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+          const port = parsedUrl.port || '2053';
+          host = `http://127.0.0.1:${port}${parsedUrl.pathname}`;
+          console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal host path: ${host}`);
         }
       } catch (e) {
         console.error(`[XUI Router] Error parsing URL for local routing optimization:`, e);
@@ -3495,9 +3495,21 @@ async function handleEnotWebhook(req: any, res: any) {
   }
 
   try {
-    const isValidSignature = await payment.verifyEnotWebhook(req.body, headerSignature);
+    let isValidSignature = await payment.verifyEnotWebhook(req.body, headerSignature);
+    
+    // If HMAC fails (Express json parser destroys raw whitespace), fallback to secure API validation:
+    if (!isValidSignature && invoice_id) {
+       console.warn(`[EnotWebhook] HMAC invalid, fallback to direct API validation for ${invoice_id}`);
+       const enotCheck = await payment.checkEnotStatus(invoice_id);
+       // Enot checkEnotStatus returns 'success' when it's fully verified
+       if (enotCheck && enotCheck.enotStatus === 'success') {
+          console.log(`[EnotWebhook] Fallback validation successful via API!`);
+          isValidSignature = true;
+       }
+    }
+
     if (!isValidSignature) {
-      console.warn('Invalid Enot webhook signature');
+      console.warn('Invalid Enot webhook signature and API validation failed');
       return res.status(400).send('Invalid signature');
     }
   } catch (err: any) {
