@@ -4100,8 +4100,11 @@ app.post('/api/subscription/buy', async (req, res) => {
     // 3A. CREATE NEW DEVICE(S)
     const devicesToCreate = forceNew ? 1 : (deviceLimit || 1);
     
-    if (existingDevices.length + devicesToCreate > globalDeviceLimit) {
-      return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${globalDeviceLimit}-х устройств.` });
+    // Honor the last sub limit if it's higher than the current global settings, or if it was unset, use global
+    const userDeviceLimit = lastSub?.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit;
+
+    if (existingDevices.length + devicesToCreate > userDeviceLimit) {
+      return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${userDeviceLimit}-х устройств.` });
     }
 
     for (let i = 0; i < devicesToCreate; i++) {

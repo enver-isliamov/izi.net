@@ -391,7 +391,7 @@ export default function Dashboard() {
   }
 
   const activeDeviceCount = vpnDevices.length;
-  const userDeviceLimit = subscription?.device_limit || globalDeviceLimit || 2;
+  const userDeviceLimit = subscription?.device_limit ? Math.max(subscription.device_limit, globalDeviceLimit) : (globalDeviceLimit || 2);
 
   let daysLeft = 0;
   if (subscription?.expires_at) {
