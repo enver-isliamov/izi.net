@@ -231,8 +231,14 @@ class XUIService {
         if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
           const originalHost = host;
           const port = parsedUrl.port || '2053';
-          host = `http://127.0.0.1:${port}${parsedUrl.pathname}`;
-          console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal host path: ${host}`);
+          const isDocker = require('fs').existsSync('/.dockerenv');
+          if (isDocker) {
+            host = `http://x3-ui:2053${parsedUrl.pathname}`;
+            console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+          } else {
+            host = `http://127.0.0.1:${port}${parsedUrl.pathname}`;
+            console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal host path: ${host}`);
+          }
         }
       } catch (e) {
         console.error(`[XUI Router] Error parsing URL for local routing optimization:`, e);
@@ -4212,7 +4218,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
-          device_limit: deviceLimit || Math.max(existingDevices.length, 2),
+          device_limit: lastSub.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit,
           v2ray_config: finalConfigJson,
           server_id: serverId,
           updated_at: new Date().toISOString()
@@ -4232,7 +4238,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           v2ray_config: finalConfigJson,
           server_type: serverType,
           period_months: periodMonths || 1,
-          device_limit: deviceLimit || Math.max(existingDevices.length, 2),
+          device_limit: globalDeviceLimit,
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0,
           server_id: serverId
@@ -4338,6 +4344,9 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
       return res.status(400).json({ error: 'Промокод на пробный период доступен только пользователям без активной подписки.' });
     }
 
+    const deviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
+    const globalDeviceLimit = parseInt(deviceLimitStr);
+
     // 5. Fetch all active servers for client provisioning
     const { data: activeServers, error: serversErr } = await supabase
       .from('vpn_servers')
@@ -4417,7 +4426,7 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
           expires_at: expiresAt.toISOString(),
           plan_type: 'trial',
           period_months: 1,
-          device_limit: 2,
+          device_limit: globalDeviceLimit,
           v2ray_config: finalConfigJson,
           server_id: activeServers[0].id,
           updated_at: new Date().toISOString()
@@ -4437,7 +4446,7 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
           v2ray_config: finalConfigJson,
           server_type: 'WIFI',
           period_months: 1,
-          device_limit: 2,
+          device_limit: globalDeviceLimit,
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0,
           server_id: activeServers[0].id
