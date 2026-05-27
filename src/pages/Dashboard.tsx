@@ -409,7 +409,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2">
              Привет, {userData?.name || user?.email?.split('@')?.[0]}!
-             {subscription && (
+             {userData?.is_pro && (
                <span className="inline-flex items-center gap-1 bg-gradient-to-r from-yellow-500/20 to-amber-500/20 text-yellow-500 border border-yellow-500/30 text-[10px] md:text-xs font-black uppercase px-2 py-0.5 rounded-lg shadow-lg shadow-yellow-500/5 select-none tracking-wider animate-pulse">PRO</span>
              )}
           </h1>

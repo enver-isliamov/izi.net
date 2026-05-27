@@ -3870,30 +3870,25 @@ app.get('/api/health', (req, res) => {
 // --- Subscription Routes ---
 app.get('/api/subscription/plans', async (req, res) => {
   try {
-    const plansJson = await getSystemSetting('SUBSCRIPTION_PLANS', '');
-    if (!plansJson) {
-      // Return default hardcoded if not set in DB
-      return res.json({
-        periods: [
-          { id: '1m', label: '1 месяц', price: 100, days: 30 },
-          { id: '2m', label: '2 месяца', price: 190, days: 60, discount: '5%' },
-          { id: '6m', label: '6 месяцев', price: 500, days: 180, discount: '17%' },
-          { id: '12m', label: '12 месяцев', price: 900, days: 365, discount: '25%' },
-        ],
-        serverTypes: [
-          { id: 'wifi', label: 'Wi-Fi', price: 0 },
-        ],
-        deviceLimit: 2
-      });
-    }
-    const plans = JSON.parse(plansJson);
-    if (plans.serverTypes) {
-      plans.serverTypes = plans.serverTypes.filter((s: any) => s.id === 'wifi');
-    } else {
-      plans.serverTypes = [{ id: 'wifi', label: 'Wi-Fi', price: 0 }];
-    }
-    const deviceLimit = await getSystemSetting('DEVICE_LIMIT', '2');
-    res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
+    const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
+    const basePrice = parseInt(monthlyPriceStr, 10) || 100;
+    const deviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
+    
+    // Always use dynamically generated linear pricing structure
+    const plans = {
+      periods: [
+        { id: '1m', label: '1 месяц', price: basePrice * 1, days: 30 },
+        { id: '2m', label: '2 месяца', price: basePrice * 2, days: 60 },
+        { id: '6m', label: '6 месяцев', price: basePrice * 6, days: 180 },
+        { id: '12m', label: '12 месяцев', price: basePrice * 12, days: 365 },
+      ],
+      serverTypes: [
+        { id: 'wifi', label: 'Wi-Fi', price: 0 }
+      ],
+      deviceLimit: parseInt(deviceLimitStr)
+    };
+    
+    return res.json(plans);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4030,26 +4025,22 @@ app.post('/api/subscription/buy', async (req, res) => {
 
   try {
     // 0.5. Validate price and device limit against DB
-    const plansJson = await getSystemSetting('SUBSCRIPTION_PLANS', '');
+    const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
+    const basePrice = parseInt(monthlyPriceStr, 10) || 100;
     const globalDeviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
     const globalDeviceLimit = parseInt(globalDeviceLimitStr);
     
-    if (plansJson) {
-      try {
-        const dbPlans = JSON.parse(plansJson);
-        const period = dbPlans.periods.find((p: any) => p.id === planId);
-        const sType = dbPlans.serverTypes.find((s: any) => s.id === (serverType?.toLowerCase() || 'wifi'));
-        
-        if (period && sType) {
-          const expectedPrice = (period.price + sType.price) * (forceNew || targetDeviceId ? 1 : (deviceLimit || 1));
-          if (Math.abs(price - expectedPrice) > 1) { // Allow small rounding diffs
-            console.warn(`[BUY] Price mismatch for user ${userId}: client sent ${price}, DB calculated ${expectedPrice}`);
-            return res.status(400).json({ error: 'Mismatched price. Please refresh the page.' });
-          }
-        }
-      } catch (e) {
-        console.error('[BUY] Failed to parse subscription plans from DB:', e);
-      }
+    // dynamically determine the price based on planId ('1m', '2m', '6m', '12m')
+    let months = 1;
+    if (planId === '2m') months = 2;
+    if (planId === '6m') months = 6;
+    if (planId === '12m') months = 12;
+    
+    // Wi-Fi server cost is standard (0 additive cost)
+    const expectedPrice = (basePrice * months) * (forceNew || targetDeviceId ? 1 : (deviceLimit || 1));
+    if (Math.abs(price - expectedPrice) > 1) { // Allow small rounding diffs
+      console.warn(`[BUY] Price mismatch for user ${userId}: client sent ${price}, DB calculated ${expectedPrice}`);
+      return res.status(400).json({ error: 'Mismatched price. Please refresh the page.' });
     }
 
     // 1. Get current balance
