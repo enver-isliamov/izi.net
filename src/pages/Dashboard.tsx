@@ -498,16 +498,20 @@ export default function Dashboard() {
           <h2 className="text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
             <Smartphone className="w-4 h-4 text-primary" /> Ваши Устройства
           </h2>
-          {vpnDevices.length < userDeviceLimit && (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="rounded-xl border-primary/30 text-primary hover:bg-primary/5 h-7 gap-1 text-[10px] px-2.5"
-              onClick={() => openWizard('new')}
-            >
-              <Plus className="w-3 h-3" /> Добавить
-            </Button>
-          )}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="rounded-xl border-primary/30 text-primary hover:bg-primary/5 h-7 gap-1 text-[10px] px-2.5"
+            onClick={() => {
+              if (vpnDevices.length >= userDeviceLimit) {
+                toast.error(`Достигнут лимит устройств (${userDeviceLimit}). Для увеличения лимита обратитесь в поддержку.`);
+              } else {
+                openWizard('new');
+              }
+            }}
+          >
+            <Plus className="w-3 h-3" /> Добавить
+          </Button>
         </div>
 
         {subscription && showUniversalLink && (
@@ -663,11 +667,12 @@ export default function Dashboard() {
                           variant="secondary" 
                           className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[9px] md:text-[10px] h-7.5 py-0 px-2"
                           onClick={async () => {
-                            const success = await copyToClipboard(device.config);
-                            if (success) toast.success(`Ключ скопирован (${device.label})`);
+                            const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
+                            const success = await copyToClipboard(deviceSubUrl);
+                            if (success) toast.success(`Ссылка скопирована (${device.label})`);
                           }}
                         >
-                          <Copy className="w-3 h-3 mr-1 opacity-50 shrink-0" /> Ключ
+                          <Copy className="w-3 h-3 mr-1 opacity-50 shrink-0" /> Ссылка
                         </Button>
                         <Button 
                           size="sm" 

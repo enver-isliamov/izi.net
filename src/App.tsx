@@ -27,6 +27,7 @@ import AdminDashboard from '@/pages/Admin/Dashboard';
 import AdminUsers from '@/pages/Admin/Users';
 import AdminSettings from '@/pages/Admin/Settings';
 import AdminPayments from '@/pages/Admin/Payments';
+import AdminRouting from '@/pages/Admin/Routing';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
@@ -93,6 +94,7 @@ export default function App() {
                       <Route path="/users" element={<AdminUsers />} />
                       <Route path="/payments" element={<AdminPayments />} />
                       <Route path="/settings" element={<AdminSettings />} />
+                      <Route path="/routing" element={<AdminRouting />} />
                       <Route path="*" element={<Navigate to="/admin" replace />} />
                     </Routes>
                   </PageContainer>

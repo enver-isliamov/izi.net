@@ -85,22 +85,20 @@ export default function Installation() {
     fetchSub();
   }, [user]);
 
-  const vpnKey = subscription?.v2ray_config 
-    ? subscription.v2ray_config
-    : 'Сначала активируйте подписку';
+  const subUrl = subscription ? `${window.location.origin}/api/sub/${subscription.id}` : '';
 
   const handleCopy = async () => {
     if (!subscription) {
       toast.error('У вас нет активной подписки');
       return;
     }
-    const success = await copyToClipboard(vpnKey);
+    const success = await copyToClipboard(subUrl);
     if (success) {
       setCopied(true);
-      toast.success('Ключ скопирован!');
+      toast.success('Ссылка на подписку скопирована!');
       setTimeout(() => setCopied(false), 2000);
     } else {
-      toast.error('Не удалось скопировать ключ. Скопируйте вручную.');
+      toast.error('Не удалось скопировать ссылку. Скопируйте вручную.');
     }
   };
 

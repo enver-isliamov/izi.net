@@ -396,6 +396,65 @@ class XUIService {
     return true;
   }
 
+  // Routing and settings
+  async getSettings() {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/all`;
+      const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      return resp.data.obj;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getSettings();
+      }
+      throw e;
+    }
+  }
+
+  async updateSettings(settingsData: any) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/update`;
+      const encodedData = new URLSearchParams();
+      for (const key in settingsData) {
+        if (typeof settingsData[key] === 'object') {
+          encodedData.append(key, JSON.stringify(settingsData[key]));
+        } else {
+          encodedData.append(key, settingsData[key]);
+        }
+      }
+      const resp = await axios.post(url, encodedData.toString(), {
+        ...getRequestConfig(url, this.authHeaders()),
+        headers: {
+          ...this.authHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+      });
+      return resp.data;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateSettings(settingsData);
+      }
+      throw e;
+    }
+  }
+
+  async restartPanel() {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/restartPanel`;
+      const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      return resp.data;
+    } catch (e) {
+      // 3x-ui drops connection on restart, handle gracefully
+      return { success: true };
+    }
+  }
+
   async getInbounds() {
     if (!this.sessionCookie) await this.login();
     try {
@@ -1321,6 +1380,82 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
     res.json(results);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
+  console.log('🔄 [AdminAPI] Synchronizing vpn_routing_rules to XUI servers...');
+  try {
+    const { data: rules, error: rulesErr } = await supabase
+      .from('vpn_routing_rules')
+      .select('*')
+      .eq('is_active', true);
+      
+    if (rulesErr) throw rulesErr;
+
+    // Build the injected rules
+    const newRules = (rules || []).map(r => {
+      const xrayRule: any = {
+        type: "field",
+        outboundTag: r.outbound_tag
+      };
+      if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
+      if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
+      return xrayRule;
+    });
+
+    const { data: activeServers, error: serverErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+      
+    if (serverErr) throw serverErr;
+
+    const results = [];
+    for (const server of (activeServers || [])) {
+      try {
+        console.log(`Syncing routing to ${server.name}...`);
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        const settings = await xuiInstance.getSettings();
+        
+        let xrayConfig = JSON.parse(settings.xrayTemplateConfig);
+        
+        // Ensure routing & rules exist
+        if (!xrayConfig.routing) xrayConfig.routing = {};
+        if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
+        
+        // Let's filter out previously inserted rules by looking at our injected tags,
+        // or just prepend them. Typically user wants these at the top.
+        // Easiest is to replace all custom ones, but we might overwrite XUI defaults.
+        // A safe way: We delete all rules with outboundTag equals to direct, block, or proxy 
+        // that match our DB entries? Actually replacing all might break default `block`.
+        // Let's just blindly push them to the beginning of the array.
+        // To be idempotent: remove everything that lacks a port (xui injected ones usually have ports like API) 
+        // OR we can just inject an "izinet" flag to our rules.
+        
+        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
+        
+        const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
+        xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
+        
+        settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
+        
+        await xuiInstance.updateSettings(settings);
+        
+        // Re-read Xray config takes effect after restart
+        await xuiInstance.restartPanel();
+        
+        results.push({ server: server.name, success: true });
+      } catch (e: any) {
+        console.error(`Failed to sync routing on ${server.name}:`, e.message);
+        results.push({ server: server.name, success: false, error: e.message });
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
   }
 });
 
