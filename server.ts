@@ -221,18 +221,21 @@ class XUIService {
     } catch (_) {}
 
     // Internal routing optimization:
-    // If the server connects to the LOCAL server ('194.50.94.28' or 'izinet.online' or 'localhost' or '127.0.0.1'),
-    // we bypass the external port/IP and talk directly to the 'x3-ui:2053' service in the Docker network.
+    // If the server connects to the LOCAL server, we talk directly to 'x3-ui:2053' in the Docker network.
     // This solves loopback blocks (NAT loopback), port blockage, and UFW issues perfectly.
-    if (host && (host.includes('194.50.94.28') || host.includes('izinet.online') || host.includes('localhost') || host.includes('127.0.0.1'))) {
-      const originalHost = host;
+    const isDocker = require('fs').existsSync('/.dockerenv');
+    if (host && isDocker) {
       try {
         const parsedUrl = new URL(host);
-        host = `http://x3-ui:2053${parsedUrl.pathname}`;
-        console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+        const hn = parsedUrl.hostname;
+        // Strict exact match to avoid breaking secondary servers (e.g. one.izinet.online)
+        if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
+          const originalHost = host;
+          host = `http://x3-ui:2053${parsedUrl.pathname}`;
+          console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+        }
       } catch (e) {
-        host = host.replace(/^(https?:\/\/)?([^\/]+)(:\d+)?/, 'http://x3-ui:2053');
-        console.log(`[XUI Router] Optimized local routing (fallback regex): rewritten ${originalHost} -> ${host}`);
+        console.error(`[XUI Router] Error parsing URL for local routing optimization:`, e);
       }
     }
 
@@ -2282,8 +2285,7 @@ app.post('/api/admin/users/create', adminOnly, async (req, res) => {
       }
       
       await supabase.from('subscriptions').update({ 
-        v2ray_config: JSON.stringify(devices),
-        device_limit: devices.length
+        v2ray_config: JSON.stringify(devices)
       }).eq('id', subscriptionId);
     }
 
@@ -2348,7 +2350,6 @@ app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, 
     
     await supabase.from('subscriptions').update({ 
       v2ray_config: JSON.stringify(devices),
-      device_limit: Math.max(1, devices.length),
       updated_at: new Date().toISOString()
     }).eq('id', sub.id);
 
@@ -2525,7 +2526,6 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
     
     await supabase.from('subscriptions').update({ 
       v2ray_config: JSON.stringify(devices),
-      device_limit: devices.length,
       updated_at: new Date().toISOString()
     }).eq('id', sub.id);
 
@@ -2601,8 +2601,7 @@ app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) =>
     }
     
     await supabase.from('subscriptions').update({ 
-      v2ray_config: JSON.stringify(devices),
-      device_limit: devices.length
+      v2ray_config: JSON.stringify(devices)
     }).eq('id', subscriptionId);
     
     res.json({ success: true, subscriptionId });
@@ -3975,7 +3974,6 @@ app.post('/api/subscription/device/delete', async (req, res) => {
       .from('subscriptions')
       .update({
         v2ray_config: JSON.stringify(nextDevices),
-        device_limit: Math.max(1, nextDevices.length),
         expires_at: maxExpiryDate.toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -4202,7 +4200,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
-          device_limit: existingDevices.length,
+          device_limit: deviceLimit || Math.max(existingDevices.length, 2),
           v2ray_config: finalConfigJson,
           server_id: serverId,
           updated_at: new Date().toISOString()
@@ -4222,7 +4220,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           v2ray_config: finalConfigJson,
           server_type: serverType,
           period_months: periodMonths || 1,
-          device_limit: existingDevices.length,
+          device_limit: deviceLimit || Math.max(existingDevices.length, 2),
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0,
           server_id: serverId
@@ -4407,7 +4405,7 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
           expires_at: expiresAt.toISOString(),
           plan_type: 'trial',
           period_months: 1,
-          device_limit: 1,
+          device_limit: 2,
           v2ray_config: finalConfigJson,
           server_id: activeServers[0].id,
           updated_at: new Date().toISOString()
@@ -4427,7 +4425,7 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
           v2ray_config: finalConfigJson,
           server_type: 'WIFI',
           period_months: 1,
-          device_limit: 1,
+          device_limit: 2,
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0,
           server_id: activeServers[0].id

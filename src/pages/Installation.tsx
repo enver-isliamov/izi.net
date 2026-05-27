@@ -216,7 +216,7 @@ export default function Installation() {
               <div className="p-6 bg-white rounded-[32px] shadow-2xl shadow-primary/10 transition-transform hover:scale-105 duration-500">
                 {subscription ? (
                   <QRCodeSVG 
-                    value={subscription.v2ray_config} 
+                    value={subUrl} 
                     size={200}
                     level="H"
                     includeMargin={false}
@@ -269,7 +269,7 @@ export default function Installation() {
                       toast.error('У вас нет активной подписки');
                       return;
                     }
-                    window.location.href = `clash://install-config?url=${encodeURIComponent(vpnKey)}`;
+                    window.location.href = `clash://install-config?url=${encodeURIComponent(subUrl)}`;
                     toast.info('Пытаемся открыть приложение...');
                   }}
                 >
