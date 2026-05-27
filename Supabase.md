@@ -123,6 +123,17 @@ create table if not exists public.settings (
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+-- Правила маршрутизации (Routing Exceptions: zetflix, mega, rkn blocks, etc.)
+create table if not exists public.vpn_routing_rules (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  domains jsonb default '[]'::jsonb, -- список доменов (например: ["geosite:mega", "domain:zetflix.com"])
+  ips jsonb default '[]'::jsonb, -- список IP или CIDR
+  outbound_tag text not null default 'block', -- например 'block', 'direct', 'bypass'
+  is_active boolean default true,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- Временные токены связывания Telegram аккаунта
 create table if not exists public.telegram_linking_tokens (
   token text primary key,
@@ -144,6 +155,7 @@ alter table public.support_messages enable row level security;
 alter table public.payments enable row level security;
 alter table public.transactions enable row level security;
 alter table public.settings enable row level security;
+alter table public.vpn_routing_rules enable row level security;
 alter table public.telegram_linking_tokens enable row level security;
 
 -- Очистка старых политик (предотвращение конфликтов)
@@ -249,6 +261,12 @@ create policy "Admins can manage transactions" on public.transactions for all us
 create policy "Admins can manage settings" on public.settings for all using (
   public.is_admin()
 );
+
+-- Политики правил маршрутизации (vpn_routing_rules)
+create policy "Admins can manage routing rules" on public.vpn_routing_rules for all using (
+  public.is_admin()
+);
+create policy "Users can view active routing rules" on public.vpn_routing_rules for select using (is_active = true);
 
 -- Политики токенов авторизации Telegram
 create policy "Public access to telegram tokens" on public.telegram_linking_tokens for all using (true);
