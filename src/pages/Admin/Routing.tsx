@@ -82,6 +82,9 @@ export default function AdminRouting() {
       setFormIps('');
       setFormOutboundTag('block');
       fetchRules();
+      
+      // Auto-sync to panels!
+      syncToServers();
     } catch (e: any) {
       toast.error('Ошибка сохранения: ' + e.message);
     }
@@ -140,7 +143,6 @@ export default function AdminRouting() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">Маршрутизация (Routing)</h1>
           <p className="text-muted-foreground text-sm">Управление исключениями и блоками доменов/IP</p>
         </div>
         <Button 

@@ -1392,9 +1392,19 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
   }
 });
 
-app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
-  console.log('🔄 [AdminAPI] Synchronizing vpn_routing_rules to XUI servers...');
+async function syncAllRoutingToAllPanels() {
+  console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray API to all XUI servers...');
   try {
+    // 1. Ensure default rules exist
+    const { data: existing, error: checkErr } = await supabase.from('vpn_routing_rules').select('*').limit(1);
+    if (!checkErr && (!existing || existing.length === 0)) {
+       console.log('📦 Setup out-of-the-box routing rules...');
+       await supabase.from('vpn_routing_rules').insert([
+         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic'], outbound_tag: 'direct', is_active: true },
+         { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
+       ]);
+    }
+
     const { data: rules, error: rulesErr } = await supabase
       .from('vpn_routing_rules')
       .select('*')
@@ -1402,15 +1412,11 @@ app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
       
     if (rulesErr) throw rulesErr;
 
-    // Build the injected rules
     const newRules = (rules || []).map(r => {
-      const xrayRule: any = {
-        type: "field",
-        outboundTag: r.outbound_tag
-      };
+      const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
       if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
       if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
-      return xrayRule;
+      return xrayRule; // Xui accepts correctly structured xray JSON objects!
     });
 
     const { data: activeServers, error: serverErr } = await supabase
@@ -1423,48 +1429,82 @@ app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
     const results = [];
     for (const server of (activeServers || [])) {
       try {
-        console.log(`Syncing routing to ${server.name}...`);
+        console.log(`Syncing routing and Xray API to ${server.name}...`);
         const { instance: xuiInstance } = await getXuiForServer(server.id);
         const settings = await xuiInstance.getSettings();
         
         let xrayConfig = JSON.parse(settings.xrayTemplateConfig);
         
-        // Ensure routing & rules exist
+        // --- Xray API Initialization (API ядра Xray) ---
+        if (!xrayConfig.api) {
+          xrayConfig.api = { tag: "api", services: ["HandlerService", "LoggerService", "StatsService"] };
+        }
+        if (!xrayConfig.stats) xrayConfig.stats = {};
+        if (!xrayConfig.policy) {
+          xrayConfig.policy = {
+            levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
+            system: { statsInboundUplink: true, statsInboundDownlink: true, statsOutboundUplink: true, statsOutboundDownlink: true }
+          };
+        }
+        if (!xrayConfig.inbounds) xrayConfig.inbounds = [];
+        if (!xrayConfig.inbounds.find((i:any) => i.tag === 'api')) {
+           xrayConfig.inbounds.unshift({
+             listen: "127.0.0.1",
+             port: 62789,
+             protocol: "dokodemo-door",
+             settings: { address: "127.0.0.1" },
+             tag: "api"
+           });
+        }
+        
+        // --- Routing Initialization ---
         if (!xrayConfig.routing) xrayConfig.routing = {};
         if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
         
-        // Let's filter out previously inserted rules by looking at our injected tags,
-        // or just prepend them. Typically user wants these at the top.
-        // Easiest is to replace all custom ones, but we might overwrite XUI defaults.
-        // A safe way: We delete all rules with outboundTag equals to direct, block, or proxy 
-        // that match our DB entries? Actually replacing all might break default `block`.
-        // Let's just blindly push them to the beginning of the array.
-        // To be idempotent: remove everything that lacks a port (xui injected ones usually have ports like API) 
-        // OR we can just inject an "izinet" flag to our rules.
+        // Add api routing if missing
+        if (!xrayConfig.routing.rules.find((r:any) => r.outboundTag === 'api')) {
+           xrayConfig.routing.rules.unshift({
+             inboundTag: ["api"],
+             outboundTag: "api",
+             type: "field",
+             izinet_managed: true
+           });
+        }
         
-        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
+        // Remove old managed rules (excluding the api one which we just ensured)
+        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed || r.outboundTag === 'api');
         
+        // Prepend current rules
         const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
         xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
         
         settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
         
+        // Extra safegaurd: ensure API is also enabled in the X-UI settings directly (just in case)
+        if (settings.apiPort === 0 || !settings.apiPort) settings.apiPort = 62789;
+
         await xuiInstance.updateSettings(settings);
-        
-        // Re-read Xray config takes effect after restart
         await xuiInstance.restartPanel();
         
         results.push({ server: server.name, success: true });
       } catch (e: any) {
-        console.error(`Failed to sync routing on ${server.name}:`, e.message);
+        console.error(`Failed to sync routing to ${server.name}:`, e.message);
         results.push({ server: server.name, success: false, error: e.message });
       }
     }
-
-    res.json({ success: true, results });
+    return results;
   } catch (error: any) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
+    console.error('Failed to sync system routing:', error);
+    return [];
+  }
+}
+
+app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
+  try {
+    const results = await syncAllRoutingToAllPanels();
+    res.json({ success: true, results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3447,7 +3487,8 @@ app.post('/api/pay/webhook/enot-legacy', async (req, res) => {
   }
 
   try {
-    const userId = custom_field; // Enot passes userId back in custom_field (cf)
+    const parsedCf = parseEnotCustomFields(custom_field);
+    const userId = parsedCf.user_id || parsedCf.userId || custom_field;
     if (!userId) {
       console.error('❌ No custom_field (userId) found in Enot webhook');
       return res.status(400).send('Missing userId in custom_field');
@@ -3480,11 +3521,16 @@ async function handleEnotWebhook(req: any, res: any) {
     // If HMAC fails (Express json parser destroys raw whitespace), fallback to secure API validation:
     if (!isValidSignature && invoice_id) {
        console.warn(`[EnotWebhook] HMAC invalid, fallback to direct API validation for ${invoice_id}`);
-       const enotCheck = await payment.checkEnotStatus(invoice_id);
-       // Enot checkEnotStatus returns 'success' when it's fully verified
-       if (enotCheck && enotCheck.enotStatus === 'success') {
-          console.log(`[EnotWebhook] Fallback validation successful via API!`);
-          isValidSignature = true;
+       try {
+         const enotCheck = await payment.checkEnotStatus(invoice_id);
+         console.log(`[EnotWebhook] API check result:`, JSON.stringify(enotCheck));
+         // Enot checkEnotStatus returns 'success' when it's fully verified
+         if (enotCheck && (enotCheck.enotStatus === 'success' || enotCheck.enotStatus === 'paid' || enotCheck.enotStatus === 'finish' || enotCheck.enotStatus === 'finished')) {
+            console.log(`[EnotWebhook] Fallback validation successful via API! Status: ${enotCheck.enotStatus}`);
+            isValidSignature = true;
+         }
+       } catch (apiErr) {
+         console.error(`[EnotWebhook] Fallback API validation threw error:`, apiErr);
        }
     }
 
@@ -3528,7 +3574,8 @@ async function handleEnotWebhook(req: any, res: any) {
       return res.send('YES');
     }
 
-    if (status !== 'success') {
+    const isSuccessStatus = ['success', 'paid', 'finish', 'finished'].includes(status.toLowerCase());
+    if (!isSuccessStatus) {
       await markPaymentStatus(orderId, status === 'refund' ? 'refunded' : 'failed');
       return res.send('YES');
     }
@@ -3765,6 +3812,20 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
 });
 
 // Health check and configuration status
+app.get('/api/test-xui', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vpn_servers').select('*').eq('is_active', true).limit(1);
+    if (!data || !data.length) return res.send('no server');
+    const { instance: xuiInstance } = await getXuiForServer(data[0].id);
+    const settings = await xuiInstance.getSettings();
+    res.json({
+      keys: Object.keys(settings),
+      api: JSON.parse(settings.xrayTemplateConfig).api,
+      routingRules: settings.routingRules, // check if this exists
+    });
+  } catch (e: any) { res.status(500).json({error: e.message}) }
+});
+
 app.get('/api/config', (req, res) => {
   res.json({
     telegramBotName: process.env.VITE_TELEGRAM_BOT_NAME || process.env.TELEGRAM_BOT_NAME || 'izinet_bot'
@@ -5123,6 +5184,9 @@ async function startServer() {
   if (!process.env.PUBLIC_URL && isProd) {
     console.warn('⚠️ WARNING: PUBLIC_URL environment variable is not set! Subscription links may be unstable or broken.');
   }
+
+  // Ensure routing and out-of-the-box system config is booted and synced
+  syncAllRoutingToAllPanels().catch(err => console.error("System Boot Sync Error:", err));
 
   setupRealtimeListener();
   syncTrafficStats();

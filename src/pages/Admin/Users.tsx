@@ -83,6 +83,17 @@ export default function AdminUsers() {
   const [qrInfo, setQrInfo] = useState<{ key?: string; sub?: string; value?: string } | null>(null);
   const [qrTitle, setQrTitle] = useState<string>('');
   const [qrType, setQrType] = useState<'device' | 'subscription'>('device');
+  const [sortRule, setSortRule] = useState('newest');
+
+  const sortedUsers = [...users].sort((a, b) => {
+    if (sortRule === 'balance_desc') return (b.balance || 0) - (a.balance || 0);
+    if (sortRule === 'balance_asc') return (a.balance || 0) - (b.balance || 0);
+    if (sortRule === 'role') {
+      const roleWeight: any = { superadmin: 3, admin: 2, user: 1 };
+      return (roleWeight[b.role] || 0) - (roleWeight[a.role] || 0);
+    }
+    return 0; // newest/default
+  });
 
   const fetchData = async () => {
     try {
@@ -227,8 +238,18 @@ export default function AdminUsers() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Пользователи</h1>
+        <div></div>
         <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+          <select
+            value={sortRule}
+            onChange={(e) => setSortRule(e.target.value)}
+            className="bg-secondary/30 border border-white/5 rounded-xl py-2 px-3 text-sm focus:border-blue-500/50 outline-none transition-all"
+          >
+            <option value="newest">Сначала новые</option>
+            <option value="balance_desc">Баланс (убыв)</option>
+            <option value="balance_asc">Баланс (возр)</option>
+            <option value="role">По роли</option>
+          </select>
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
             <input
@@ -293,8 +314,8 @@ export default function AdminUsers() {
                     </td>
                   </tr>
                 ))
-              ) : Array.isArray(users) && users.length > 0 ? (
-                users.map((user) => {
+              ) : Array.isArray(sortedUsers) && sortedUsers.length > 0 ? (
+                sortedUsers.map((user) => {
                 const sub = user.active_subscription;
                 const trafficUsedGB = sub ? (sub.traffic_used_mb / 1024).toFixed(1) : 0;
                 const trafficLimitGB = sub ? (sub.traffic_limit_mb / 1024).toFixed(1) : 0;
@@ -513,7 +534,7 @@ export default function AdminUsers() {
 
         {/* Mobile Cards View */}
         <div className="md:hidden divide-y divide-white/5">
-          {Array.isArray(users) && users.map((user) => {
+          {Array.isArray(sortedUsers) && sortedUsers.map((user) => {
             const sub = user.active_subscription;
             const trafficUsedGB = sub ? (sub.traffic_used_mb / 1024).toFixed(1) : 0;
             const trafficLimitGB = sub ? (sub.traffic_limit_mb / 1024).toFixed(1) : 0;

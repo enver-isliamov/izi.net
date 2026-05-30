@@ -48,7 +48,6 @@ export default function AdminDashboard() {
   if (loading && !stats) {
     return (
       <div className="space-y-6 animate-in fade-in duration-500">
-        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
         <AdminNav />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => (
@@ -73,9 +72,6 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Admin Panel</h1>
-      </div>
 
       <AdminNav />
 

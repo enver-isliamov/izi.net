@@ -220,7 +220,7 @@ docker image prune -f`;
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">System Settings</h1>
+        <div></div>
         <button
           onClick={fetchSettings}
           className="flex items-center justify-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors font-medium text-xs text-muted-foreground"
@@ -642,6 +642,32 @@ docker image prune -f`}
                   type="button"
                   onClick={handleCopyDeployScript}
                   className="absolute top-2 right-2 p-1.5 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 rounded-lg transition-colors border border-blue-500/30 backdrop-blur-md"
+                  title="Копировать скрипт"
+                >
+                  <Copy size={12} />
+                </button>
+              </div>
+            </div>
+
+            {/* VPN/RAM Diagnostic Terminal Script Card */}
+            <div className="p-4 bg-orange-500/5 rounded-xl flex flex-col justify-between border border-orange-500/10 space-y-3 shadow-md shadow-orange-500/5 col-span-1 md:col-span-2 lg:col-span-2">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-orange-400">Скрипт диагностики памяти и отвала VPN</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Если падает VPN и забивается RAM, выполните этот код в терминале сервера и скиньте результат разработчику для анализа логов docker и OOM Killer.
+                </p>
+              </div>
+              <div className="relative group mt-auto">
+                <div className="bg-black/40 border border-orange-500/20 rounded-xl p-3 font-mono text-[10px] text-orange-200 overflow-x-auto whitespace-pre">
+{`echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER LOGS x3-ui ===" && docker logs --tail 50 x3-ui && echo "" && echo "=== OOM KILLS ===" && dmesg -T | grep -i oom`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER LOGS x3-ui ===" && docker logs --tail 50 x3-ui && echo "" && echo "=== OOM KILLS ===" && dmesg -T | grep -i oom`);
+                    toast.success('Скрипт диагностики скопирован в буфер обмена!');
+                  }}
+                  className="absolute top-2 right-2 p-1.5 bg-orange-500/20 hover:bg-orange-500/40 text-orange-300 rounded-lg transition-colors border border-orange-500/30 backdrop-blur-md"
                   title="Копировать скрипт"
                 >
                   <Copy size={12} />
