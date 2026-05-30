@@ -1393,7 +1393,7 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
 });
 
 async function syncAllRoutingToAllPanels() {
-  console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray API to all XUI servers...');
+  console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray Config to all XUI servers...');
   try {
     // 1. Ensure default rules exist
     const { data: existing, error: checkErr } = await supabase.from('vpn_routing_rules').select('*').limit(1);
@@ -1405,90 +1405,53 @@ async function syncAllRoutingToAllPanels() {
        ]);
     }
 
-    const { data: rules, error: rulesErr } = await supabase
-      .from('vpn_routing_rules')
-      .select('*')
-      .eq('is_active', true);
-      
+    const { data: rules, error: rulesErr } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
     if (rulesErr) throw rulesErr;
 
     const newRules = (rules || []).map(r => {
       const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
       if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
       if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
-      return xrayRule; // Xui accepts correctly structured xray JSON objects!
+      return xrayRule; 
     });
 
-    const { data: activeServers, error: serverErr } = await supabase
-      .from('vpn_servers')
-      .select('*')
-      .eq('is_active', true);
-      
+    const { data: activeServers, error: serverErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
     if (serverErr) throw serverErr;
 
     const results = [];
     for (const server of (activeServers || [])) {
       try {
-        console.log(`Syncing routing and Xray API to ${server.name}...`);
+        console.log(`Syncing routing and Xray Config to ${server.name}...`);
         const { instance: xuiInstance } = await getXuiForServer(server.id);
-        const settings = await xuiInstance.getSettings();
+        const headers = { headers: { ...xuiInstance.authHeaders(), Cookie: xuiInstance['sessionCookie'] } };
         
-        let xrayConfig = JSON.parse(settings.xrayTemplateConfig);
+        // 1. GET Current Xray Settings
+        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, headers));
+        if (!xrayR.data?.success) throw new Error("Failed to fetch Xray config");
+        const parsedObj = JSON.parse(xrayR.data.obj);
+        let xrayConfig = parsedObj.xraySetting;
         
-        // --- Xray API Initialization (API ядра Xray) ---
-        if (!xrayConfig.api) {
-          xrayConfig.api = { tag: "api", services: ["HandlerService", "LoggerService", "StatsService"] };
-        }
-        if (!xrayConfig.stats) xrayConfig.stats = {};
-        if (!xrayConfig.policy) {
-          xrayConfig.policy = {
-            levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
-            system: { statsInboundUplink: true, statsInboundDownlink: true, statsOutboundUplink: true, statsOutboundDownlink: true }
-          };
-        }
-        if (!xrayConfig.inbounds) xrayConfig.inbounds = [];
-        if (!xrayConfig.inbounds.find((i:any) => i.tag === 'api')) {
-           xrayConfig.inbounds.unshift({
-             listen: "127.0.0.1",
-             port: 62789,
-             protocol: "dokodemo-door",
-             settings: { address: "127.0.0.1" },
-             tag: "api"
-           });
-        }
-        
-        // --- Routing Initialization ---
+        // 2. Modify Routing
         if (!xrayConfig.routing) xrayConfig.routing = {};
         if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
+        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
         
-        // Add api routing if missing
-        if (!xrayConfig.routing.rules.find((r:any) => r.outboundTag === 'api')) {
-           xrayConfig.routing.rules.unshift({
-             inboundTag: ["api"],
-             outboundTag: "api",
-             type: "field",
-             izinet_managed: true
-           });
-        }
-        
-        // Remove old managed rules (excluding the api one which we just ensured)
-        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed || r.outboundTag === 'api');
-        
-        // Prepend current rules
         const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
         xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
         
-        settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
+        // 3. POST Back to Xray Update
+        const updatePayload = new URLSearchParams();
+        updatePayload.append("xraySetting", JSON.stringify(xrayConfig));
+        if (parsedObj.outboundTestUrl) updatePayload.append("outboundTestUrl", parsedObj.outboundTestUrl);
         
-        // Extra safegaurd: ensure API is also enabled in the X-UI settings directly (just in case)
-        if (settings.apiPort === 0 || !settings.apiPort) settings.apiPort = 62789;
+        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), headers));
+        if (!updateR.data?.success) throw new Error(updateR.data?.msg || "Update failed");
 
-        await xuiInstance.updateSettings(settings);
         await xuiInstance.restartPanel();
         
         results.push({ server: server.name, success: true });
       } catch (e: any) {
-        console.error(`Failed to sync routing to ${server.name}:`, e.message);
+        console.error(`Failed to sync routing to ${server.name}:`, e.message || e);
         results.push({ server: server.name, success: false, error: e.message });
       }
     }
@@ -3814,15 +3777,8 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
 // Health check and configuration status
 app.get('/api/test-xui', async (req, res) => {
   try {
-    const { data } = await supabase.from('vpn_servers').select('*').eq('is_active', true).limit(1);
-    if (!data || !data.length) return res.send('no server');
-    const { instance: xuiInstance } = await getXuiForServer(data[0].id);
-    const settings = await xuiInstance.getSettings();
-    res.json({
-      keys: Object.keys(settings),
-      api: JSON.parse(settings.xrayTemplateConfig).api,
-      routingRules: settings.routingRules, // check if this exists
-    });
+    const results = await syncAllRoutingToAllPanels();
+    res.json({ results });
   } catch (e: any) { res.status(500).json({error: e.message}) }
 });
 
