@@ -223,22 +223,22 @@ export default function AdminRouting() {
       <div className="space-y-3">
         {rules.map((rule) => (
           <Card key={rule.id} className={`glass-card border-white/5 ${!rule.is_active ? 'opacity-50' : ''}`}>
-             <CardContent className="p-4 flex items-center justify-between">
+             <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                <div>
-                 <div className="flex items-center gap-2 mb-1">
-                   <ShieldAlert className={`w-4 h-4 ${rule.outbound_tag === 'block' ? 'text-red-500' : 'text-blue-500'}`} />
-                   <span className="font-bold">{rule.name}</span>
-                   <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+                 <div className="flex items-center gap-2 mb-1 flex-wrap">
+                   <ShieldAlert className={`w-4 h-4 shrink-0 ${rule.outbound_tag === 'block' ? 'text-red-500' : 'text-blue-500'}`} />
+                   <span className="font-bold break-all">{rule.name}</span>
+                   <span className={`shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
                      rule.outbound_tag === 'block' ? 'bg-red-500/10 text-red-500' : 
                      rule.outbound_tag === 'direct' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'
                    }`}>{rule.outbound_tag}</span>
                  </div>
                  <div className="text-xs text-muted-foreground mt-2 grid grid-cols-1 gap-1">
-                   {rule.domains && rule.domains.length > 0 && <div><span className="font-bold text-white/70">Domains:</span> {rule.domains.join(', ')}</div>}
-                   {rule.ips && rule.ips.length > 0 && <div><span className="font-bold text-white/70">IPs:</span> {rule.ips.join(', ')}</div>}
+                   {rule.domains && rule.domains.length > 0 && <div className="break-all"><span className="font-bold text-white/70">Domains:</span> {rule.domains.join(', ')}</div>}
+                   {rule.ips && rule.ips.length > 0 && <div className="break-all"><span className="font-bold text-white/70">IPs:</span> {rule.ips.join(', ')}</div>}
                  </div>
                </div>
-               <div className="flex gap-2">
+               <div className="flex gap-2 self-end md:self-center">
                  <Button size="sm" variant="ghost" className="h-8" onClick={() => handleToggleStatus(rule.id, rule.is_active)}>
                    {rule.is_active ? 'Отключить' : 'Включить'}
                  </Button>

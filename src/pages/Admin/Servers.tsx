@@ -249,7 +249,7 @@ export function AdminServersList() {
             </div>
           </div>
         </div>
-        <div className="flex items-start gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-start gap-2 w-full sm:w-auto">
           <button
             onClick={async () => {
               try {
@@ -323,7 +323,7 @@ export function AdminServersList() {
                 ) : (
                   <div className="space-y-1">
                     <p className="text-[10px] text-green-500">Конфигруация в норме</p>
-                    <div className="flex flex-col gap-0.5 mt-2 font-mono text-[9px] text-muted-foreground opacity-70">
+                    <div className="flex flex-col gap-0.5 mt-2 font-mono text-[9px] text-muted-foreground opacity-70 break-all">
                       <span>SNI: {res.details?.sni}</span>
                       <span>SID: {res.details?.sid}</span>
                     </div>

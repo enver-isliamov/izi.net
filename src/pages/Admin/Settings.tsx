@@ -734,7 +734,7 @@ docker image prune -f`}
                 if (log.startsWith('[Старт]') || log.startsWith('[Система]')) colorClass = 'text-cyan-400';
                 if (log.startsWith('===') || log.startsWith('---')) colorClass = 'text-zinc-500 font-bold';
                 return (
-                  <div key={idx} className="flex gap-2 leading-relaxed">
+                  <div key={idx} className="flex gap-2 leading-relaxed break-words break-all">
                     <span className="text-zinc-600 shrink-0 select-none">~</span>
                     <span className={colorClass}>{log}</span>
                   </div>
