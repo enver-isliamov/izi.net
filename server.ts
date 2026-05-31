@@ -489,17 +489,18 @@ class XUIService {
     let inbound;
     let flow = "";
     try {
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
-      if (resp.data.success) {
-        inbound = resp.data.obj;
-        const streamSettings = JSON.parse(inbound.streamSettings);
+      const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig(`${this.host}${this.basePath}/panel/api/inbounds/list`, this.authHeaders()));
+      if (listResp.data.success && listResp.data.obj?.length > 0) {
+        // Find vless inbound or fallback to provided ID
+        inbound = listResp.data.obj.find((i: any) => i.protocol === 'vless') || listResp.data.obj.find((i: any) => i.id === inboundId) || listResp.data.obj[0];
+        inboundId = inbound.id; // Correct the inboundId dynamically
+        const streamSettings = JSON.parse(inbound.streamSettings || '{}');
         if (streamSettings.security === 'reality') {
           flow = "xtls-rprx-vision";
         }
       }
     } catch (e: any) {
-      console.warn(`Could not fetch inbound settings from ${this.host}${this.basePath}.`);
+      console.warn(`Could not fetch dynamic inbound from ${this.host}${this.basePath}, using fallback ID ${inboundId}.`);
     }
 
     const clientData = {
@@ -565,15 +566,30 @@ class XUIService {
     // UUID is already known from DB or creation.
     let effectiveUuid = uuid;
     let effectiveInboundId = inboundId;
+    let inbound = null;
 
-    const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
-    
-    if (!resp.data.success || !resp.data.obj) {
-      throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
+    try {
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
+      if (resp.data.success && resp.data.obj) {
+        inbound = resp.data.obj;
+      }
+    } catch (e) {}
+
+    if (!inbound) {
+      // Fallback: fetch all and find vless
+      try {
+        const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig(`${this.host}${this.basePath}/panel/api/inbounds/list`, this.authHeaders(), 10000));
+        if (listResp.data.success && listResp.data.obj?.length > 0) {
+           inbound = listResp.data.obj.find((i: any) => i.protocol === 'vless') || listResp.data.obj[0];
+           effectiveInboundId = inbound.id;
+        }
+      } catch (e) {}
     }
-    
-    const inbound = resp.data.obj;
+
+    if (!inbound) {
+      throw new Error(`[XUI] Не удалось получить настройки входящего соединения (даже динамически) с сервера ${this.host}.`);
+    }
     
     // Safety check for streamSettings: it can be a string or an object depending on XUI version
     let streamSettings: any = {};
@@ -1400,7 +1416,7 @@ async function syncAllRoutingToAllPanels() {
     if (!checkErr && (!existing || existing.length === 0)) {
        console.log('📦 Setup out-of-the-box routing rules...');
        await supabase.from('vpn_routing_rules').insert([
-         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic'], outbound_tag: 'direct', is_active: true },
+         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic', 'domain:aistudio.google.com', 'domain:gemini.google.com'], outbound_tag: 'ipv6-out', is_active: true },
          { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
        ]);
     }
@@ -1430,6 +1446,17 @@ async function syncAllRoutingToAllPanels() {
         if (!xrayR.data?.success) throw new Error("Failed to fetch Xray config");
         const parsedObj = JSON.parse(xrayR.data.obj);
         let xrayConfig = parsedObj.xraySetting;
+        
+        // Ensure ipv6-out exists for Gemini/aistudio bypass
+        if (!xrayConfig.outbounds) xrayConfig.outbounds = [];
+        const hasIpv6Out = xrayConfig.outbounds.find((o: any) => o.tag === 'ipv6-out');
+        if (!hasIpv6Out) {
+          xrayConfig.outbounds.push({
+            tag: "ipv6-out",
+            protocol: "freedom",
+            settings: { domainStrategy: "UseIPv6" }
+          });
+        }
         
         // 2. Modify Routing
         if (!xrayConfig.routing) xrayConfig.routing = {};
@@ -2708,6 +2735,26 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
     if (loginSuccess) {
       // Try to get stats as a deeper check
       const stats = await instance.getInbounds();
+      if (stats.length === 0) {
+        console.log(`[AdminAPI] Server ${id} has 0 inbounds. Auto-configuring IZINET VLESS REALITY...`);
+        const payload = {
+          up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
+          listen: "", port: 443, protocol: "vless",
+          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
+          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
+          sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
+        };
+        const axios = require('axios');
+        await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
+           headers: { ...instance.authHeaders(), Cookie: instance['sessionCookie'], 'Content-Type': 'application/json' }
+        });
+        
+        await syncAllRoutingToAllPanels();
+        
+        const newStats = await instance.getInbounds();
+        return res.json({ success: true, name: 'XUI', version: 'Latest', stats_count: newStats.length, status: 'ok', configured: true });
+      }
+
       res.json({ success: true, name: 'XUI', version: 'Latest', stats_count: stats.length, status: 'ok' });
     } else {
       res.json({ success: false, error: 'Login failed', status: 'error' });

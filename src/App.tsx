@@ -34,14 +34,16 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-          <span className="text-blue-400 font-mono tracking-widest animate-pulse uppercase text-xs">
-            Initializing Session...
-          </span>
+      <PageContainer>
+        <div className="space-y-6 opacity-60">
+          <div className="h-[200px] w-full bg-secondary/30 animate-pulse rounded-2xl" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+             <div className="h-[120px] bg-secondary/30 animate-pulse rounded-2xl" />
+             <div className="h-[120px] bg-secondary/30 animate-pulse rounded-2xl" />
+             <div className="h-[120px] bg-secondary/30 animate-pulse rounded-2xl" />
+          </div>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
