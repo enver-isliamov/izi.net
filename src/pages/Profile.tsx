@@ -229,7 +229,7 @@ export default function Profile() {
               <div className="flex items-center gap-6">
                 <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center relative">
                   <User className="w-10 h-10 text-primary" />
-                  {hasActiveSub && (
+                  {userData?.is_pro && (
                     <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-md shadow-yellow-500/20 uppercase tracking-widest select-none animate-pulse">
                       PRO
                     </span>
@@ -238,7 +238,7 @@ export default function Profile() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <h3 className="text-xl font-bold">{userData?.name || user?.email?.split('@')?.[0] || 'User'}</h3>
-                    {hasActiveSub && (
+                    {userData?.is_pro && (
                       <span className="hidden sm:inline bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 text-[9px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
                         PRO-АККАУНТ
                       </span>
@@ -249,7 +249,7 @@ export default function Profile() {
                     <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30">
                       {(userData?.email_verified || userData?.telegram_linked) ? 'Активен' : 'Ожидает подтверждения'}
                     </Badge>
-                    {hasActiveSub && (
+                    {userData?.is_pro && (
                       <Badge className="bg-yellow-500/20 hover:bg-yellow-500/35 text-yellow-500 border-yellow-500/30 font-bold uppercase text-[9px] tracking-wide">
                         PRO ДОСТУП
                       </Badge>

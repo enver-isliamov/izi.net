@@ -9,7 +9,8 @@ import {
   QrCode,
   CheckCircle2,
   Copy,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -84,22 +85,20 @@ export default function Installation() {
     fetchSub();
   }, [user]);
 
-  const vpnKey = subscription?.v2ray_config 
-    ? subscription.v2ray_config
-    : 'Сначала активируйте подписку';
+  const subUrl = subscription ? `${window.location.origin}/api/sub/${subscription.id}` : '';
 
   const handleCopy = async () => {
     if (!subscription) {
       toast.error('У вас нет активной подписки');
       return;
     }
-    const success = await copyToClipboard(vpnKey);
+    const success = await copyToClipboard(subUrl);
     if (success) {
       setCopied(true);
-      toast.success('Ключ скопирован!');
+      toast.success('Ссылка на подписку скопирована!');
       setTimeout(() => setCopied(false), 2000);
     } else {
-      toast.error('Не удалось скопировать ключ. Скопируйте вручную.');
+      toast.error('Не удалось скопировать ссылку. Скопируйте вручную.');
     }
   };
 
@@ -217,7 +216,7 @@ export default function Installation() {
               <div className="p-6 bg-white rounded-[32px] shadow-2xl shadow-primary/10 transition-transform hover:scale-105 duration-500">
                 {subscription ? (
                   <QRCodeSVG 
-                    value={subscription.v2ray_config} 
+                    value={subUrl} 
                     size={200}
                     level="H"
                     includeMargin={false}
@@ -248,8 +247,9 @@ export default function Installation() {
                   <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Universal Config</span>
                   <CheckCircle2 className={cn("w-4 h-4 transition-colors", copied ? "text-primary" : "text-white/5")} />
                 </div>
-                <div className="font-mono text-[10px] break-all leading-relaxed text-muted-foreground line-clamp-4">
-                  {vpnKey}
+                <div className="flex flex-col items-center justify-center py-6 bg-black/50 rounded-2xl border border-white/5">
+                  <Lock className="w-8 h-8 text-white/20 mb-3" />
+                  <span className="text-sm font-medium text-white/50 text-center px-4">Секретный ключ подписки скрыт <br/> Для добавления просто скопируйте его</span>
                 </div>
                 <Button 
                   onClick={handleCopy}
@@ -269,7 +269,7 @@ export default function Installation() {
                       toast.error('У вас нет активной подписки');
                       return;
                     }
-                    window.location.href = `clash://install-config?url=${encodeURIComponent(vpnKey)}`;
+                    window.location.href = `clash://install-config?url=${encodeURIComponent(subUrl)}`;
                     toast.info('Пытаемся открыть приложение...');
                   }}
                 >

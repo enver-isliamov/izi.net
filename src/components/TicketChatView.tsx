@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface Message {
   id: string;
+  ticket_id: string;
   sender: 'user' | 'admin';
   content: string;
   created_at: string;
@@ -30,6 +31,7 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
   // Initialize with ticket.message as first message
   const initialMessage: Message | null = ticket.message ? {
     id: 'initial',
+    ticket_id: ticket.id,
     sender: 'user',
     content: ticket.message,
     created_at: ticket.created_at,
@@ -46,7 +48,9 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
       if (error && error.code !== 'PGRST205') { // Ignore if table missing temporarily
         console.error(error);
       }
-      setMessages(data || []);
+      if (data) {
+        setMessages(data);
+      }
     } catch(e) {
       console.error(e);
     } finally {
@@ -57,20 +61,29 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
   useEffect(() => {
     fetchMessages();
 
+    // Fallback polling for updates in case Supabase Realtime isn't configured
+    const pollInterval = setInterval(fetchMessages, 5000);
+
     // Subscribe to new messages
     const subscription = supabase
       .channel(`chat_${ticket.id}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
-        table: 'support_messages',
-        filter: `ticket_id=eq.${ticket.id}`
+        table: 'support_messages'
       }, (payload) => {
-        setMessages((prev) => [...prev, payload.new as Message]);
+        const newMsg = payload.new as Message;
+        if (newMsg.ticket_id === ticket.id) {
+          setMessages((prev) => {
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+        }
       })
       .subscribe();
 
     return () => {
+      clearInterval(pollInterval);
       supabase.removeChannel(subscription);
     };
   }, [ticket.id]);

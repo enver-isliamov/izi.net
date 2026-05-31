@@ -229,11 +229,27 @@ export function AdminServersList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
-          <Server size={20} className="text-blue-400" /> Управление серверами
-        </h2>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+      <div className="flex flex-col sm:flex-row justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
+            <Server size={20} className="text-blue-400" /> Управление серверами
+          </h2>
+          <div className="text-[11px] text-muted-foreground mt-2 max-w-2xl space-y-2">
+            <div>
+              <p className="text-white/70"><b><RefreshCw size={10} className="inline mr-1" /> Синхронизировать юзеров:</b> Принудительная выгрузка всех клиентов из БД изинет во все активные сервера 3x-ui.</p>
+              <p className="text-white/40 italic ml-4">Пример: Вы полностью переустановили XUI панель сервера, купили другой сервер или пользователи жалуются, что ключ не работает. Эта кнопка сопоставит квоты, лимиты и ключи из вашей базы с панелью.</p>
+            </div>
+            <div>
+              <p className="text-white/70"><b><Activity size={10} className="inline mr-1" /> Диагностика Reality:</b> Проверяет доступность сервера, версию Xray и получает логи нагрузки / ОЗУ.</p>
+              <p className="text-white/40 italic ml-4">Пример: Пользователи жалуются на обрывы связи ("VPN ломается"). Вы нажимаете эту кнопку, чтобы получить вывод терминала и убедиться, что серверу хватает памяти и Xray не перезагружается из-за ошибок конфигурации.</p>
+            </div>
+            <div>
+              <p className="text-white/70"><b><Plus size={10} className="inline mr-1" /> Добавить сервер:</b> Добавляет новую ноду (IP/Домен) в пул доступных локаций.</p>
+              <p className="text-white/40 italic ml-4">Пример: Вашего старого сервера (Например, Германия) стало не хватать, вы покупаете новый VPS в Нидерландах, устанавливаете туда 3x-ui и добавляете его суда для выдачи новым клиентам.</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-start gap-2 w-full sm:w-auto">
           <button
             onClick={async () => {
               try {
@@ -307,7 +323,7 @@ export function AdminServersList() {
                 ) : (
                   <div className="space-y-1">
                     <p className="text-[10px] text-green-500">Конфигруация в норме</p>
-                    <div className="flex flex-col gap-0.5 mt-2 font-mono text-[9px] text-muted-foreground opacity-70">
+                    <div className="flex flex-col gap-0.5 mt-2 font-mono text-[9px] text-muted-foreground opacity-70 break-all">
                       <span>SNI: {res.details?.sni}</span>
                       <span>SID: {res.details?.sid}</span>
                     </div>

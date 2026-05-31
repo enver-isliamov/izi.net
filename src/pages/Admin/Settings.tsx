@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2 } from 'lucide-react';
+import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2, Lock, Unlock, Copy } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -14,6 +14,8 @@ interface Setting {
 export default function AdminSettings() {
   const { session } = useAuth();
   const [settings, setSettings] = useState<Record<string, string>>({
+    MONTHLY_PRICE: '100',
+    PUBLIC_URL: '',
     ENOT_MERCHANT_ID: '',
     ENOT_SECRET_KEY: '',
     ENOT_SECRET_KEY2: '',
@@ -25,6 +27,18 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
+  const [editLocks, setEditLocks] = useState<Record<string, boolean>>({
+    MONTHLY_PRICE: true,
+    PUBLIC_URL: true,
+    ENOT_MERCHANT_ID: true,
+    ENOT_SECRET_KEY: true,
+    ENOT_SECRET_KEY2: true,
+    PROMO_CODES_LIST: true,
+  });
+
+  const toggleLock = (key: string) => {
+    setEditLocks(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   useEffect(() => {
     fetchSettings();
@@ -70,6 +84,7 @@ export default function AdminSettings() {
       setSaving(true);
       // Clean values
       const cleanSettings = {
+        MONTHLY_PRICE: settings.MONTHLY_PRICE?.trim() || '100',
         PUBLIC_URL: settings.PUBLIC_URL?.trim() || '',
         ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim() || '',
         ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim() || '',
@@ -97,51 +112,19 @@ export default function AdminSettings() {
 
   const [isRepairing, setIsRepairing] = useState(false);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
-  const [isRedeploying, setIsRedeploying] = useState(false);
   const [systemLogs, setSystemLogs] = useState<string[]>([
     '[Система] Добро пожаловать в веб-консоль управления сервером изинет.',
     '[Система] Выберите желаемое действие выше для получения детального отчета.',
-    '[Подсказка] Кнопка ремонта полностью настроит сожительство Reality на порту 443 и Nginx на порту 3443.',
-    '[Подсказка] Кнопка деплоя из GitHub стянет свежую версию кода, установит зависимости, пересоберет проект и автоматически перезапустит сервер.'
+    '[Подсказка] Кнопка ремонта полностью настроит сожительство Reality на порту 443 и Nginx на порту 3443.'
   ]);
 
-  const handleGitRedeploy = async () => {
-    try {
-      setIsRedeploying(true);
-      setSystemLogs([
-        '[Старт] Запуск развертывания новой версии с GitHub (git pull)...',
-        '[Сборка] Установка новых npm зависимостей (npm install)...',
-        '[Компиляция] Сборка фронтенда и бэкенда (npm run build)...',
-        '[Система] Пожалуйста подождите, сборка в среднем занимает от 30 до 90 секунд...'
-      ]);
-      toast.loading('Деплой и сборка кода из GitHub...', { id: 'sys-redeploy' });
-      
-      const { data } = await axios.post('/api/admin/system/git-pull-redeploy', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      
-      const outLines = (data.stdout || '').split('\n');
-      const errLines = (data.stderr || '').split('\n');
-      const lines = [...outLines, ...errLines].filter((l: string) => l.trim().length > 0);
-      
-      setSystemLogs(lines.length ? lines : ['[Успех] Код успешно обновлен.']);
-      
-      if (data.success) {
-        toast.success(data.message || 'Сборка успешна! Перезапуск сервера...', { id: 'sys-redeploy' });
-        // Даем 4 секунды на перезагрузку страницы, пока сервер перезапускается
-        setTimeout(() => {
-          window.location.reload();
-        }, 4000);
-      } else {
-        toast.error('Ошибка сборки. Проверьте логи в терминале выше.', { id: 'sys-redeploy', duration: 10000 });
-      }
-    } catch (e: any) {
-      const errMsg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
-      toast.error('Ошибка сборки с GitHub: ' + errMsg, { id: 'sys-redeploy' });
-    } finally {
-      setIsRedeploying(false);
-    }
+  const handleCopyDeployScript = () => {
+    const script = `cd /opt/izinet && \\
+git pull && \\
+docker compose up -d --build && \\
+docker image prune -f`;
+    navigator.clipboard.writeText(script);
+    toast.success('Команда обновления скопирована!');
   };
 
   const handleRepairVless = async () => {
@@ -237,7 +220,7 @@ export default function AdminSettings() {
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">System Settings</h1>
+        <div></div>
         <button
           onClick={fetchSettings}
           className="flex items-center justify-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors font-medium text-xs text-muted-foreground"
@@ -292,14 +275,49 @@ export default function AdminSettings() {
                 </div>
                 <input
                   type="text"
+                  disabled={editLocks.PUBLIC_URL}
                   value={settings.PUBLIC_URL || ''}
                   onChange={(e) => setSettings({ ...settings, PUBLIC_URL: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-emerald-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
                   placeholder="https://izinet.online"
                 />
+                <button
+                  type="button"
+                  onClick={() => toggleLock('PUBLIC_URL')}
+                  className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                >
+                  {editLocks.PUBLIC_URL ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                </button>
               </div>
               <p className="text-[10px] text-muted-foreground ml-1">
-                Укажите точный домен (вместе с https://), на котором размещен сайт. Этот URL будет использоваться для корректного редиректа после оплаты Enot.io, а также для копирования ссылок.
+                Укажите точный домен (вместе с https://), на котором размещен сайт.
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Базовая стоимость за месяц (₽)</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-emerald-400 transition-colors">
+                  <Wallet size={18} />
+                </div>
+                <input
+                  type="number"
+                  disabled={editLocks.MONTHLY_PRICE}
+                  value={settings.MONTHLY_PRICE || ''}
+                  onChange={(e) => setSettings({ ...settings, MONTHLY_PRICE: e.target.value })}
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-emerald-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                  placeholder="100"
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleLock('MONTHLY_PRICE')}
+                  className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                >
+                  {editLocks.MONTHLY_PRICE ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground ml-1">
+                Цена за 1 месяц подписки с одного устройства. При покупке на более длительный срок скидки применяться не будут.
               </p>
             </div>
           </div>
@@ -330,11 +348,19 @@ export default function AdminSettings() {
                 </div>
                 <input
                   type="text"
+                  disabled={editLocks.ENOT_MERCHANT_ID}
                   value={settings.ENOT_MERCHANT_ID}
                   onChange={(e) => setSettings({ ...settings, ENOT_MERCHANT_ID: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm [&:-webkit-autofill]:[transition:background-color_5000s_ease-in-out_0s] [&:-webkit-autofill]:[-webkit-text-fill-color:white]"
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
                   placeholder="UUID кассы Enot.io"
                 />
+                <button
+                  type="button"
+                  onClick={() => toggleLock('ENOT_MERCHANT_ID')}
+                  className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                >
+                  {editLocks.ENOT_MERCHANT_ID ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                </button>
               </div>
             </div>
 
@@ -348,19 +374,29 @@ export default function AdminSettings() {
                   <input
                     type={showKeys.ENOT_SECRET_KEY ? "text" : "password"}
                     autoComplete="new-password"
+                    disabled={editLocks.ENOT_SECRET_KEY}
                     name={`enot_sk1_${Date.now()}`}
                     value={settings.ENOT_SECRET_KEY}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
+                    className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-[80px] focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
                     placeholder="Из кабинета Enot.io"
                   />
-                  <button
-                    type="button"
-                    onClick={() => toggleKey('ENOT_SECRET_KEY')}
-                    className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
-                  >
-                    {showKeys.ENOT_SECRET_KEY ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+                  <div className="absolute inset-y-0 right-4 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleLock('ENOT_SECRET_KEY')}
+                      className="text-muted-foreground hover:text-white transition-colors"
+                    >
+                      {editLocks.ENOT_SECRET_KEY ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleKey('ENOT_SECRET_KEY')}
+                      className="text-muted-foreground hover:text-white transition-colors"
+                    >
+                      {showKeys.ENOT_SECRET_KEY ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -373,19 +409,29 @@ export default function AdminSettings() {
                   <input
                     type={showKeys.ENOT_SECRET_KEY2 ? "text" : "password"}
                     autoComplete="new-password"
+                    disabled={editLocks.ENOT_SECRET_KEY2}
                     name={`enot_sk2_${Date.now()}`}
                     value={settings.ENOT_SECRET_KEY2}
                     onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
+                    className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-[80px] focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
                     placeholder="Из кабинета Enot.io (Дополнительный)"
                   />
-                  <button
-                    type="button"
-                    onClick={() => toggleKey('ENOT_SECRET_KEY2')}
-                    className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
-                  >
-                    {showKeys.ENOT_SECRET_KEY2 ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+                  <div className="absolute inset-y-0 right-4 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleLock('ENOT_SECRET_KEY2')}
+                      className="text-muted-foreground hover:text-white transition-colors"
+                    >
+                      {editLocks.ENOT_SECRET_KEY2 ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleKey('ENOT_SECRET_KEY2')}
+                      className="text-muted-foreground hover:text-white transition-colors"
+                    >
+                      {showKeys.ENOT_SECRET_KEY2 ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -454,12 +500,22 @@ export default function AdminSettings() {
 
             <div className="space-y-2">
               <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Список промокодов (слов/кодов)</label>
-              <textarea
-                value={settings.PROMO_CODES_LIST || ''}
-                onChange={(e) => setSettings({ ...settings, PROMO_CODES_LIST: e.target.value })}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm min-h-[100px]"
-                placeholder="PROMO24&#10;FREE24&#10;IZINET24"
-              />
+              <div className="relative group">
+                <textarea
+                  disabled={editLocks.PROMO_CODES_LIST}
+                  value={settings.PROMO_CODES_LIST || ''}
+                  onChange={(e) => setSettings({ ...settings, PROMO_CODES_LIST: e.target.value })}
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-4 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm min-h-[100px]"
+                  placeholder="PROMO24&#10;FREE24&#10;IZINET24"
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleLock('PROMO_CODES_LIST')}
+                  className="absolute top-3 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                >
+                  {editLocks.PROMO_CODES_LIST ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                </button>
+              </div>
               <p className="text-[10px] text-muted-foreground ml-1">
                 Введите промокоды, каждый с новой строки или через запятую. Регистр букв игнорируется (все будет приведено к верхнему регистру).
               </p>
@@ -567,23 +623,56 @@ export default function AdminSettings() {
               </button>
             </div>
 
-            {/* GitHub Pull / Redeploy Card */}
+            {/* GitHub Deploy Details Card */}
             <div className="p-4 bg-blue-500/5 rounded-xl flex flex-col justify-between border border-blue-500/10 space-y-3 shadow-md shadow-blue-500/5">
               <div className="space-y-1">
-                <h3 className="text-sm font-bold text-blue-400">Деплой с GitHub</h3>
+                <h3 className="text-sm font-bold text-blue-400">Скрипт обновления (GitHub)</h3>
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Стянет свежий код с ветки репозитория, бережно пересоберет проект и выполнит хот-рестарт.
+                  Скопируйте скрипт ниже и выполните его в терминале (консоли) вашего сервера. Он стянет новые изменения с репозитория и перезапустит docker контейнеры.
                 </p>
               </div>
-              <button
-                type="button"
-                disabled={isRedeploying}
-                onClick={handleGitRedeploy}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-blue-500/30"
-              >
-                {isRedeploying ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                Стянуть и обновить
-              </button>
+              <div className="relative group">
+                <div className="bg-black/40 border border-blue-500/20 rounded-xl p-3 font-mono text-[10px] text-blue-200 overflow-x-auto whitespace-pre">
+{`cd /opt/izinet && \\
+git pull && \\
+docker compose up -d --build && \\
+docker image prune -f`}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyDeployScript}
+                  className="absolute top-2 right-2 p-1.5 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 rounded-lg transition-colors border border-blue-500/30 backdrop-blur-md"
+                  title="Копировать скрипт"
+                >
+                  <Copy size={12} />
+                </button>
+              </div>
+            </div>
+
+            {/* VPN/RAM Diagnostic Terminal Script Card */}
+            <div className="p-4 bg-orange-500/5 rounded-xl flex flex-col justify-between border border-orange-500/10 space-y-3 shadow-md shadow-orange-500/5 col-span-1 md:col-span-2 lg:col-span-2">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-orange-400">Скрипт диагностики памяти и отвала VPN</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Если падает VPN и забивается RAM, выполните этот код в терминале сервера и скиньте результат разработчику для анализа логов docker и OOM Killer.
+                </p>
+              </div>
+              <div className="relative group mt-auto">
+                <div className="bg-black/40 border border-orange-500/20 rounded-xl p-3 font-mono text-[10px] text-orange-200 overflow-x-auto whitespace-pre">
+{`echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER LOGS x3-ui ===" && docker logs --tail 50 x3-ui && echo "" && echo "=== OOM KILLS ===" && dmesg -T | grep -i oom`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER LOGS x3-ui ===" && docker logs --tail 50 x3-ui && echo "" && echo "=== OOM KILLS ===" && dmesg -T | grep -i oom`);
+                    toast.success('Скрипт диагностики скопирован в буфер обмена!');
+                  }}
+                  className="absolute top-2 right-2 p-1.5 bg-orange-500/20 hover:bg-orange-500/40 text-orange-300 rounded-lg transition-colors border border-orange-500/30 backdrop-blur-md"
+                  title="Копировать скрипт"
+                >
+                  <Copy size={12} />
+                </button>
+              </div>
             </div>
 
             {/* Repair / Coexistence Card */}
@@ -645,7 +734,7 @@ export default function AdminSettings() {
                 if (log.startsWith('[Старт]') || log.startsWith('[Система]')) colorClass = 'text-cyan-400';
                 if (log.startsWith('===') || log.startsWith('---')) colorClass = 'text-zinc-500 font-bold';
                 return (
-                  <div key={idx} className="flex gap-2 leading-relaxed">
+                  <div key={idx} className="flex gap-2 leading-relaxed break-words break-all">
                     <span className="text-zinc-600 shrink-0 select-none">~</span>
                     <span className={colorClass}>{log}</span>
                   </div>

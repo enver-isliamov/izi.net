@@ -123,7 +123,7 @@ export default function AdminPayments() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-xl md:text-2xl font-bold font-mono tracking-tight text-blue-400 uppercase">Управление платежами</h1>
+        <div></div>
         <button 
           onClick={fetchPayments}
           className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5 text-sm hover:bg-white/10 transition-colors"
@@ -146,7 +146,7 @@ export default function AdminPayments() {
             className="w-full pl-10 pr-4 py-2.5 bg-secondary/30 rounded-xl border border-white/5 focus:border-blue-500/50 outline-none transition-all"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {['all', 'pending', 'completed', 'failed'].map((f) => (
             <button
               key={f}

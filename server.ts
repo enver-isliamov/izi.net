@@ -221,18 +221,27 @@ class XUIService {
     } catch (_) {}
 
     // Internal routing optimization:
-    // If the server connects to the LOCAL server ('194.50.94.28' or 'izinet.online' or 'localhost' or '127.0.0.1'),
-    // we bypass the external port/IP and talk directly to the 'x3-ui:2053' service in the Docker network.
+    // If the server connects to the LOCAL server, we talk directly to '127.0.0.1' on the host network.
     // This solves loopback blocks (NAT loopback), port blockage, and UFW issues perfectly.
-    if (host && (host.includes('194.50.94.28') || host.includes('izinet.online') || host.includes('localhost') || host.includes('127.0.0.1'))) {
-      const originalHost = host;
+    if (host) {
       try {
         const parsedUrl = new URL(host);
-        host = `http://x3-ui:2053${parsedUrl.pathname}`;
-        console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+        const hn = parsedUrl.hostname;
+        // Strict exact match to avoid breaking secondary servers (e.g. one.izinet.online)
+        if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
+          const originalHost = host;
+          const port = parsedUrl.port || '2053';
+          const isDocker = require('fs').existsSync('/.dockerenv');
+          if (isDocker) {
+            host = `http://x3-ui:2053${parsedUrl.pathname}`;
+            console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+          } else {
+            host = `http://127.0.0.1:${port}${parsedUrl.pathname}`;
+            console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal host path: ${host}`);
+          }
+        }
       } catch (e) {
-        host = host.replace(/^(https?:\/\/)?([^\/]+)(:\d+)?/, 'http://x3-ui:2053');
-        console.log(`[XUI Router] Optimized local routing (fallback regex): rewritten ${originalHost} -> ${host}`);
+        console.error(`[XUI Router] Error parsing URL for local routing optimization:`, e);
       }
     }
 
@@ -394,6 +403,65 @@ class XUIService {
     // Utilize getInbounds which already handles session caching and 401 retries
     await this.getInbounds();
     return true;
+  }
+
+  // Routing and settings
+  async getSettings() {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/all`;
+      const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      return resp.data.obj;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getSettings();
+      }
+      throw e;
+    }
+  }
+
+  async updateSettings(settingsData: any) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/update`;
+      const encodedData = new URLSearchParams();
+      for (const key in settingsData) {
+        if (typeof settingsData[key] === 'object') {
+          encodedData.append(key, JSON.stringify(settingsData[key]));
+        } else {
+          encodedData.append(key, settingsData[key]);
+        }
+      }
+      const resp = await axios.post(url, encodedData.toString(), {
+        ...getRequestConfig(url, this.authHeaders()),
+        headers: {
+          ...this.authHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+      });
+      return resp.data;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateSettings(settingsData);
+      }
+      throw e;
+    }
+  }
+
+  async restartPanel() {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/restartPanel`;
+      const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      return resp.data;
+    } catch (e) {
+      // 3x-ui drops connection on restart, handle gracefully
+      return { success: true };
+    }
   }
 
   async getInbounds() {
@@ -1324,6 +1392,85 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
   }
 });
 
+async function syncAllRoutingToAllPanels() {
+  console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray Config to all XUI servers...');
+  try {
+    // 1. Ensure default rules exist
+    const { data: existing, error: checkErr } = await supabase.from('vpn_routing_rules').select('*').limit(1);
+    if (!checkErr && (!existing || existing.length === 0)) {
+       console.log('📦 Setup out-of-the-box routing rules...');
+       await supabase.from('vpn_routing_rules').insert([
+         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic'], outbound_tag: 'direct', is_active: true },
+         { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
+       ]);
+    }
+
+    const { data: rules, error: rulesErr } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
+    if (rulesErr) throw rulesErr;
+
+    const newRules = (rules || []).map(r => {
+      const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
+      if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
+      if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
+      return xrayRule; 
+    });
+
+    const { data: activeServers, error: serverErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (serverErr) throw serverErr;
+
+    const results = [];
+    for (const server of (activeServers || [])) {
+      try {
+        console.log(`Syncing routing and Xray Config to ${server.name}...`);
+        const { instance: xuiInstance } = await getXuiForServer(server.id);
+        const headers = { headers: { ...xuiInstance.authHeaders(), Cookie: xuiInstance['sessionCookie'] } };
+        
+        // 1. GET Current Xray Settings
+        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, headers));
+        if (!xrayR.data?.success) throw new Error("Failed to fetch Xray config");
+        const parsedObj = JSON.parse(xrayR.data.obj);
+        let xrayConfig = parsedObj.xraySetting;
+        
+        // 2. Modify Routing
+        if (!xrayConfig.routing) xrayConfig.routing = {};
+        if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
+        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
+        
+        const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
+        xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
+        
+        // 3. POST Back to Xray Update
+        const updatePayload = new URLSearchParams();
+        updatePayload.append("xraySetting", JSON.stringify(xrayConfig));
+        if (parsedObj.outboundTestUrl) updatePayload.append("outboundTestUrl", parsedObj.outboundTestUrl);
+        
+        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), headers));
+        if (!updateR.data?.success) throw new Error(updateR.data?.msg || "Update failed");
+
+        await xuiInstance.restartPanel();
+        
+        results.push({ server: server.name, success: true });
+      } catch (e: any) {
+        console.error(`Failed to sync routing to ${server.name}:`, e.message || e);
+        results.push({ server: server.name, success: false, error: e.message });
+      }
+    }
+    return results;
+  } catch (error: any) {
+    console.error('Failed to sync system routing:', error);
+    return [];
+  }
+}
+
+app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
+  try {
+    const results = await syncAllRoutingToAllPanels();
+    res.json({ success: true, results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/admin/system/sync-all', adminOnly, async (req, res) => {
   console.log('🚀 [Sync] Starting global background synchronization...');
   res.json({ success: true, message: 'Синхронизация запущена в фоновом режиме.' });
@@ -1417,33 +1564,7 @@ app.post('/api/admin/system/diagnose-vps', adminOnly, async (req, res) => {
   });
 });
 
-app.post('/api/admin/system/git-pull-redeploy', adminOnly, async (req, res) => {
-  console.log('🔄 [AdminAPI] Starting Git Pull & Rebuild deployment...');
-  
-  // Выполняем git pull и сборку приложения
-  const cmd = 'git stash && git pull && npm install && npm run build';
-  
-  exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-    console.log('[AdminAPI] Git pull & build completed.');
-    const success = !error;
-    
-    res.json({
-      success,
-      stdout: stdout || '',
-      stderr: stderr || '',
-      message: success 
-        ? 'Код успешно стянут с GitHub и пересобран! Сервер автоматически перезапустится через 2 секунды...' 
-        : 'Сборка завершилась с ошибками во время выполнения git pull или npm run build'
-    });
 
-    if (success) {
-      setTimeout(() => {
-        console.log('🔄 [System] Exiting process code 0 to trigger automatic restart by supervisor/PM2...');
-        process.exit(0);
-      }, 2000);
-    }
-  });
-});
 
 // --- Traffic Webhook for 3x-ui ---
 // Usage: http://your-site.app/api/webhooks/traffic-limit?token=YOUR_SECRET
@@ -2147,8 +2268,7 @@ app.post('/api/admin/users/create', adminOnly, async (req, res) => {
       }
       
       await supabase.from('subscriptions').update({ 
-        v2ray_config: JSON.stringify(devices),
-        device_limit: devices.length
+        v2ray_config: JSON.stringify(devices)
       }).eq('id', subscriptionId);
     }
 
@@ -2213,7 +2333,6 @@ app.delete('/api/admin/users/:userId/devices/:deviceId', adminOnly, async (req, 
     
     await supabase.from('subscriptions').update({ 
       v2ray_config: JSON.stringify(devices),
-      device_limit: Math.max(1, devices.length),
       updated_at: new Date().toISOString()
     }).eq('id', sub.id);
 
@@ -2390,7 +2509,6 @@ app.post('/api/admin/users/:userId/devices', adminOnly, async (req, res) => {
     
     await supabase.from('subscriptions').update({ 
       v2ray_config: JSON.stringify(devices),
-      device_limit: devices.length,
       updated_at: new Date().toISOString()
     }).eq('id', sub.id);
 
@@ -2466,8 +2584,7 @@ app.post('/api/admin/users/:userId/subscription', adminOnly, async (req, res) =>
     }
     
     await supabase.from('subscriptions').update({ 
-      v2ray_config: JSON.stringify(devices),
-      device_limit: devices.length
+      v2ray_config: JSON.stringify(devices)
     }).eq('id', subscriptionId);
     
     res.json({ success: true, subscriptionId });
@@ -3333,7 +3450,8 @@ app.post('/api/pay/webhook/enot-legacy', async (req, res) => {
   }
 
   try {
-    const userId = custom_field; // Enot passes userId back in custom_field (cf)
+    const parsedCf = parseEnotCustomFields(custom_field);
+    const userId = parsedCf.user_id || parsedCf.userId || custom_field;
     if (!userId) {
       console.error('❌ No custom_field (userId) found in Enot webhook');
       return res.status(400).send('Missing userId in custom_field');
@@ -3361,9 +3479,26 @@ async function handleEnotWebhook(req: any, res: any) {
   }
 
   try {
-    const isValidSignature = await payment.verifyEnotWebhook(req.body, headerSignature);
+    let isValidSignature = await payment.verifyEnotWebhook(req.body, headerSignature);
+    
+    // If HMAC fails (Express json parser destroys raw whitespace), fallback to secure API validation:
+    if (!isValidSignature && invoice_id) {
+       console.warn(`[EnotWebhook] HMAC invalid, fallback to direct API validation for ${invoice_id}`);
+       try {
+         const enotCheck = await payment.checkEnotStatus(invoice_id);
+         console.log(`[EnotWebhook] API check result:`, JSON.stringify(enotCheck));
+         // Enot checkEnotStatus returns 'success' when it's fully verified
+         if (enotCheck && (enotCheck.enotStatus === 'success' || enotCheck.enotStatus === 'paid' || enotCheck.enotStatus === 'finish' || enotCheck.enotStatus === 'finished')) {
+            console.log(`[EnotWebhook] Fallback validation successful via API! Status: ${enotCheck.enotStatus}`);
+            isValidSignature = true;
+         }
+       } catch (apiErr) {
+         console.error(`[EnotWebhook] Fallback API validation threw error:`, apiErr);
+       }
+    }
+
     if (!isValidSignature) {
-      console.warn('Invalid Enot webhook signature');
+      console.warn('Invalid Enot webhook signature and API validation failed');
       return res.status(400).send('Invalid signature');
     }
   } catch (err: any) {
@@ -3402,7 +3537,8 @@ async function handleEnotWebhook(req: any, res: any) {
       return res.send('YES');
     }
 
-    if (status !== 'success') {
+    const isSuccessStatus = ['success', 'paid', 'finish', 'finished'].includes(status.toLowerCase());
+    if (!isSuccessStatus) {
       await markPaymentStatus(orderId, status === 'refund' ? 'refunded' : 'failed');
       return res.send('YES');
     }
@@ -3639,6 +3775,13 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
 });
 
 // Health check and configuration status
+app.get('/api/test-xui', async (req, res) => {
+  try {
+    const results = await syncAllRoutingToAllPanels();
+    res.json({ results });
+  } catch (e: any) { res.status(500).json({error: e.message}) }
+});
+
 app.get('/api/config', (req, res) => {
   res.json({
     telegramBotName: process.env.VITE_TELEGRAM_BOT_NAME || process.env.TELEGRAM_BOT_NAME || 'izinet_bot'
@@ -3718,30 +3861,25 @@ app.get('/api/health', (req, res) => {
 // --- Subscription Routes ---
 app.get('/api/subscription/plans', async (req, res) => {
   try {
-    const plansJson = await getSystemSetting('SUBSCRIPTION_PLANS', '');
-    if (!plansJson) {
-      // Return default hardcoded if not set in DB
-      return res.json({
-        periods: [
-          { id: '1m', label: '1 месяц', price: 100, days: 30 },
-          { id: '2m', label: '2 месяца', price: 190, days: 60, discount: '5%' },
-          { id: '6m', label: '6 месяцев', price: 500, days: 180, discount: '17%' },
-          { id: '12m', label: '12 месяцев', price: 900, days: 365, discount: '25%' },
-        ],
-        serverTypes: [
-          { id: 'wifi', label: 'Wi-Fi', price: 0 },
-        ],
-        deviceLimit: 2
-      });
-    }
-    const plans = JSON.parse(plansJson);
-    if (plans.serverTypes) {
-      plans.serverTypes = plans.serverTypes.filter((s: any) => s.id === 'wifi');
-    } else {
-      plans.serverTypes = [{ id: 'wifi', label: 'Wi-Fi', price: 0 }];
-    }
-    const deviceLimit = await getSystemSetting('DEVICE_LIMIT', '2');
-    res.json({ ...plans, deviceLimit: parseInt(deviceLimit) });
+    const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
+    const basePrice = parseInt(monthlyPriceStr, 10) || 100;
+    const deviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
+    
+    // Always use dynamically generated linear pricing structure
+    const plans = {
+      periods: [
+        { id: '1m', label: '1 месяц', price: basePrice * 1, days: 30 },
+        { id: '2m', label: '2 месяца', price: basePrice * 2, days: 60 },
+        { id: '6m', label: '6 месяцев', price: basePrice * 6, days: 180 },
+        { id: '12m', label: '12 месяцев', price: basePrice * 12, days: 365 },
+      ],
+      serverTypes: [
+        { id: 'wifi', label: 'Wi-Fi', price: 0 }
+      ],
+      deviceLimit: parseInt(deviceLimitStr)
+    };
+    
+    return res.json(plans);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3840,7 +3978,6 @@ app.post('/api/subscription/device/delete', async (req, res) => {
       .from('subscriptions')
       .update({
         v2ray_config: JSON.stringify(nextDevices),
-        device_limit: Math.max(1, nextDevices.length),
         expires_at: maxExpiryDate.toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -3879,26 +4016,22 @@ app.post('/api/subscription/buy', async (req, res) => {
 
   try {
     // 0.5. Validate price and device limit against DB
-    const plansJson = await getSystemSetting('SUBSCRIPTION_PLANS', '');
+    const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
+    const basePrice = parseInt(monthlyPriceStr, 10) || 100;
     const globalDeviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
     const globalDeviceLimit = parseInt(globalDeviceLimitStr);
     
-    if (plansJson) {
-      try {
-        const dbPlans = JSON.parse(plansJson);
-        const period = dbPlans.periods.find((p: any) => p.id === planId);
-        const sType = dbPlans.serverTypes.find((s: any) => s.id === (serverType?.toLowerCase() || 'wifi'));
-        
-        if (period && sType) {
-          const expectedPrice = (period.price + sType.price) * (forceNew || targetDeviceId ? 1 : (deviceLimit || 1));
-          if (Math.abs(price - expectedPrice) > 1) { // Allow small rounding diffs
-            console.warn(`[BUY] Price mismatch for user ${userId}: client sent ${price}, DB calculated ${expectedPrice}`);
-            return res.status(400).json({ error: 'Mismatched price. Please refresh the page.' });
-          }
-        }
-      } catch (e) {
-        console.error('[BUY] Failed to parse subscription plans from DB:', e);
-      }
+    // dynamically determine the price based on planId ('1m', '2m', '6m', '12m')
+    let months = 1;
+    if (planId === '2m') months = 2;
+    if (planId === '6m') months = 6;
+    if (planId === '12m') months = 12;
+    
+    // Wi-Fi server cost is standard (0 additive cost)
+    const expectedPrice = (basePrice * months) * (forceNew || targetDeviceId ? 1 : (deviceLimit || 1));
+    if (Math.abs(price - expectedPrice) > 1) { // Allow small rounding diffs
+      console.warn(`[BUY] Price mismatch for user ${userId}: client sent ${price}, DB calculated ${expectedPrice}`);
+      return res.status(400).json({ error: 'Mismatched price. Please refresh the page.' });
     }
 
     // 1. Get current balance
@@ -3949,8 +4082,11 @@ app.post('/api/subscription/buy', async (req, res) => {
     // 3A. CREATE NEW DEVICE(S)
     const devicesToCreate = forceNew ? 1 : (deviceLimit || 1);
     
-    if (existingDevices.length + devicesToCreate > globalDeviceLimit) {
-      return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${globalDeviceLimit}-х устройств.` });
+    // Honor the last sub limit if it's higher than the current global settings, or if it was unset, use global
+    const userDeviceLimit = lastSub?.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit;
+
+    if (existingDevices.length + devicesToCreate > userDeviceLimit) {
+      return res.status(400).json({ error: `Превышен лимит: можно иметь не более ${userDeviceLimit}-х устройств.` });
     }
 
     for (let i = 0; i < devicesToCreate; i++) {
@@ -4067,7 +4203,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           plan_type: planName.toLowerCase(),
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
-          device_limit: existingDevices.length,
+          device_limit: lastSub.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit,
           v2ray_config: finalConfigJson,
           server_id: serverId,
           updated_at: new Date().toISOString()
@@ -4087,7 +4223,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           v2ray_config: finalConfigJson,
           server_type: serverType,
           period_months: periodMonths || 1,
-          device_limit: existingDevices.length,
+          device_limit: globalDeviceLimit,
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0,
           server_id: serverId
@@ -4193,6 +4329,9 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
       return res.status(400).json({ error: 'Промокод на пробный период доступен только пользователям без активной подписки.' });
     }
 
+    const deviceLimitStr = await getSystemSetting('DEVICE_LIMIT', '2');
+    const globalDeviceLimit = parseInt(deviceLimitStr);
+
     // 5. Fetch all active servers for client provisioning
     const { data: activeServers, error: serversErr } = await supabase
       .from('vpn_servers')
@@ -4272,7 +4411,7 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
           expires_at: expiresAt.toISOString(),
           plan_type: 'trial',
           period_months: 1,
-          device_limit: 1,
+          device_limit: globalDeviceLimit,
           v2ray_config: finalConfigJson,
           server_id: activeServers[0].id,
           updated_at: new Date().toISOString()
@@ -4292,7 +4431,7 @@ app.post('/api/promocode/apply', authenticateUser, async (req: any, res) => {
           v2ray_config: finalConfigJson,
           server_type: 'WIFI',
           period_months: 1,
-          device_limit: 1,
+          device_limit: globalDeviceLimit,
           traffic_limit_mb: trafficLimitMb,
           traffic_used_mb: 0,
           server_id: activeServers[0].id
@@ -5001,6 +5140,9 @@ async function startServer() {
   if (!process.env.PUBLIC_URL && isProd) {
     console.warn('⚠️ WARNING: PUBLIC_URL environment variable is not set! Subscription links may be unstable or broken.');
   }
+
+  // Ensure routing and out-of-the-box system config is booted and synced
+  syncAllRoutingToAllPanels().catch(err => console.error("System Boot Sync Error:", err));
 
   setupRealtimeListener();
   syncTrafficStats();

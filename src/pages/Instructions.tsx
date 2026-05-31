@@ -83,67 +83,6 @@ export default function Instructions() {
         <p className="text-[11px] md:text-xs text-muted-foreground">Простые краткие шаги до безопасного интернета</p>
       </div>
 
-      {/* Subscription Key section */}
-      {subscription ? (
-        <Card className="glass-card border-primary/20 p-3.5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] font-black uppercase tracking-widest text-primary flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" /> Ваш личный VPN-ключ
-            </span>
-            <span className="text-[9px] text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
-              Подписка активна
-            </span>
-          </div>
-          
-          <div className="p-2.5 rounded-lg bg-black/60 border border-white/5 space-y-2">
-            <div className="font-mono text-[9px] break-all leading-normal text-muted-foreground line-clamp-2 select-all">
-              {vpnKey}
-            </div>
-            <div className="flex gap-2.5 pt-1">
-              <Button 
-                onClick={handleCopy}
-                className="flex-1 bg-primary text-black hover:bg-primary/90 rounded-xl h-8 text-[11px] font-bold gap-1.5"
-              >
-                <Copy className="w-3 h-3" />
-                {copied ? 'Скопировано!' : 'Копировать ключ'}
-              </Button>
-              <Button 
-                onClick={() => setShowQr(!showQr)}
-                variant="outline"
-                className="rounded-xl border-border hover:bg-white/5 h-8 w-11 shrink-0 p-0"
-                title="Показать QR-код"
-              >
-                <QrCode className="w-4 h-4 text-primary" />
-              </Button>
-            </div>
-          </div>
-
-          {showQr && (
-            <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl border border-white animate-in zoom-in-95 duration-200 w-fit mx-auto">
-              <QRCodeSVG 
-                value={vpnKey} 
-                size={140}
-                level="M"
-                includeMargin={false}
-                bgColor="#FFFFFF"
-                fgColor="#000000"
-              />
-              <span className="text-[9px] text-black font-semibold mt-1.5 uppercase font-mono">Отсканируйте из приложения</span>
-            </div>
-          )}
-        </Card>
-      ) : (
-        <Card className="glass-card border-white/5 p-4 text-center space-y-2">
-          <p className="text-xs text-muted-foreground">У вас пока нет активной подписки VPN.</p>
-          <Button 
-            onClick={() => navigate('/dashboard')}
-            className="w-full bg-primary text-black hover:bg-primary/90 text-xs font-bold rounded-xl h-9 animate-pulse"
-          >
-            Купить подписку
-          </Button>
-        </Card>
-      )}
-
       {/* Краткая инструкция (Оптимизированная по ширине) */}
       <Card className="glass-card border-white/5 p-3.5 space-y-2.5">
         <h3 className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
@@ -152,7 +91,7 @@ export default function Instructions() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] md:text-xs text-muted-foreground leading-normal pl-0">
           <div className="flex gap-2 p-2 rounded-xl bg-white/[0.01] border border-white/5">
             <span className="text-primary font-black">1.</span>
-            <span>Скопируйте ваш **личный VPN-ключ** в панели выше.</span>
+            <span>Скопируйте VPN-ключ нужного устройства на главной странице приложения.</span>
           </div>
           <div className="flex gap-2 p-2 rounded-xl bg-white/[0.01] border border-white/5">
             <span className="text-primary font-black">2.</span>
