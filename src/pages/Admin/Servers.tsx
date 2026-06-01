@@ -28,7 +28,8 @@ export function AdminServersList() {
   const [isDiagServerLoading, setIsDiagServerLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false
+    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false,
+    custom_direct_domains: '', custom_proxy_domains: ''
   });
 
   const fetchServers = async () => {
@@ -80,14 +81,25 @@ export function AdminServersList() {
     e.preventDefault();
     try {
       const serverConfigState = editingId 
-        ? { ...(servers.find(s => s.id === editingId)?.xui_config_state || {}), routing_sync_disabled: formData.routing_sync_disabled }
-        : { routing_sync_disabled: formData.routing_sync_disabled };
+        ? { 
+            ...(servers.find(s => s.id === editingId)?.xui_config_state || {}), 
+            routing_sync_disabled: formData.routing_sync_disabled,
+            custom_direct_domains: formData.custom_direct_domains,
+            custom_proxy_domains: formData.custom_proxy_domains
+          }
+        : { 
+            routing_sync_disabled: formData.routing_sync_disabled,
+            custom_direct_domains: formData.custom_direct_domains,
+            custom_proxy_domains: formData.custom_proxy_domains
+          };
 
       const submitPayload = {
         ...formData,
         xui_config_state: serverConfigState
       };
       delete (submitPayload as any).routing_sync_disabled;
+      delete (submitPayload as any).custom_direct_domains;
+      delete (submitPayload as any).custom_proxy_domains;
 
       if (editingId) {
         await axios.put(`/api/admin/servers/${editingId}`, submitPayload, {
@@ -103,7 +115,10 @@ export function AdminServersList() {
       
       setIsAdding(false);
       setEditingId(null);
-      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false });
+      setFormData({ 
+        name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false,
+        custom_direct_domains: '', custom_proxy_domains: ''
+      });
       fetchServers();
     } catch (e: any) {
       const errorMsg = e.response?.data?.error || e.message || 'Ошибка сохранения сервера';
@@ -251,7 +266,9 @@ export function AdminServersList() {
       password: server.password || '',
       location_code: server.location_code || 'DE',
       is_default: !!server.is_default,
-      routing_sync_disabled: !!server.xui_config_state?.routing_sync_disabled
+      routing_sync_disabled: !!server.xui_config_state?.routing_sync_disabled,
+      custom_direct_domains: server.xui_config_state?.custom_direct_domains || '',
+      custom_proxy_domains: server.xui_config_state?.custom_proxy_domains || ''
     });
     setIsAdding(true);
   };
@@ -259,7 +276,10 @@ export function AdminServersList() {
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
-    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false });
+    setFormData({ 
+      name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false,
+      custom_direct_domains: '', custom_proxy_domains: ''
+    });
   };
 
   const toggleServer = async (id: string, active: boolean) => {
@@ -475,8 +495,40 @@ export function AdminServersList() {
                   />
                   <label htmlFor="routing_sync_disabled" className="text-sm text-muted-foreground cursor-pointer flex flex-col leading-tight gap-1">
                     <span>Исключить из автоматической синхронизации маршрутов Xray</span>
-                    <span className="text-[10px] text-red-400 select-none">Рекомендуется для Bare-metal серверов без Docker (например, Amster), чтобы не перезаписывать их кастомные outbound-правила и встроенное DNS/проксирование.</span>
+                    <span className="text-[10px] text-red-500 select-none">После исправления багов с geosite (SYS-26, SYS-27) синхронизация полностью безопасна. Исключайте, только если на этом сервере (например, Amster) полностью кастомные настройки outbounds/DNS.</span>
                   </label>
+                </div>
+
+                <div className="md:col-span-2 flex flex-col gap-2 pt-3 border-t border-white/5">
+                  <span className="text-xs font-semibold text-white">Кастомные правила маршрутизации сервера</span>
+                  <p className="text-[11px] text-muted-foreground leading-normal">Кастомные правила, применяемые к Xray-конфигурации данного сервера при автоматической синхронизации маршрутов (актуально, если НЕ исключено из синхронизации выше).</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1">
+                    <div>
+                      <label htmlFor="custom_direct_domains" className="text-[11px] text-muted-foreground block mb-1">
+                        Локальный доступ (Direct / Bypass VPN) — домены через запятую:
+                      </label>
+                      <textarea
+                        id="custom_direct_domains"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500 h-16 resize-none"
+                        placeholder="domain:ok.ru, domain:rutube.ru"
+                        value={formData.custom_direct_domains}
+                        onChange={e => setFormData({...formData, custom_direct_domains: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="custom_proxy_domains" className="text-[11px] text-muted-foreground block mb-1">
+                        Проксирование (IPv6-out / VPN) — домены через запятую:
+                      </label>
+                      <textarea
+                        id="custom_proxy_domains"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500 h-16 resize-none"
+                        placeholder="domain:customblock.com, domain:spotify.com"
+                        value={formData.custom_proxy_domains}
+                        onChange={e => setFormData({...formData, custom_proxy_domains: e.target.value})}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="md:col-span-2 flex gap-2">

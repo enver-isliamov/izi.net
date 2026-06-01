@@ -1473,11 +1473,39 @@ async function syncAllRoutingToAllPanels() {
        }
     }
 
+    // Default "Block Torrents" rule setup (out-of-the-box torrent blocking)
+    const safeTorrentDomains = [
+      'domain:torrent',
+      'domain:peer',
+      'domain:tracker',
+      'domain:utorrent',
+      'domain:bittorrent',
+      'domain:rutracker',
+      'domain:rutor',
+      'domain:fast-torrent',
+      'domain:torrent-soft'
+    ];
+    const { data: torrentRule, error: checkErr3 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Block Torrents').maybeSingle();
+    if (!checkErr3) {
+       if (!torrentRule) {
+          console.log('📦 Setup default Block Torrents routing rule...');
+          await supabase.from('vpn_routing_rules').insert([
+            { name: 'Block Torrents', domains: safeTorrentDomains, outbound_tag: 'blocked', is_active: true }
+          ]);
+       }
+    }
+
     const { data: rules, error: rulesErr } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
     if (rulesErr) throw rulesErr;
 
     const newRules = (rules || []).map(r => {
       const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
+      
+      // If it's a torrent block rule, automatically bind the "bittorrent" protocol signature
+      if (r.name?.toLowerCase().includes('torrent')) {
+        xrayRule.protocol = ["bittorrent"];
+      }
+
       if (r.domains && r.domains.length > 0) {
         const resolvedDomains: string[] = [];
         for (const d of r.domains) {
@@ -1536,6 +1564,16 @@ async function syncAllRoutingToAllPanels() {
             domainStrategy: "UseIP"
           };
         }
+
+        // Ensure "blocked" blackhole outbound exists for dropping torrent traffic
+        const blockedIndex = xrayConfig.outbounds.findIndex((o: any) => o.tag === 'blocked');
+        if (blockedIndex === -1) {
+          xrayConfig.outbounds.push({
+            tag: "blocked",
+            protocol: "blackhole",
+            settings: {}
+          });
+        }
         
         // 2. Modify Routing
         if (!xrayConfig.routing) xrayConfig.routing = {};
@@ -1543,6 +1581,40 @@ async function syncAllRoutingToAllPanels() {
         xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
         
         const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
+
+        // Append custom server-specific rules from xui_config_state
+        if (server.xui_config_state && typeof server.xui_config_state === 'object') {
+          const stateObj = server.xui_config_state;
+          
+          if (stateObj.custom_direct_domains) {
+            const list = typeof stateObj.custom_direct_domains === 'string'
+              ? stateObj.custom_direct_domains.split(',').map((d: string) => d.trim()).filter(Boolean)
+              : stateObj.custom_direct_domains;
+            if (Array.isArray(list) && list.length > 0) {
+              finalRules.unshift({
+                type: "field",
+                outboundTag: "direct",
+                domain: list,
+                izinet_managed: true
+              });
+            }
+          }
+          
+          if (stateObj.custom_proxy_domains) {
+            const list = typeof stateObj.custom_proxy_domains === 'string'
+              ? stateObj.custom_proxy_domains.split(',').map((d: string) => d.trim()).filter(Boolean)
+              : stateObj.custom_proxy_domains;
+            if (Array.isArray(list) && list.length > 0) {
+              finalRules.unshift({
+                type: "field",
+                outboundTag: "ipv6-out",
+                domain: list,
+                izinet_managed: true
+              });
+            }
+          }
+        }
+
         xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
         
         // 3. POST Back to Xray Update
