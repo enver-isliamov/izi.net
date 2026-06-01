@@ -1413,13 +1413,32 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
 async function syncAllRoutingToAllPanels() {
   console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray Config to all XUI servers...');
   try {
-    // 1. Ensure default rules exist by name check
+    // 1. Ensure default rules exist by name check and clean legacy unstable geosite entries
     const { data: geminiRule, error: checkErr1 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Gemini / Google Services').maybeSingle();
-    if (!checkErr1 && !geminiRule) {
-       console.log('📦 Setup default Gemini / Google Services routing rule...');
-       await supabase.from('vpn_routing_rules').insert([
-         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic', 'domain:aistudio.google.com', 'domain:gemini.google.com', 'domain:makersuite.google.com'], outbound_tag: 'ipv6-out', is_active: true }
-       ]);
+    const safeGeminiDomains = [
+      'geosite:google',
+      'geosite:openai',
+      'domain:ai.com',
+      'domain:anthropic.com',
+      'domain:claude.ai',
+      'domain:aistudio.google.com',
+      'domain:gemini.google.com',
+      'domain:makersuite.google.com',
+      'domain:openai.com'
+    ];
+
+    if (!checkErr1) {
+       if (!geminiRule) {
+          console.log('📦 Setup default Gemini / Google Services routing rule...');
+          await supabase.from('vpn_routing_rules').insert([
+            { name: 'Gemini / Google Services', domains: safeGeminiDomains, outbound_tag: 'ipv6-out', is_active: true }
+          ]);
+       } else if (geminiRule.domains && (geminiRule.domains.includes('geosite:gemini') || geminiRule.domains.includes('geosite:anthropic'))) {
+          console.log('🔄 Cleaning up Gemini / Google Services rule in DB (removing unstable geosite markers)...');
+          await supabase.from('vpn_routing_rules').update({
+            domains: safeGeminiDomains
+          }).eq('id', geminiRule.id);
+       }
     }
 
     const { data: ruRule, error: checkErr2 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Russia Bypass (GeoIP + GeoSite)').maybeSingle();
@@ -1435,7 +1454,10 @@ async function syncAllRoutingToAllPanels() {
 
     const newRules = (rules || []).map(r => {
       const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
-      if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
+      if (r.domains && r.domains.length > 0) {
+        // Safe filter: remove any geosite rules that crash old geosite.dat databases
+        xrayRule.domain = r.domains.filter(d => d !== 'geosite:gemini' && d !== 'geosite:anthropic');
+      }
       if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
       return xrayRule; 
     });
