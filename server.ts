@@ -1422,7 +1422,10 @@ async function syncAllRoutingToAllPanels() {
       'domain:anthropic.com',
       'domain:claude.ai',
       'domain:aistudio.google.com',
+      'domain:aistudio.google',
       'domain:gemini.google.com',
+      'domain:gemini.google',
+      'domain:generativeai.google',
       'domain:makersuite.google.com',
       'domain:openai.com'
     ];
@@ -1433,8 +1436,8 @@ async function syncAllRoutingToAllPanels() {
           await supabase.from('vpn_routing_rules').insert([
             { name: 'Gemini / Google Services', domains: safeGeminiDomains, outbound_tag: 'ipv6-out', is_active: true }
           ]);
-       } else if (geminiRule.domains && (geminiRule.domains.includes('geosite:gemini') || geminiRule.domains.includes('geosite:anthropic'))) {
-          console.log('🔄 Cleaning up Gemini / Google Services rule in DB (removing unstable geosite markers)...');
+       } else if (geminiRule.domains && (geminiRule.domains.includes('geosite:gemini') || geminiRule.domains.includes('geosite:anthropic') || !geminiRule.domains.includes('domain:aistudio.google'))) {
+          console.log('🔄 Cleaning up Gemini / Google Services rule in DB (adding direct/T-Level .google domains)...');
           await supabase.from('vpn_routing_rules').update({
             domains: safeGeminiDomains
           }).eq('id', geminiRule.id);
