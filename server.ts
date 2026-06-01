@@ -300,8 +300,12 @@ class XUIService {
 
       let customHeaders: any = {};
       if (csrfData) {
-         customHeaders['X-CSRF-Token'] = csrfData.token;
-         if (csrfData.cookieStr) customHeaders['Cookie'] = csrfData.cookieStr;
+         if (csrfData.token) {
+            customHeaders['X-CSRF-Token'] = csrfData.token;
+         }
+         if (csrfData.cookieStr) {
+            customHeaders['Cookie'] = csrfData.cookieStr;
+         }
       }
 
       try {
@@ -347,13 +351,14 @@ class XUIService {
            csrfToken = csrfRes.data.obj;
         }
         if (csrfRes.headers['set-cookie']) {
-           cookies = cookies.concat(csrfRes.headers['set-cookie']);
+          cookies = cookies.concat(csrfRes.headers['set-cookie']);
         }
       } catch (e) {
         // CSRF endpoint might not exist on older versions, just ignore
       }
 
-      const csrfData = csrfToken ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
+      // Always pass cookies if retrieved, even if csrfToken is empty
+      const csrfData = cookies.length > 0 ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
 
       // 3x-ui almost universally uses /login. Trying others blindly triggers rate limits.
       let response = await tryLogin('/login', csrfData);
