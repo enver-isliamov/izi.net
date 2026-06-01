@@ -1446,6 +1446,11 @@ async function syncAllRoutingToAllPanels() {
     const results = [];
     for (const server of (activeServers || [])) {
       try {
+        if (server.xui_config_state && typeof server.xui_config_state === 'object' && server.xui_config_state.routing_sync_disabled) {
+          console.log(`[Sync Routing] Server ${server.name} has routing sync disabled. Skipping.`);
+          results.push({ server: server.name, success: true, skipped: true, message: 'Синхронизация отключена в настройках' });
+          continue;
+        }
         console.log(`Syncing routing and Xray Config to ${server.name}...`);
         const { instance: xuiInstance } = await getXuiForServer(server.id);
         const headers = { headers: { ...xuiInstance.authHeaders(), Cookie: xuiInstance['sessionCookie'] } };
@@ -2832,7 +2837,19 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
     }
 
     // Шаг 2: Проверка TCP-порт панели API (3x-ui)
-    const apiPort = server.api_port || 2053;
+    let apiPort = server.api_port || 2053;
+    try {
+      if (instance && instance.host) {
+        const urlOb = new URL(instance.host);
+        if (urlOb.port) {
+          apiPort = parseInt(urlOb.port);
+        } else if (urlOb.protocol === 'https:') {
+          apiPort = 443;
+        } else {
+          apiPort = 80;
+        }
+      }
+    } catch (_) {}
     const testIp = results.dns_ip || targetIp;
 
     if (!testIp) {
@@ -3246,7 +3263,7 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
 });
 
 app.post('/api/admin/servers', adminOnly, async (req, res) => {
-  const { name, ip, domain, api_port, username, password, location_code, is_default } = req.body;
+  const { name, ip, domain, api_port, username, password, location_code, is_default, xui_config_state } = req.body;
   
   try {
     const isDefault = !!is_default;
@@ -3267,7 +3284,8 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
       username, 
       password, 
       location_code: location_code || 'DE',
-      is_active: true
+      is_active: true,
+      xui_config_state: xui_config_state || {}
     };
 
     // Try adding is_default if available

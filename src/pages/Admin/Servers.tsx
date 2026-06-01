@@ -28,7 +28,7 @@ export function AdminServersList() {
   const [isDiagServerLoading, setIsDiagServerLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
+    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false
   });
 
   const fetchServers = async () => {
@@ -79,13 +79,23 @@ export function AdminServersList() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const serverConfigState = editingId 
+        ? { ...(servers.find(s => s.id === editingId)?.xui_config_state || {}), routing_sync_disabled: formData.routing_sync_disabled }
+        : { routing_sync_disabled: formData.routing_sync_disabled };
+
+      const submitPayload = {
+        ...formData,
+        xui_config_state: serverConfigState
+      };
+      delete (submitPayload as any).routing_sync_disabled;
+
       if (editingId) {
-        await axios.put(`/api/admin/servers/${editingId}`, formData, {
+        await axios.put(`/api/admin/servers/${editingId}`, submitPayload, {
           headers: { Authorization: `Bearer ${session?.access_token}` }
         });
         toast.success('Сервер обновлен (API)');
       } else {
-        await axios.post('/api/admin/servers', formData, {
+        await axios.post('/api/admin/servers', submitPayload, {
           headers: { Authorization: `Bearer ${session?.access_token}` }
         });
         toast.success('Сервер добавлен (API)');
@@ -93,7 +103,7 @@ export function AdminServersList() {
       
       setIsAdding(false);
       setEditingId(null);
-      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
+      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false });
       fetchServers();
     } catch (e: any) {
       const errorMsg = e.response?.data?.error || e.message || 'Ошибка сохранения сервера';
@@ -240,7 +250,8 @@ export function AdminServersList() {
       username: server.username || '',
       password: server.password || '',
       location_code: server.location_code || 'DE',
-      is_default: !!server.is_default
+      is_default: !!server.is_default,
+      routing_sync_disabled: !!server.xui_config_state?.routing_sync_disabled
     });
     setIsAdding(true);
   };
@@ -248,7 +259,7 @@ export function AdminServersList() {
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
-    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
+    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false });
   };
 
   const toggleServer = async (id: string, active: boolean) => {
@@ -440,17 +451,33 @@ export function AdminServersList() {
                 onChange={e => setFormData({...formData, password: e.target.value})}
                 required
               />
-              <div className="md:col-span-2 flex items-center gap-3 px-1">
-                <input
-                  type="checkbox"
-                  id="is_default"
-                  checked={formData.is_default}
-                  onChange={e => setFormData({...formData, is_default: e.target.checked})}
-                  className="w-4 h-4 accent-blue-600"
-                />
-                <label htmlFor="is_default" className="text-sm text-muted-foreground cursor-pointer">
-                  Сделать сервером по умолчанию для новых пользователей
-                </label>
+              <div className="md:col-span-2 flex flex-col gap-3.5 px-1 py-1">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="is_default"
+                    checked={formData.is_default}
+                    onChange={e => setFormData({...formData, is_default: e.target.checked})}
+                    className="w-4 h-4 accent-blue-600"
+                  />
+                  <label htmlFor="is_default" className="text-sm text-muted-foreground cursor-pointer">
+                    Сделать сервером по умолчанию для новых пользователей
+                  </label>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="routing_sync_disabled"
+                    checked={formData.routing_sync_disabled}
+                    onChange={e => setFormData({...formData, routing_sync_disabled: e.target.checked})}
+                    className="w-4 h-4 accent-red-600 mt-1"
+                  />
+                  <label htmlFor="routing_sync_disabled" className="text-sm text-muted-foreground cursor-pointer flex flex-col leading-tight gap-1">
+                    <span>Исключить из автоматической синхронизации маршрутов Xray</span>
+                    <span className="text-[10px] text-red-400 select-none">Рекомендуется для Bare-metal серверов без Docker (например, Amster), чтобы не перезаписывать их кастомные outbound-правила и встроенное DNS/проксирование.</span>
+                  </label>
+                </div>
               </div>
               <div className="md:col-span-2 flex gap-2">
                 <button type="submit" className="px-6 py-2 bg-blue-600 rounded-xl text-sm font-medium">
