@@ -207,12 +207,24 @@ export function AdminServersList() {
         setDiagLogs(data.logs || []);
         setDiagResultsObj(data.results || null);
       } else {
-        setDiagLogs(prev => [...prev, '❌ Сбой диагностики.', `Ошибка: ${data.message || 'Неизвестная ошибка'}`]);
+        if (data.logs && data.logs.length > 0) {
+          setDiagLogs(data.logs);
+        } else {
+          setDiagLogs(prev => [...prev, '❌ Сбой диагностики.', `Ошибка: ${data.message || 'Неизвестная ошибка'}`]);
+        }
+        setDiagResultsObj(data.results || null);
       }
     } catch (e: any) {
       console.error('Diagnosis request error:', e);
-      const errMsg = e.response?.data?.error || e.message || 'Не удалось связаться с сервером';
-      setDiagLogs(prev => [...prev, `❌ Критическая ошибка: ${errMsg}`]);
+      if (e.response?.data?.logs && e.response.data.logs.length > 0) {
+        setDiagLogs(e.response.data.logs);
+        if (e.response.data.results) {
+          setDiagResultsObj(e.response.data.results);
+        }
+      } else {
+        const errMsg = e.response?.data?.error || e.message || 'Не удалось связаться с сервером';
+        setDiagLogs(prev => [...prev, `❌ Критическая ошибка: ${errMsg}`]);
+      }
     } finally {
       setIsDiagServerLoading(false);
     }

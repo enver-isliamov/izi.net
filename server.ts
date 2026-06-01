@@ -15,6 +15,8 @@ import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import { exec } from 'child_process';
 import fs from 'fs';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { Telegraf, Context } from 'telegraf';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
@@ -231,7 +233,7 @@ class XUIService {
         if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
           const originalHost = host;
           const port = parsedUrl.port || '2053';
-          const isDocker = require('fs').existsSync('/.dockerenv');
+          const isDocker = fs.existsSync('/.dockerenv');
           if (isDocker) {
             host = `http://x3-ui:2053${parsedUrl.pathname}`;
             console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
@@ -1411,12 +1413,19 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
 async function syncAllRoutingToAllPanels() {
   console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray Config to all XUI servers...');
   try {
-    // 1. Ensure default rules exist
-    const { data: existing, error: checkErr } = await supabase.from('vpn_routing_rules').select('*').limit(1);
-    if (!checkErr && (!existing || existing.length === 0)) {
-       console.log('📦 Setup out-of-the-box routing rules...');
+    // 1. Ensure default rules exist by name check
+    const { data: geminiRule, error: checkErr1 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Gemini / Google Services').maybeSingle();
+    if (!checkErr1 && !geminiRule) {
+       console.log('📦 Setup default Gemini / Google Services routing rule...');
        await supabase.from('vpn_routing_rules').insert([
-         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic', 'domain:aistudio.google.com', 'domain:gemini.google.com'], outbound_tag: 'ipv6-out', is_active: true },
+         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic', 'domain:aistudio.google.com', 'domain:gemini.google.com', 'domain:makersuite.google.com'], outbound_tag: 'ipv6-out', is_active: true }
+       ]);
+    }
+
+    const { data: ruRule, error: checkErr2 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Russia Bypass (GeoIP + GeoSite)').maybeSingle();
+    if (!checkErr2 && !ruRule) {
+       console.log('📦 Setup default Russia Bypass routing rule...');
+       await supabase.from('vpn_routing_rules').insert([
          { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
        ]);
     }
@@ -2750,7 +2759,6 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
           streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
-        const axios = require('axios');
         await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
            headers: { ...instance.authHeaders(), Cookie: instance['sessionCookie'], 'Content-Type': 'application/json' }
         });
@@ -2808,7 +2816,6 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
     } else {
       logs.push(`[DNS] Разрешение сетевого адреса "${dnsHost}"...`);
       try {
-        const dns = require('dns').promises;
         const startDns = Date.now();
         const addresses = await dns.resolve4(dnsHost).catch(async () => {
           const lookup = await dns.lookup(dnsHost);
@@ -2832,7 +2839,6 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
       logs.push(`❌ Пропуск проверки портов: IP-адрес сервера не определен.`);
     } else {
       logs.push(`[Port API] Тестирование доступности API-порта ${apiPort} на IP ${testIp}...`);
-      const net = require('net');
       const startPortConn = Date.now();
       
       const checkPort = (port: number, host: string, timeoutMs = 4000): Promise<{open: boolean, elapsed: number, err?: string}> => {
@@ -2942,8 +2948,9 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
 
     res.json({ success: true, logs, results });
   } catch (globalErr: any) {
+    console.error('[Diagnose Exception Raw]:', globalErr);
     logs.push(`❌ Критическая ошибка выполнения диагностики: ${globalErr.message}`);
-    res.status(500).json({ success: false, logs, results });
+    res.json({ success: true, logs, results });
   }
 });
 
