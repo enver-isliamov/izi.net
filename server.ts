@@ -1441,12 +1441,33 @@ async function syncAllRoutingToAllPanels() {
        }
     }
 
+    const safeRuDomains = [
+      'domain:ru',
+      'domain:su',
+      'domain:xn--p1ai',
+      'domain:vk.com',
+      'domain:vk.ru',
+      'domain:yandex.ru',
+      'domain:mail.ru',
+      'domain:gosuslugi.ru',
+      'domain:sberbank.ru',
+      'domain:tbank.ru',
+      'domain:tinkoff.ru'
+    ];
+
     const { data: ruRule, error: checkErr2 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Russia Bypass (GeoIP + GeoSite)').maybeSingle();
-    if (!checkErr2 && !ruRule) {
-       console.log('📦 Setup default Russia Bypass routing rule...');
-       await supabase.from('vpn_routing_rules').insert([
-         { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
-       ]);
+    if (!checkErr2) {
+       if (!ruRule) {
+          console.log('📦 Setup default Russia Bypass routing rule...');
+          await supabase.from('vpn_routing_rules').insert([
+            { name: 'Russia Bypass (GeoIP + GeoSite)', domains: safeRuDomains, ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
+          ]);
+       } else if (ruRule.domains && ruRule.domains.includes('geosite:ru')) {
+          console.log('🔄 Cleaning up Russia Bypass rule in DB (replacing geosite:ru with safe domain matchers)...');
+          await supabase.from('vpn_routing_rules').update({
+            domains: safeRuDomains
+          }).eq('id', ruRule.id);
+       }
     }
 
     const { data: rules, error: rulesErr } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
@@ -1455,8 +1476,21 @@ async function syncAllRoutingToAllPanels() {
     const newRules = (rules || []).map(r => {
       const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
       if (r.domains && r.domains.length > 0) {
-        // Safe filter: remove any geosite rules that crash old geosite.dat databases
-        xrayRule.domain = r.domains.filter(d => d !== 'geosite:gemini' && d !== 'geosite:anthropic');
+        const resolvedDomains: string[] = [];
+        for (const d of r.domains) {
+          if (d === 'geosite:gemini' || d === 'geosite:anthropic') {
+            continue; // Skip unstable domains already covered
+          }
+          if (d === 'geosite:ru') {
+            // Unpack geosite:ru to safe string matchers
+            resolvedDomains.push('domain:ru', 'domain:su', 'domain:xn--p1ai');
+          } else {
+            resolvedDomains.push(d);
+          }
+        }
+        if (resolvedDomains.length > 0) {
+          xrayRule.domain = resolvedDomains;
+        }
       }
       if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
       return xrayRule; 
