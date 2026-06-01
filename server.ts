@@ -901,6 +901,33 @@ class XUIService {
     }
   }
 
+  async updateInbound(inboundId: number, inboundObj: any): Promise<boolean> {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inboundId}`;
+      const payload = {
+        id: inboundObj.id,
+        port: inboundObj.port,
+        protocol: inboundObj.protocol,
+        settings: inboundObj.settings,
+        streamSettings: inboundObj.streamSettings,
+        sniffing: inboundObj.sniffing,
+        remark: inboundObj.remark,
+        enable: inboundObj.enable
+      };
+      const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/json', ...this.authHeaders() }));
+      return response.data?.success || false;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateInbound(inboundId, inboundObj);
+      }
+      console.error(`❌ 3x-ui updateInbound error for ${inboundId}:`, e.message);
+      return false;
+    }
+  }
+
   generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
     // BUG-09: Do not generate broken links. Throw error to force using getInboundLink which has Reality params.
     throw new Error(`[XUI] Не удалось получить реальный конфиг с Reality для ${email}. Проверьте соединение с сервером.`);
@@ -1640,9 +1667,104 @@ async function syncAllRoutingToAllPanels() {
   }
 }
 
+async function runGlobalSniMigration() {
+  console.log('🔄 [System] Starting active servers Reality SNI check & clean-up...');
+  try {
+    const { data: servers, error: dbErr } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
+    if (dbErr || !servers) {
+      console.error('❌ Sni Migration failed to select servers:', dbErr);
+      return;
+    }
+
+    for (const server of servers) {
+      console.log(`🔍 [System-Migrate] Processing server: ${server.name}...`);
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const inbounds = await instance.getInbounds();
+        if (!inbounds || inbounds.length === 0) continue;
+
+        let serverUpdated = false;
+        for (const inbound of inbounds) {
+          if (inbound.protocol !== 'vless') continue;
+          let streamSettings: any = {};
+          try {
+            streamSettings = typeof inbound.streamSettings === 'string' 
+              ? JSON.parse(inbound.streamSettings || '{}')
+              : inbound.streamSettings;
+          } catch (e) {
+            continue;
+          }
+
+          if (streamSettings.security === 'reality') {
+            const reality = streamSettings.realitySettings || {};
+            const serverNames = reality.serverNames || [];
+            const hasGoogle = serverNames.some((n: string) => n.toLowerCase().includes('google.com'));
+            if (hasGoogle || serverNames.length === 0) {
+              console.log(`⚠️ [System-Migrate] Blocked SNI found at inbound id ${inbound.id} on server "${server.name}". Cleaning SNI...`);
+              reality.serverNames = ["www.microsoft.com", "microsoft.com"];
+              if (reality.target && reality.target.toLowerCase().includes('google.com')) {
+                reality.target = "www.microsoft.com:443";
+              }
+              if (reality.dest && reality.dest.toLowerCase().includes('google.com')) {
+                reality.dest = "www.microsoft.com:443";
+              }
+              streamSettings.realitySettings = reality;
+              inbound.streamSettings = JSON.stringify(streamSettings);
+              
+              const works = await instance.updateInbound(inbound.id, inbound);
+              if (works) {
+                console.log(`✅ [System-Migrate] Inbound ID ${inbound.id} updated to safe SNI www.microsoft.com.`);
+                serverUpdated = true;
+              } else {
+                console.warn(`❌ [System-Migrate] Failed to update inbound ID ${inbound.id} on panel.`);
+              }
+            }
+          }
+        }
+
+        if (serverUpdated) {
+          try {
+            await instance.restartPanel();
+            console.log(`✅ [System-Migrate] Restarted panel on "${server.name}" to apply safe SNI.`);
+          } catch (rErr) {}
+        }
+      } catch (err: any) {
+        console.error(`❌ [System-Migrate] Error during server ${server.name} SNI processing:`, err.message);
+      }
+    }
+
+    // Database subscriptions migration
+    const { data: subs, error: subsErr } = await supabase.from('subscriptions').select('id, v2ray_config');
+    if (!subsErr && subs) {
+      let updatedCount = 0;
+      for (const sub of subs) {
+        if (!sub.v2ray_config) continue;
+        let configStr = sub.v2ray_config;
+        if (configStr.includes('sni=google.com') || configStr.includes('sni=dl.google.com')) {
+          configStr = configStr.replace(/sni=google\.com/g, 'sni=www.microsoft.com');
+          configStr = configStr.replace(/sni=dl\.google\.com/g, 'sni=www.microsoft.com');
+          
+          const { error: updErr } = await supabase.from('subscriptions').update({
+            v2ray_config: configStr,
+            updated_at: new Date().toISOString()
+          }).eq('id', sub.id);
+
+          if (!updErr) updatedCount++;
+        }
+      }
+      if (updatedCount > 0) {
+        console.log(`✅ [System-Migrate] Migrated ${updatedCount} subscriptions v2ray_config records to use www.microsoft.com.`);
+      }
+    }
+  } catch (error: any) {
+    console.error('❌ [System-Migrate] Global SNI migration failed:', error.message);
+  }
+}
+
 app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
   try {
     const results = await syncAllRoutingToAllPanels();
+    await runGlobalSniMigration().catch(err => console.error("Global SNI Migration background error:", err));
     res.json({ success: true, results });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -5527,7 +5649,9 @@ async function startServer() {
   }
 
   // Ensure routing and out-of-the-box system config is booted and synced
-  syncAllRoutingToAllPanels().catch(err => console.error("System Boot Sync Error:", err));
+  syncAllRoutingToAllPanels()
+    .then(() => runGlobalSniMigration())
+    .catch(err => console.error("System Boot Sync Error:", err));
 
   setupRealtimeListener();
   syncTrafficStats();
