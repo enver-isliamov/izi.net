@@ -20,6 +20,13 @@ export function AdminServersList() {
   const [healthData, setHealthData] = useState<Record<string, { online: boolean, error?: string }>>({});
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
+  
+  // Detailed diagnostic modal state variables
+  const [diagServerId, setDiagServerId] = useState<string | null>(null);
+  const [diagLogs, setDiagLogs] = useState<string[]>([]);
+  const [diagResultsObj, setDiagResultsObj] = useState<any | null>(null);
+  const [isDiagServerLoading, setIsDiagServerLoading] = useState(false);
+
   const [formData, setFormData] = useState({
     name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
   });
@@ -179,6 +186,35 @@ export function AdminServersList() {
       toast.error('Ошибка диагностики: ' + (e.response?.data?.error || e.message), { id: 'diag' });
     } finally {
       setIsDiagnosing(false);
+    }
+  };
+
+  const diagnoseSingleServer = async (id: string | number) => {
+    try {
+      setIsDiagServerLoading(true);
+      const serverObj = servers.find(s => s.id === id);
+      const serverName = serverObj?.name || 'Сервер';
+      
+      setDiagServerId(id.toString());
+      setDiagLogs([`[Соединение] Инициализация процесса диагностики для "${serverName}"...`]);
+      setDiagResultsObj(null);
+      
+      const { data } = await axios.post(`/api/admin/servers/${id}/diagnose`, {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      
+      if (data.success) {
+        setDiagLogs(data.logs || []);
+        setDiagResultsObj(data.results || null);
+      } else {
+        setDiagLogs(prev => [...prev, '❌ Сбой диагностики.', `Ошибка: ${data.message || 'Неизвестная ошибка'}`]);
+      }
+    } catch (e: any) {
+      console.error('Diagnosis request error:', e);
+      const errMsg = e.response?.data?.error || e.message || 'Не удалось связаться с сервером';
+      setDiagLogs(prev => [...prev, `❌ Критическая ошибка: ${errMsg}`]);
+    } finally {
+      setIsDiagServerLoading(false);
     }
   };
 
@@ -511,6 +547,148 @@ export function AdminServersList() {
             </motion.div>
           </motion.div>
         )}
+
+        {diagServerId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-[#0f0f0f] border border-white/10 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl overflow-hidden text-left"
+            >
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                  <Activity size={18} className="text-blue-500 animate-pulse" />
+                  <h3 className="font-semibold text-white text-base">
+                    Трассировка и Диагностика: {servers.find(s => s.id.toString() === diagServerId)?.name || 'Сервер'}
+                  </h3>
+                </div>
+                <button 
+                  onClick={() => setDiagServerId(null)}
+                  className="text-[#666] hover:text-white transition-colors p-1"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              {/* Console terminal logs */}
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground font-medium mb-1">События диагностики:</div>
+                <div className="bg-black/40 border border-white/5 font-mono text-[11px] p-4 rounded-xl min-h-[160px] max-h-[220px] overflow-y-auto space-y-1 scrollbar-thin text-green-400 select-text leading-relaxed">
+                  {diagLogs.map((log, index) => {
+                    const isError = log.includes('❌') || log.includes('Ошибка') || log.includes('Сбой');
+                    const isWarning = log.includes('⚠️');
+                    const isSuccess = log.includes('✅');
+                    return (
+                      <div 
+                        key={index} 
+                        className={
+                          isError ? 'text-red-400' :
+                          isWarning ? 'text-yellow-400' :
+                          isSuccess ? 'text-green-400' : 'text-gray-400 font-light'
+                        }
+                      >
+                        {log}
+                      </div>
+                    );
+                  })}
+                  {isDiagServerLoading && (
+                    <div className="text-blue-400 flex items-center gap-1.5 animate-pulse mt-1">
+                      <RefreshCw size={12} className="animate-spin" /> Рассчитываем сетевую задержку и трассируем порты...
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Diagnostic checklist results */}
+              {diagResultsObj && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <div className="bg-white/5 p-3 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">DNS Резолв</span>
+                    {diagResultsObj.dns_resolved ? (
+                      <CheckCircle size={18} className="text-green-500" />
+                    ) : (
+                      <XCircle size={18} className="text-red-500" />
+                    )}
+                    <span className="text-[9px] text-muted-foreground mt-1 truncate max-w-full font-mono">{diagResultsObj.dns_ip || 'n/a'}</span>
+                  </div>
+
+                  <div className="bg-white/5 p-3 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Порт Панели</span>
+                    {diagResultsObj.port_open ? (
+                      <CheckCircle size={18} className="text-green-500" />
+                    ) : (
+                      <XCircle size={18} className="text-red-500" />
+                    )}
+                    <span className="text-[9px] text-muted-foreground mt-1 font-mono">{diagResultsObj.latency_ms > 0 ? `${diagResultsObj.latency_ms}мс` : 'n/a'}</span>
+                  </div>
+
+                  <div className="bg-white/5 p-3 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Апи Сессия</span>
+                    {diagResultsObj.login_successful ? (
+                      <CheckCircle size={18} className="text-green-500" />
+                    ) : (
+                      <XCircle size={18} className="text-red-500" />
+                    )}
+                    <span className="text-[9px] text-muted-foreground mt-1 font-mono">{diagResultsObj.login_successful ? 'ОК' : 'Ошибка'}</span>
+                  </div>
+
+                  <div className="bg-white/5 p-3 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">VLESS Порт</span>
+                    {diagResultsObj.vless_port_open ? (
+                      <CheckCircle size={18} className="text-green-500" />
+                    ) : (
+                      <AlertTriangle size={18} className="text-yellow-500" />
+                    )}
+                    <span className="text-[9px] text-muted-foreground mt-1 font-mono">{diagResultsObj.vless_port_open ? 'Открыт' : 'Закрыт'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Actionable recommendations / advice section */}
+              {diagResultsObj?.advice?.length > 0 && (
+                <div className="space-y-1.5 pt-1 border-t border-white/5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
+                  <div className="text-xs text-blue-400 font-semibold flex items-center gap-1.5">
+                    <AlertTriangle size={14} /> Рекомендации и решения проблем:
+                  </div>
+                  <div className="space-y-2">
+                    {diagResultsObj.advice.map((item: string, i: number) => {
+                      const isInfo = item.includes('💡');
+                      return (
+                        <div 
+                          key={i} 
+                          className={`p-2.5 rounded-xl text-[11px] leading-relaxed select-text text-left ${
+                            isInfo 
+                              ? 'bg-blue-500/5 text-blue-300 border border-blue-500/10' 
+                              : 'bg-red-500/5 text-red-300 border border-red-500/10'
+                          }`}
+                        >
+                          <p className="whitespace-pre-line">{item}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                <span className="text-[10px] text-muted-foreground font-mono">izinet-diagnostics v1.1</span>
+                <button
+                  type="button"
+                  onClick={() => setDiagServerId(null)}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs text-white transition-all font-medium"
+                >
+                  Закрыть диагностику
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
@@ -591,6 +769,14 @@ export function AdminServersList() {
                 title="Проверить соединение"
               >
                 {isChecking === server.id ? <RefreshCw className="animate-spin" size={18} /> : <Zap size={18} />}
+              </button>
+              <button 
+                onClick={() => diagnoseSingleServer(server.id)}
+                disabled={isDiagServerLoading && diagServerId === server.id.toString()}
+                className="p-2 md:p-2.5 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 rounded-xl transition-colors disabled:opacity-50"
+                title="Подробная трассировка и диагностика"
+              >
+                {isDiagServerLoading && diagServerId === server.id.toString() ? <RefreshCw className="animate-spin" size={18} /> : <Activity size={18} />}
               </button>
               <button
                 onClick={() => startEdit(server)}
