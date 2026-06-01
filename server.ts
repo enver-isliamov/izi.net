@@ -618,7 +618,7 @@ class XUIService {
       // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
       const rs = realitySettings.settings || realitySettings;
       
-      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIPOrEmpty ? 'google.com' : hostName);
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIPOrEmpty ? 'www.microsoft.com' : hostName);
       const pbk = rs.publicKey || realitySettings.publicKey || '';
       
       if (!pbk || pbk.includes('m_G-oZ_9a6')) {
