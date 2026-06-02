@@ -5215,14 +5215,23 @@ async function syncUserTraffic(userId: string) {
   const trafficUsedMb = Math.round(totalUsedBytes / (1024 * 1024));
   const trafficLimitMb = maxLimitBytes > 0 ? Math.round(maxLimitBytes / (1024 * 1024)) : sub.traffic_limit_mb || 102400;
 
+  const isOverLimit = trafficLimitMb > 0 && trafficUsedMb >= trafficLimitMb;
+  
+  const updateData: any = { 
+    traffic_used_mb: trafficUsedMb,
+    traffic_limit_mb: trafficLimitMb,
+    v2ray_config: JSON.stringify(devices)
+  };
+
+  if (isOverLimit) {
+    updateData.status = 'limited';
+    console.log(`[TrafficSync] Sub ${sub.id} automatically marked as limited. ${trafficUsedMb}MB used of ${trafficLimitMb}MB.`);
+  }
+
   // 4. Update the subscription in DB, saving back the updated devices JSON
   const { data, error } = await supabase
     .from('subscriptions')
-    .update({ 
-      traffic_used_mb: trafficUsedMb,
-      traffic_limit_mb: trafficLimitMb,
-      v2ray_config: JSON.stringify(devices)
-    })
+    .update(updateData)
     .eq('id', sub.id)
     .select()
     .maybeSingle();
