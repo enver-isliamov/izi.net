@@ -206,6 +206,17 @@ def main():
     web_port = "2053"
     web_base_path = "/"
     try:
+        # Ensure "externalTraffic" webhook spam is turned OFF to prevent I/O and memory exhaustion
+        cursor.execute("SELECT key, value FROM settings WHERE key IN ('externalTraffic', 'externalTrafficInformURI');")
+        rows = cursor.fetchall()
+        traffic_settings = {row[0]: row[1] for row in rows}
+        if traffic_settings.get("externalTraffic") != "false":
+            print("⚠️ 'externalTraffic' (Информация о внешнем трафике) is enabled or missing. Disabling it to prevent endless spam logs and RAM leaks...")
+            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('externalTraffic', 'false');")
+            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('externalTrafficInformURI', '');")
+            conn.commit()
+            print("✅ Successfully disabled 'externalTraffic' webhook spam in settings table!")
+
         cursor.execute("SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath');")
         rows = cursor.fetchall()
         settings = {row[0]: row[1] for row in rows}
