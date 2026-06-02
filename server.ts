@@ -760,13 +760,11 @@ class XUIService {
 
       if (response.data.success) {
         console.log(`✅ Client ${email} updated in 3x-ui [${this.host}] with expiry ${expiryTime}`);
-        return true;
+        return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
       } else {
         const errorMsg = response.data.msg || 'Unknown error';
         console.warn(`⚠️ Failed to update client ${email} in 3x-ui: ${errorMsg}`);
-        // If it failed with "empty client ID" it might be because the ID should be in a different field or structure
-        // but given our investigation, usually it means the UUID didn't match anything.
-        return false;
+        return '';
       }
     } catch (error: any) {
       if (error.response?.status === 401) {
@@ -774,13 +772,8 @@ class XUIService {
         await this.login(true);
         return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
-      if (error.response?.status === 401) {
-        this.sessionCookie = null;
-        await this.login(true);
-        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
-      }
       console.error(`❌ 3x-ui updateClient total failure for ${email}:`, error.message);
-      return false;
+      return '';
     }
   }
 
@@ -808,6 +801,26 @@ class XUIService {
       }
       console.error(`❌ 3x-ui getClientTraffic error for ${email}:`, error.message);
       return null;
+    }
+  }
+
+  async resetClientTraffic(email: string, inboundId: number) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      // 3x-ui API for resetting traffic: POST /panel/api/inbounds/${inboundId}/resetClientTraffic/${email}
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${email}`;
+      const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      return response.data.success;
+    } catch(error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login();
+        const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${email}`;
+        await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+        return true;
+      }
+      console.error(`❌ 3x-ui resetClientTraffic error for ${email}:`, error.message);
+      return false;
     }
   }
 
@@ -1607,15 +1620,12 @@ async function syncAllRoutingToAllPanels() {
           });
         }
 
-        // --- AUTOMATIC REPAIR FOR CORRUPTED DNS CAUSED BY SYS-37/39 ---
-        // If the Xray config contains the hardcoded broken DoH array (which crashes on CIS networks), 
-        // safely revert it to 'localhost' to let the OS restore normal VPN traffic functionality.
-        if (xrayConfig.dns && Array.isArray(xrayConfig.dns.servers)) {
-          const hasBadDoH = xrayConfig.dns.servers.includes("https://dns.adguard-dns.com/dns-query") || xrayConfig.dns.servers.includes("https://dns.yandex.ru/dns-query");
-          if (hasBadDoH) {
-            console.log(`⚠️ [System-Migrate] Found corrupted/blocked DoH DNS array on "${server.name}". Reverting to safe system "localhost"...`);
-            xrayConfig.dns.servers = ["localhost"];
-          }
+        // --- AUTOMATIC REPAIR FOR CORRUPTED DNS ---
+        // Forcefully delete custom DNS arrays so Xray relies on Docker's native /etc/resolv.conf
+        // This is the most stable and compatible method.
+        if (xrayConfig.dns) {
+          console.log(`⚠️ [System-Migrate] Deleting custom DNS array on "${server.name}" to use stable Docker resolving...`);
+          delete xrayConfig.dns;
         }
 
         // 2. Modify Routing
@@ -4715,6 +4725,11 @@ app.post('/api/subscription/buy', async (req, res) => {
         try {
           console.log(`♻️ Syncing expiration for device ${tDevice.email} on server [${server.name}]`);
           const { instance: xuiInstance } = await getXuiForServer(server.id);
+          // We must reset traffic in XUI so the limited user is unblocked
+          try {
+            await xuiInstance.resetClientTraffic(tDevice.email, inboundId);
+          } catch(e) {}
+          
           const rawConfig = await xuiInstance.updateClient(tDevice.email, tDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
           
           if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
@@ -4754,6 +4769,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           device_limit: lastSub.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit,
           v2ray_config: finalConfigJson,
           server_id: serverId,
+          traffic_used_mb: 0,
           updated_at: new Date().toISOString()
         })
         .eq('id', lastSub.id)
