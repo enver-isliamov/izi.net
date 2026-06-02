@@ -17,12 +17,21 @@ sudo apt-get update && sudo apt-get install -y curl git jq cron sqlite3
 
 # Настройка авто-синхронизации времени через HTTP Google Date (особенно важно, если UDP NTP 123 закрыт провайдером)
 echo "⏰ Настройка синхронизации времени..."
+sudo timedatectl set-ntp true || true
 sudo systemctl enable cron || true
 sudo systemctl start cron || true
-# Выполняем первичную синхронизацию
-sudo date -s "$(curl -sI https://www.google.com | grep -i '^date:' | cut -d' ' -f2-)" || true
-# Записываем задачу в cron, чтобы время синхронизировалось каждые 15 минут
-(crontab -l 2>/dev/null | grep -v "date -s" ; echo "*/15 * * * * sudo date -s \"\$(curl -sI https://www.google.com | grep -i '^date:' | cut -d' ' -f2-)\" > /dev/null 2>&1") | crontab -
+
+# Выравниваем локальное время системы через HTTP Date (обязательно вырезая \r из заголовков во избежание "invalid date" ошибок)
+HTTP_DATE=$(curl -sI --max-time 5 https://www.google.com | grep -i '^date:' | cut -d' ' -f2- | tr -d '\r')
+if [ -n "$HTTP_DATE" ]; then
+    echo "Синхронизация через Google HTTP: $HTTP_DATE"
+    sudo date -s "$HTTP_DATE" || true
+else
+    echo "⚠️ Не удалось получить время от Google HTTP, используем системное"
+fi
+
+# Вносим в крон циклическую проверку (удаляем застрявшие \r для стабильной работы команды date -s)
+(crontab -l 2>/dev/null | grep -v "date -s" ; echo "*/15 * * * * [ -n \"\$(curl -sI --max-time 5 https://www.google.com | grep -i '^date:' | cut -d' ' -f2- | tr -d '\\r')\" ] && sudo date -s \"\$(curl -sI --max-time 5 https://www.google.com | grep -i '^date:' | cut -d' ' -f2- | tr -d '\\r')\" > /dev/null 2>&1") | crontab -
 echo "✅ Задача авто-синхронизации времени через HTTP внесена в cron!"
 
 # 2. Установка Docker, если он не установлен

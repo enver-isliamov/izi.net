@@ -1614,13 +1614,13 @@ async function syncAllRoutingToAllPanels() {
           xrayConfig.dns = {};
         }
         xrayConfig.dns.servers = [
-          "localhost",                             // Local DNS (First priority: queries local AdGuard Home/DNS server if installed on the node)
           "https://dns.adguard-dns.com/dns-query", // Official secure encrypted AdGuard DNS over HTTPS (Premium ad & tracker filtering out of the box)
           "https://dns.yandex.ru/dns-query",       // Yandex secure encrypted DNS over HTTPS (100% unblocked, extremely fast in CIS)
           "94.140.14.14",                          // AdGuard IPv4 Public DNS fallback
           "77.88.8.8",                             // Yandex DNS IPv4 (UDP) fallback
           "1.1.1.1",                               // Cloudflare fallback
-          "8.8.8.8"                                // Google fallback
+          "8.8.8.8",                               // Google fallback
+          "localhost"                              // Local System DNS fallback (MANDATORY for DoH bootstrapping and stability)
         ];
         
         // 2. Modify Routing
@@ -1665,6 +1665,17 @@ async function syncAllRoutingToAllPanels() {
 
         xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
         
+        // --- SAFEGUARD: Identify if config actually changed before pushing! ---
+        // Avoid blind updates which trigger VPN connection drops and panel restarts.
+        const originalXrayStr = JSON.stringify(JSON.parse(parsedObj.xraySetting || '{}'));
+        const newXrayStr = JSON.stringify(xrayConfig);
+        
+        if (originalXrayStr === newXrayStr) {
+          console.log(`⚡ [System] Config on "${server.name}" is already up-to-date. Skipping update.`);
+          results.push({ server: server.name, success: true, unchanged: true });
+          continue;
+        }
+
         // 3. POST Back to Xray Update
         const updatePayload = new URLSearchParams();
         updatePayload.append("xraySetting", JSON.stringify(xrayConfig));
