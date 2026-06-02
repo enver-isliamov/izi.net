@@ -1624,8 +1624,10 @@ async function syncAllRoutingToAllPanels() {
         // Instead of deleting the DNS array (which might crash Xray parsing if domainStrategy needs it),
         // we forcefully set it to reliable public resolvers.
         if (xrayConfig.dns) {
-          console.log(`⚠️ [System-Migrate] Overwriting custom DNS array on "${server.name}" to use stable public resolvers...`);
-          xrayConfig.dns.servers = ["8.8.8.8", "1.1.1.1", "localhost"];
+          console.log(`⚠️ [System-Migrate] Overwriting custom DNS array on "${server.name}" to use stable resolvers...`);
+          // 127.0.0.11 is the Docker Embedded DNS resolver. 
+          // "localhost" causes "127.0.0.1:53 refused" because Docker DNS runs on .11, not .1.
+          xrayConfig.dns.servers = ["127.0.0.11", "8.8.8.8", "1.1.1.1"];
         }
 
         // 2. Modify Routing
@@ -1737,30 +1739,60 @@ async function runGlobalSniMigration() {
             continue;
           }
 
+          let settings: any = {};
+          try {
+            settings = typeof inbound.settings === 'string'
+              ? JSON.parse(inbound.settings || '{}')
+              : inbound.settings;
+          } catch (e) {
+          }
+
+          let settingsUpdated = false;
+          if (settings.fallbacks && Array.isArray(settings.fallbacks)) {
+             const originalLength = settings.fallbacks.length;
+             // Remove any default fallback (no name) that routes to docker.internal or internal network
+             settings.fallbacks = settings.fallbacks.filter((f: any) => {
+               if (!f.name && f.dest && (f.dest.includes('docker.internal') || f.dest.includes('127.0.0.1'))) {
+                 return false;
+               }
+               return true;
+             });
+             if (settings.fallbacks.length !== originalLength) {
+               inbound.settings = JSON.stringify(settings);
+               settingsUpdated = true;
+               console.log(`⚠️ [System-Migrate] Removed dangerous default catch-all fallback causing cert leak on server "${server.name}".`);
+             }
+          }
+
+          let streamUpdated = false;
           if (streamSettings.security === 'reality') {
             const reality = streamSettings.realitySettings || {};
             const serverNames = reality.serverNames || [];
             const hasGoogle = serverNames.some((n: string) => n.toLowerCase().includes('google.com'));
-            if (hasGoogle || serverNames.length === 0) {
-              console.log(`⚠️ [System-Migrate] Blocked SNI found at inbound id ${inbound.id} on server "${server.name}". Cleaning SNI...`);
+            
+            // Check if SNI is wrong OR if dest/target points to our internal network (which destroys Reality camouflage)
+            const hasInternalLeak = (reality.dest && reality.dest.includes('docker.internal')) || (reality.target && reality.target.includes('docker.internal'));
+
+            if (hasGoogle || serverNames.length === 0 || hasInternalLeak) {
+              console.log(`⚠️ [System-Migrate] Flawed SNI or Internal Leak found at inbound id ${inbound.id} on server "${server.name}". Cleaning REALITY camouflage...`);
               reality.serverNames = ["www.microsoft.com", "microsoft.com"];
-              if (reality.target && reality.target.toLowerCase().includes('google.com')) {
-                reality.target = "www.microsoft.com:443";
-              }
-              if (reality.dest && reality.dest.toLowerCase().includes('google.com')) {
-                reality.dest = "www.microsoft.com:443";
-              }
+              reality.target = "www.microsoft.com:443";
+              reality.dest = "www.microsoft.com:443";
+              
               streamSettings.realitySettings = reality;
               inbound.streamSettings = JSON.stringify(streamSettings);
-              
+              streamUpdated = true;
+            }
+          }
+
+          if (settingsUpdated || streamUpdated) {
               const works = await instance.updateInbound(inbound.id, inbound);
               if (works) {
-                console.log(`✅ [System-Migrate] Inbound ID ${inbound.id} updated to safe SNI www.microsoft.com.`);
+                console.log(`✅ [System-Migrate] Inbound ID ${inbound.id} updated to safe configuration.`);
                 serverUpdated = true;
               } else {
                 console.warn(`❌ [System-Migrate] Failed to update inbound ID ${inbound.id} on panel.`);
               }
-            }
           }
         }
 
@@ -3055,8 +3087,8 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
         const payload = {
           up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
           listen: "", port: 443, protocol: "vless",
-          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
-          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
+          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0}]}),
+          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"www.microsoft.com:443", dest:"www.microsoft.com:443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
         await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
