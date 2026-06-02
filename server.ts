@@ -807,19 +807,19 @@ class XUIService {
   async resetClientTraffic(email: string, inboundId: number) {
     if (!this.sessionCookie) await this.login();
     try {
-      // 3x-ui API for resetting traffic: POST /panel/api/inbounds/${inboundId}/resetClientTraffic/${email}
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${email}`;
+      // 3x-ui API for resetting traffic: POST /panel/api/inbounds/${inboundId}/resetClientTraffics/${email}
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffics/${email}`;
       const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       return response.data.success;
     } catch(error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
         await this.login();
-        const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${email}`;
+        const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffics/${email}`;
         await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
         return true;
       }
-      console.error(`❌ 3x-ui resetClientTraffic error for ${email}:`, error.message);
+      console.error(`❌ 3x-ui resetClientTraffics error for ${email}:`, error.message);
       return false;
     }
   }
@@ -1621,11 +1621,11 @@ async function syncAllRoutingToAllPanels() {
         }
 
         // --- AUTOMATIC REPAIR FOR CORRUPTED DNS ---
-        // Forcefully delete custom DNS arrays so Xray relies on Docker's native /etc/resolv.conf
-        // This is the most stable and compatible method.
+        // Instead of deleting the DNS array (which might crash Xray parsing if domainStrategy needs it),
+        // we forcefully set it to reliable public resolvers.
         if (xrayConfig.dns) {
-          console.log(`⚠️ [System-Migrate] Deleting custom DNS array on "${server.name}" to use stable Docker resolving...`);
-          delete xrayConfig.dns;
+          console.log(`⚠️ [System-Migrate] Overwriting custom DNS array on "${server.name}" to use stable public resolvers...`);
+          xrayConfig.dns.servers = ["8.8.8.8", "1.1.1.1", "localhost"];
         }
 
         // 2. Modify Routing
@@ -4767,6 +4767,7 @@ app.post('/api/subscription/buy', async (req, res) => {
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
           device_limit: lastSub.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit,
+          traffic_limit_mb: trafficLimitMb,
           v2ray_config: finalConfigJson,
           server_id: serverId,
           traffic_used_mb: 0,
