@@ -1606,6 +1606,21 @@ async function syncAllRoutingToAllPanels() {
             settings: {}
           });
         }
+
+        // --- OPTIMIZE XRAY DNS TO AVOID TIMEOUT / I/O TIMEOUT HANGS ---
+        // Highly resilient, unblocked DNS over HTTPS (DoH) and local DNS configurations
+        // that bypass any regional port 53 UDP blockages (e.g. in Crimea/RF).
+        if (typeof xrayConfig.dns !== 'object' || xrayConfig.dns === null) {
+          xrayConfig.dns = {};
+        }
+        xrayConfig.dns.servers = [
+          "https://dns.yandex.ru/dns-query",       // Yandex secure encrypted DNS over HTTPS (100% unblocked, extremely fast in CIS)
+          "https://common.secureroutes.net/dns-query", // Secure fallback DoH
+          "77.88.8.8",                             // Yandex DNS IPv4 (UDP) fallback
+          "localhost",                             // Local systemd-resolved DNS
+          "1.1.1.1",                               // Cloudflare fallback
+          "8.8.8.8"                                // Google fallback
+        ];
         
         // 2. Modify Routing
         if (!xrayConfig.routing) xrayConfig.routing = {};
