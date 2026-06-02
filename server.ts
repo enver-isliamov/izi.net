@@ -1607,22 +1607,17 @@ async function syncAllRoutingToAllPanels() {
           });
         }
 
-        // --- OPTIMIZE XRAY DNS TO AVOID TIMEOUT / I/O TIMEOUT HANGS ---
-        // Highly resilient, unblocked DNS over HTTPS (DoH) and local DNS configurations
-        // featuring native support for local AdGuard Home and official AdGuard Ad-Blocking DNS.
-        if (typeof xrayConfig.dns !== 'object' || xrayConfig.dns === null) {
-          xrayConfig.dns = {};
+        // --- AUTOMATIC REPAIR FOR CORRUPTED DNS CAUSED BY SYS-37/39 ---
+        // If the Xray config contains the hardcoded broken DoH array (which crashes on CIS networks), 
+        // safely revert it to 'localhost' to let the OS restore normal VPN traffic functionality.
+        if (xrayConfig.dns && Array.isArray(xrayConfig.dns.servers)) {
+          const hasBadDoH = xrayConfig.dns.servers.includes("https://dns.adguard-dns.com/dns-query") || xrayConfig.dns.servers.includes("https://dns.yandex.ru/dns-query");
+          if (hasBadDoH) {
+            console.log(`⚠️ [System-Migrate] Found corrupted/blocked DoH DNS array on "${server.name}". Reverting to safe system "localhost"...`);
+            xrayConfig.dns.servers = ["localhost"];
+          }
         }
-        xrayConfig.dns.servers = [
-          "https://dns.adguard-dns.com/dns-query", // Official secure encrypted AdGuard DNS over HTTPS (Premium ad & tracker filtering out of the box)
-          "https://dns.yandex.ru/dns-query",       // Yandex secure encrypted DNS over HTTPS (100% unblocked, extremely fast in CIS)
-          "94.140.14.14",                          // AdGuard IPv4 Public DNS fallback
-          "77.88.8.8",                             // Yandex DNS IPv4 (UDP) fallback
-          "1.1.1.1",                               // Cloudflare fallback
-          "8.8.8.8",                               // Google fallback
-          "localhost"                              // Local System DNS fallback (MANDATORY for DoH bootstrapping and stability)
-        ];
-        
+
         // 2. Modify Routing
         if (!xrayConfig.routing) xrayConfig.routing = {};
         if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
@@ -1667,10 +1662,15 @@ async function syncAllRoutingToAllPanels() {
         
         // --- SAFEGUARD: Identify if config actually changed before pushing! ---
         // Avoid blind updates which trigger VPN connection drops and panel restarts.
-        const originalXrayStr = JSON.stringify(JSON.parse(parsedObj.xraySetting || '{}'));
-        const newXrayStr = JSON.stringify(xrayConfig);
+        // Deeply check if the arrays match irrespective of stringification formatting jitter
+        const oldRulesStr = JSON.stringify(JSON.parse(parsedObj.xraySetting || '{}').routing?.rules || []);
+        const newRulesStr = JSON.stringify(xrayConfig.routing.rules);
         
-        if (originalXrayStr === newXrayStr) {
+        // Furthermore, check if DNS was mutated (we safely corrected DoH to localhost earlier) 
+        const oldDnsStr = JSON.stringify(JSON.parse(parsedObj.xraySetting || '{}').dns || {});
+        const newDnsStr = JSON.stringify(xrayConfig.dns || {});
+
+        if (oldRulesStr === newRulesStr && oldDnsStr === newDnsStr) {
           console.log(`⚡ [System] Config on "${server.name}" is already up-to-date. Skipping update.`);
           results.push({ server: server.name, success: true, unchanged: true });
           continue;
@@ -3682,9 +3682,11 @@ app.get('/api/sub/:id', async (req, res) => {
 
   const now = new Date();
   const expires = new Date(sub.expires_at);
-  if (sub.status !== 'active' || expires < now) {
+  const isInactive = sub.status !== 'active' || expires < now;
+
+  if (isInactive) {
     console.warn(`[SubAPI][${requestId}] Inactive or expired: ${id}. Status: ${sub.status}, Expires: ${sub.expires_at}`);
-    return res.status(403).send('Subscription expired or inactive');
+    // DO NOT return 403. Return a valid empty response with headers so Hiddify processes the exhaustion naturally.
   }
 
   // Retrieve all servers to distinguish between active, inactive, and legacy links
@@ -3715,34 +3717,26 @@ app.get('/api/sub/:id', async (req, res) => {
   }
 
   // V2Ray apps expect Base64 encoded list of links
-  const configLines = configText.split('\n')
+  let configLines = configText.split('\n')
     .map(l => l.trim())
     .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
     .filter(line => {
-      // Check if it belongs to an explicitly inactive server
       const isExplicitlyInactive = inactiveSuffices.some((suffix: string) => line.endsWith(suffix));
-      if (isExplicitlyInactive) return false; // Drop dead links
-
-      // If it belongs to an active server, absolutely keep it
+      if (isExplicitlyInactive) return false;
       const isActive = activeSuffices.some((suffix: string) => line.endsWith(suffix));
       if (isActive) return true;
-
-      // If it matches neither (meaning it has no #Server_Name suffix), it's a legacy link! Keep it so users don't lose internet.
       return true;
     })
     .join('\n');
-  
-  if (!configLines) {
-    console.warn(`⚠️ No valid links found for subscription: ${id}`);
-    return res.status(200).send(''); 
+    
+  if (isInactive) {
+    configLines = "";
   }
-
+  
   const base64Config = Buffer.from(configLines).toString('base64');
   
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=60');
-  
-  // Standard headers for V2Ray/Hiddify
   res.setHeader('profile-title', 'izinet-vpn');
   res.setHeader('profile-update-interval', '6'); // update every 6 hours
   
@@ -3750,6 +3744,11 @@ app.get('/api/sub/:id', async (req, res) => {
   const total = Math.floor((sub.traffic_limit_mb || 0) * 1024 * 1024);
   const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
   res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
+  
+  if (!configLines) {
+    console.warn(`⚠️ No valid links found for subscription: ${id} (Or inactive)`);
+    return res.status(200).send(base64Config); 
+  }
   
   console.log(`[SubAPI][${requestId}] ✅ Delivered nodes: ${configLines.split('\n').filter(Boolean).length}`);
   console.log(`[SubAPI][${requestId}] 📋 Config sample: ${configLines.substring(0, 100)}...`);
