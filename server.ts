@@ -1609,15 +1609,16 @@ async function syncAllRoutingToAllPanels() {
 
         // --- OPTIMIZE XRAY DNS TO AVOID TIMEOUT / I/O TIMEOUT HANGS ---
         // Highly resilient, unblocked DNS over HTTPS (DoH) and local DNS configurations
-        // that bypass any regional port 53 UDP blockages (e.g. in Crimea/RF).
+        // featuring native support for local AdGuard Home and official AdGuard Ad-Blocking DNS.
         if (typeof xrayConfig.dns !== 'object' || xrayConfig.dns === null) {
           xrayConfig.dns = {};
         }
         xrayConfig.dns.servers = [
+          "localhost",                             // Local DNS (First priority: queries local AdGuard Home/DNS server if installed on the node)
+          "https://dns.adguard-dns.com/dns-query", // Official secure encrypted AdGuard DNS over HTTPS (Premium ad & tracker filtering out of the box)
           "https://dns.yandex.ru/dns-query",       // Yandex secure encrypted DNS over HTTPS (100% unblocked, extremely fast in CIS)
-          "https://common.secureroutes.net/dns-query", // Secure fallback DoH
+          "94.140.14.14",                          // AdGuard IPv4 Public DNS fallback
           "77.88.8.8",                             // Yandex DNS IPv4 (UDP) fallback
-          "localhost",                             // Local systemd-resolved DNS
           "1.1.1.1",                               // Cloudflare fallback
           "8.8.8.8"                                // Google fallback
         ];
