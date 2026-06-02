@@ -4386,6 +4386,16 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', config: configStatus });
 });
 
+app.get('/api/diagnose_custom.sh', (req, res) => {
+  const filePath = path.join(process.cwd(), 'diagnose_custom.sh');
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/x-sh');
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send('Diagnostics script not found on server.');
+  }
+});
+
 // --- Subscription Routes ---
 app.get('/api/subscription/plans', async (req, res) => {
   try {
