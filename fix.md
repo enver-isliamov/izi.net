@@ -171,7 +171,8 @@
 
 После внесения изменений выполните команду:
 ```bash
-cd /opt/izinet
-git pull origin main
-docker-compose up -d --build
+cd /opt/izinet && \
+git pull && \
+docker compose up -d --build && \
+docker image prune -f
 ```
