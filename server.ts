@@ -1749,51 +1749,36 @@ async function runGlobalSniMigration() {
           }
 
           let settingsUpdated = false;
-          // Restore ONLY specific fallbacks for our website without a catch-all to prevent Reality dest bypass
-          if (!settings.fallbacks || !Array.isArray(settings.fallbacks) || settings.fallbacks.length === 0) {
+          // Restore ALL specific fallbacks to point to local NGINX as per RECO.MD
+          if (!settings.fallbacks || !Array.isArray(settings.fallbacks) || settings.fallbacks.length === 0 || !settings.fallbacks.find((f: any) => !f.name)) {
              settings.fallbacks = [
                {name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},
-               {name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0}
+               {name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},
+               {dest:"host.docker.internal:3443",xver:0}
              ];
              inbound.settings = JSON.stringify(settings);
              settingsUpdated = true;
              console.log(`✅ [System-Migrate] Restored required NGINX SNI fallbacks at inbound id ${inbound.id} on server "${server.name}".`);
-          } else {
-             // Remove any default fallback (no name) so that unrecognized SNI goes to Reality dest (Microsoft)
-             const hasDefault = settings.fallbacks.findIndex((f: any) => !f.name && f.dest);
-             if (hasDefault !== -1) {
-                settings.fallbacks.splice(hasDefault, 1);
-                inbound.settings = JSON.stringify(settings);
-                settingsUpdated = true;
-                console.log(`✅ [System-Migrate] Removed default fallback to prevent DPI leakage at inbound id ${inbound.id} on server "${server.name}".`);
-             }
           }
 
           let streamUpdated = false;
           if (streamSettings.security === 'reality') {
             const reality = streamSettings.realitySettings || {};
             const serverNames = reality.serverNames || [];
-            const hasGoogle = serverNames.some((n: string) => n.toLowerCase().includes('google.com'));
             
-            // Check if SNI is wrong OR if dest/target points to our internal network (which destroys Reality camouflage)
-            if (hasGoogle || serverNames.length === 0 || (reality.dest && (reality.dest.includes('docker.internal') || reality.dest.includes('127.0.0.1'))) || (reality.target && (reality.target.includes('docker.internal') || reality.target.includes('127.0.0.1')))) {
-              console.log(`⚠️ [System-Migrate] Flawed SNI or Internal Leak found at inbound id ${inbound.id} on server "${server.name}". Cleaning REALITY camouflage...`);
-              reality.serverNames = ["www.microsoft.com", "microsoft.com", "izinet.online", "www.izinet.online"];
-              reality.target = "www.microsoft.com:443";
-              reality.dest = "www.microsoft.com:443";
+            // Check if dest/target points to external network (we need local nginx for website fallback)
+            if (reality.dest !== 'host.docker.internal:3443' || reality.target !== 'host.docker.internal:3443') {
+              console.log(`⚠️ [System-Migrate] Flawed SNI or External Leak found at inbound id ${inbound.id} on server "${server.name}". Cleaning REALITY camouflage to local NGINX...`);
+              // We'll keep whatever serverNames are there, but ensure izinet is present just in case
+              if (!serverNames.includes("izinet.online")) {
+                 reality.serverNames.push("izinet.online", "www.izinet.online");
+              }
+              reality.target = "host.docker.internal:3443";
+              reality.dest = "host.docker.internal:3443";
               
               streamSettings.realitySettings = reality;
               inbound.streamSettings = JSON.stringify(streamSettings);
               streamUpdated = true;
-            } else {
-              // Ensure izinet.online is included in serverNames for fallback routing to work!
-              if (!serverNames.includes("izinet.online")) {
-                reality.serverNames.push("izinet.online", "www.izinet.online");
-                streamSettings.realitySettings = reality;
-                inbound.streamSettings = JSON.stringify(streamSettings);
-                streamUpdated = true;
-                console.log(`✅ [System-Migrate] Added izinet.online to serverNames at inbound id ${inbound.id} on server "${server.name}" to allow fallback to NGINX.`);
-              }
             }
           }
 
@@ -1826,10 +1811,15 @@ async function runGlobalSniMigration() {
       for (const sub of subs) {
         if (!sub.v2ray_config) continue;
         let configStr = sub.v2ray_config;
-        if (configStr.includes('sni=google.com') || configStr.includes('sni=dl.google.com')) {
-          configStr = configStr.replace(/sni=google\.com/g, 'sni=www.microsoft.com');
-          configStr = configStr.replace(/sni=dl\.google\.com/g, 'sni=www.microsoft.com');
-          
+        let changed = false;
+        if (configStr.includes('sni=www.microsoft.com') || configStr.includes('sni=microsoft.com') || configStr.includes('sni=google.com')) {
+          configStr = configStr.replace(/sni=www\.microsoft\.com/g, 'sni=izinet.online');
+          configStr = configStr.replace(/sni=microsoft\.com/g, 'sni=izinet.online');
+          configStr = configStr.replace(/sni=google\.com/g, 'sni=izinet.online');
+          configStr = configStr.replace(/sni=dl\.google\.com/g, 'sni=izinet.online');
+          changed = true;
+        }
+        if (changed) {
           const { error: updErr } = await supabase.from('subscriptions').update({
             v2ray_config: configStr,
             updated_at: new Date().toISOString()
@@ -1839,7 +1829,7 @@ async function runGlobalSniMigration() {
         }
       }
       if (updatedCount > 0) {
-        console.log(`✅ [System-Migrate] Migrated ${updatedCount} subscriptions v2ray_config records to use www.microsoft.com.`);
+        console.log(`✅ [System-Migrate] Migrated ${updatedCount} subscriptions v2ray_config records to use izinet.online.`);
       }
     }
   } catch (error: any) {
@@ -3099,8 +3089,8 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
         const payload = {
           up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
           listen: "", port: 443, protocol: "vless",
-          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0}]}),
-          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"www.microsoft.com:443", dest:"www.microsoft.com:443", xver:0, serverNames:["www.microsoft.com","microsoft.com","izinet.online","www.izinet.online"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
+          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
+          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["izinet.online","www.izinet.online"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
         await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
