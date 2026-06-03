@@ -489,18 +489,17 @@ class XUIService {
     let inbound;
     let flow = "";
     try {
-      const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig(`${this.host}${this.basePath}/panel/api/inbounds/list`, this.authHeaders()));
-      if (listResp.data.success && listResp.data.obj?.length > 0) {
-        // Find vless inbound or fallback to provided ID
-        inbound = listResp.data.obj.find((i: any) => i.protocol === 'vless') || listResp.data.obj.find((i: any) => i.id === inboundId) || listResp.data.obj[0];
-        inboundId = inbound.id; // Correct the inboundId dynamically
-        const streamSettings = JSON.parse(inbound.streamSettings || '{}');
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      if (resp.data.success) {
+        inbound = resp.data.obj;
+        const streamSettings = JSON.parse(inbound.streamSettings);
         if (streamSettings.security === 'reality') {
           flow = "xtls-rprx-vision";
         }
       }
     } catch (e: any) {
-      console.warn(`Could not fetch dynamic inbound from ${this.host}${this.basePath}, using fallback ID ${inboundId}.`);
+      console.warn(`Could not fetch inbound settings from ${this.host}${this.basePath}.`);
     }
 
     const clientData = {
@@ -566,30 +565,15 @@ class XUIService {
     // UUID is already known from DB or creation.
     let effectiveUuid = uuid;
     let effectiveInboundId = inboundId;
-    let inbound = null;
 
-    try {
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
-      if (resp.data.success && resp.data.obj) {
-        inbound = resp.data.obj;
-      }
-    } catch (e) {}
-
-    if (!inbound) {
-      // Fallback: fetch all and find vless
-      try {
-        const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig(`${this.host}${this.basePath}/panel/api/inbounds/list`, this.authHeaders(), 10000));
-        if (listResp.data.success && listResp.data.obj?.length > 0) {
-           inbound = listResp.data.obj.find((i: any) => i.protocol === 'vless') || listResp.data.obj[0];
-           effectiveInboundId = inbound.id;
-        }
-      } catch (e) {}
+    const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+    const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
+    
+    if (!resp.data.success || !resp.data.obj) {
+      throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${effectiveInboundId} с сервера ${this.host}. Проверьте ID инбаунда в настройках сервера.`);
     }
-
-    if (!inbound) {
-      throw new Error(`[XUI] Не удалось получить настройки входящего соединения (даже динамически) с сервера ${this.host}.`);
-    }
+    
+    const inbound = resp.data.obj;
     
     // Safety check for streamSettings: it can be a string or an object depending on XUI version
     let streamSettings: any = {};
@@ -1409,82 +1393,102 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
 });
 
 async function syncAllRoutingToAllPanels() {
-  console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray Config to all XUI servers...');
+  console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray API to all XUI servers...');
   try {
     // 1. Ensure default rules exist
     const { data: existing, error: checkErr } = await supabase.from('vpn_routing_rules').select('*').limit(1);
     if (!checkErr && (!existing || existing.length === 0)) {
        console.log('📦 Setup out-of-the-box routing rules...');
        await supabase.from('vpn_routing_rules').insert([
-         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic', 'domain:aistudio.google.com', 'domain:gemini.google.com'], outbound_tag: 'ipv6-out', is_active: true },
+         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic'], outbound_tag: 'direct', is_active: true },
          { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
        ]);
     }
 
-    const { data: rules, error: rulesErr } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
+    const { data: rules, error: rulesErr } = await supabase
+      .from('vpn_routing_rules')
+      .select('*')
+      .eq('is_active', true);
+      
     if (rulesErr) throw rulesErr;
 
     const newRules = (rules || []).map(r => {
       const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
       if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
       if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
-      return xrayRule; 
+      return xrayRule; // Xui accepts correctly structured xray JSON objects!
     });
 
-    const { data: activeServers, error: serverErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    const { data: activeServers, error: serverErr } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+      
     if (serverErr) throw serverErr;
 
     const results = [];
     for (const server of (activeServers || [])) {
       try {
-        console.log(`Syncing routing and Xray Config to ${server.name}...`);
+        console.log(`Syncing routing and Xray API to ${server.name}...`);
         const { instance: xuiInstance } = await getXuiForServer(server.id);
-        const headers = { headers: { ...xuiInstance.authHeaders(), Cookie: xuiInstance['sessionCookie'] } };
+        const settings = await xuiInstance.getSettings();
         
-        // 1. GET Current Xray Settings
-        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, headers));
-        if (!xrayR.data?.success) throw new Error("Failed to fetch Xray config");
-        const parsedObj = JSON.parse(xrayR.data.obj);
-        let xrayConfig = parsedObj.xraySetting;
+        let xrayConfig = JSON.parse(settings.xrayTemplateConfig);
         
-        // Ensure ipv6-out exists or update it for Gemini/aistudio bypass with safe dual-stack fallback
-        if (!xrayConfig.outbounds) xrayConfig.outbounds = [];
-        const ipv6OutIndex = xrayConfig.outbounds.findIndex((o: any) => o.tag === 'ipv6-out');
-        if (ipv6OutIndex === -1) {
-          xrayConfig.outbounds.push({
-            tag: "ipv6-out",
-            protocol: "freedom",
-            settings: { domainStrategy: "UseIP" }
-          });
-        } else {
-          // For existing servers, upgrade from UseIPv6/Direct to UseIP so it falls back gracefully
-          xrayConfig.outbounds[ipv6OutIndex].settings = {
-            ...(xrayConfig.outbounds[ipv6OutIndex].settings || {}),
-            domainStrategy: "UseIP"
+        // --- Xray API Initialization (API ядра Xray) ---
+        if (!xrayConfig.api) {
+          xrayConfig.api = { tag: "api", services: ["HandlerService", "LoggerService", "StatsService"] };
+        }
+        if (!xrayConfig.stats) xrayConfig.stats = {};
+        if (!xrayConfig.policy) {
+          xrayConfig.policy = {
+            levels: { "0": { statsUserUplink: true, statsUserDownlink: true } },
+            system: { statsInboundUplink: true, statsInboundDownlink: true, statsOutboundUplink: true, statsOutboundDownlink: true }
           };
         }
+        if (!xrayConfig.inbounds) xrayConfig.inbounds = [];
+        if (!xrayConfig.inbounds.find((i:any) => i.tag === 'api')) {
+           xrayConfig.inbounds.unshift({
+             listen: "127.0.0.1",
+             port: 62789,
+             protocol: "dokodemo-door",
+             settings: { address: "127.0.0.1" },
+             tag: "api"
+           });
+        }
         
-        // 2. Modify Routing
+        // --- Routing Initialization ---
         if (!xrayConfig.routing) xrayConfig.routing = {};
         if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
-        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
         
+        // Add api routing if missing
+        if (!xrayConfig.routing.rules.find((r:any) => r.outboundTag === 'api')) {
+           xrayConfig.routing.rules.unshift({
+             inboundTag: ["api"],
+             outboundTag: "api",
+             type: "field",
+             izinet_managed: true
+           });
+        }
+        
+        // Remove old managed rules (excluding the api one which we just ensured)
+        xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed || r.outboundTag === 'api');
+        
+        // Prepend current rules
         const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
         xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
         
-        // 3. POST Back to Xray Update
-        const updatePayload = new URLSearchParams();
-        updatePayload.append("xraySetting", JSON.stringify(xrayConfig));
-        if (parsedObj.outboundTestUrl) updatePayload.append("outboundTestUrl", parsedObj.outboundTestUrl);
+        settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
         
-        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), headers));
-        if (!updateR.data?.success) throw new Error(updateR.data?.msg || "Update failed");
+        // Extra safegaurd: ensure API is also enabled in the X-UI settings directly (just in case)
+        if (settings.apiPort === 0 || !settings.apiPort) settings.apiPort = 62789;
 
+        await xuiInstance.updateSettings(settings);
         await xuiInstance.restartPanel();
         
         results.push({ server: server.name, success: true });
       } catch (e: any) {
-        console.error(`Failed to sync routing to ${server.name}:`, e.message || e);
+        console.error(`Failed to sync routing to ${server.name}:`, e.message);
         results.push({ server: server.name, success: false, error: e.message });
       }
     }
@@ -2741,26 +2745,6 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
     if (loginSuccess) {
       // Try to get stats as a deeper check
       const stats = await instance.getInbounds();
-      if (stats.length === 0) {
-        console.log(`[AdminAPI] Server ${id} has 0 inbounds. Auto-configuring IZINET VLESS REALITY...`);
-        const payload = {
-          up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
-          listen: "", port: 443, protocol: "vless",
-          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
-          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
-          sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
-        };
-        const axios = require('axios');
-        await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
-           headers: { ...instance.authHeaders(), Cookie: instance['sessionCookie'], 'Content-Type': 'application/json' }
-        });
-        
-        await syncAllRoutingToAllPanels();
-        
-        const newStats = await instance.getInbounds();
-        return res.json({ success: true, name: 'XUI', version: 'Latest', stats_count: newStats.length, status: 'ok', configured: true });
-      }
-
       res.json({ success: true, name: 'XUI', version: 'Latest', stats_count: stats.length, status: 'ok' });
     } else {
       res.json({ success: false, error: 'Login failed', status: 'error' });
@@ -2768,182 +2752,6 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
   } catch (err: any) {
     console.error(`❌ Connection check error for server ${id}:`, err.message);
     res.status(500).json({ success: false, error: err.message, status: 'error' });
-  }
-});
-
-app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
-  const { id } = req.params;
-  const logs: string[] = [];
-  const results = {
-    dns_resolved: false,
-    dns_ip: '',
-    port_open: false,
-    vless_port_open: false,
-    ping_status: 'unknown',
-    latency_ms: -1,
-    login_successful: false,
-    xray_status: 'unknown',
-    advice: [] as string[]
-  };
-
-  logs.push(`[Диагностика] Запуск комплексной диагностики для сервера ID: ${id}`);
-  
-  try {
-    const { instance, server } = await getXuiForServer(id);
-    if (!server) {
-      logs.push(`❌ Ошибка: Сервер не найден в базе данных.`);
-      return res.status(404).json({ success: false, logs, results });
-    }
-
-    logs.push(`[Сервер] Название: "${server.name}", IP: ${server.ip || 'не указан'}, Домен: ${server.domain || 'не указан'}`);
-    logs.push(`[Параметры] Порт панели API: ${server.api_port || 2053}, Пользователь: ${server.username || 'не указан'}`);
-
-    // Шаг 1: Разрешение DNS
-    const targetDomain = (server.domain || '').trim();
-    const targetIp = (server.ip || '').trim().split('/')[0].split(':')[0]; // Очистка от путей и портов
-    const dnsHost = targetDomain || targetIp;
-
-    if (!dnsHost) {
-      logs.push(`❌ Не указан ни IP, ни домен сервера.`);
-    } else {
-      logs.push(`[DNS] Разрешение сетевого адреса "${dnsHost}"...`);
-      try {
-        const dns = require('dns').promises;
-        const startDns = Date.now();
-        const addresses = await dns.resolve4(dnsHost).catch(async () => {
-          const lookup = await dns.lookup(dnsHost);
-          return [lookup.address];
-        });
-        const elapsed = Date.now() - startDns;
-        results.dns_resolved = true;
-        results.dns_ip = addresses[0];
-        logs.push(`✅ [DNS] Адрес успешно разрешен за ${elapsed}мс. IP: ${addresses.join(', ')}`);
-      } catch (err: any) {
-        logs.push(`❌ [DNS] Не удалось разрешить адрес "${dnsHost}": ${err.message}`);
-        results.advice.push(`Проверьте правильность домена "${dnsHost}". Если домен куплен недавно, сетевые изменения у провайдеров могут вступать в силу до 24 часов.`);
-      }
-    }
-
-    // Шаг 2: Проверка TCP-порт панели API (3x-ui)
-    const apiPort = server.api_port || 2053;
-    const testIp = results.dns_ip || targetIp;
-
-    if (!testIp) {
-      logs.push(`❌ Пропуск проверки портов: IP-адрес сервера не определен.`);
-    } else {
-      logs.push(`[Port API] Тестирование доступности API-порта ${apiPort} на IP ${testIp}...`);
-      const net = require('net');
-      const startPortConn = Date.now();
-      
-      const checkPort = (port: number, host: string, timeoutMs = 4000): Promise<{open: boolean, elapsed: number, err?: string}> => {
-        return new Promise((resolve) => {
-          const socket = new net.Socket();
-          let resolved = false;
-          
-          socket.setTimeout(timeoutMs);
-          
-          socket.connect(port, host, () => {
-            const elapsed = Date.now() - startPortConn;
-            resolved = true;
-            socket.destroy();
-            resolve({ open: true, elapsed });
-          });
-          
-          socket.on('error', (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              socket.destroy();
-              resolve({ open: false, elapsed: Date.now() - startPortConn, err: err.message });
-            }
-          });
-          
-          socket.on('timeout', () => {
-            if (!resolved) {
-              resolved = true;
-              socket.destroy();
-              resolve({ open: false, elapsed: timeoutMs, err: 'Превышено время ожидания (Connection Timeout)' });
-            }
-          });
-        });
-      };
-
-      const portCheck = await checkPort(apiPort, testIp);
-      if (portCheck.open) {
-        results.port_open = true;
-        results.latency_ms = portCheck.elapsed;
-        logs.push(`✅ [Port API] Порт управления ${apiPort} успешно СВЯЗАН! Пинг до панели: ${portCheck.elapsed}мс.`);
-      } else {
-        logs.push(`❌ [Port API] Порт ${apiPort} ЗАКРЫТ или недоступен за ${portCheck.elapsed}мс. Ошибка: ${portCheck.err}`);
-        results.advice.push(`Управляющий порт API ${apiPort} недоступен. Возможные причины и решения:
-1. На VPS работает фаервол (UFW/iptables), фильтрующий новые входящие подключения. Решение: выполните на VPS консольную команду "sudo ufw allow ${apiPort}/tcp" или полностью выключите фаервол "sudo ufw disable".
-2. Сама служба 3x-ui упала или зависла. Решение: попробуйте перезапустить контейнер docker или службу 3x-ui прямо на сервере ("x-ui restart" или "systemctl restart x-ui").
-3. Окружение Docker: Если сервер внутри одной локальной сети с приложением, убедитесь, что имя хоста указано корректно (для локального Docker см. 'x3-ui:2053').`);
-      }
-
-      // Проверим также порт VLESS (обычно 443)
-      logs.push(`[Port VLESS] Тестирование доступности пользовательского VLESS Reality порта 443...`);
-      const vlessCheck = await checkPort(443, testIp);
-      if (vlessCheck.open) {
-        results.vless_port_open = true;
-        logs.push(`✅ [Port VLESS] Главный порт 443 для VPN-туннеля ОТКРЫТ! Доступ со стороны VPN-клиентов открыт.`);
-      } else {
-        logs.push(`⚠️ [Port VLESS] Порт туннеля VLESS 443 ЗАКРЫТ или недоступен за ${vlessCheck.elapsed}мс. Причина: ${vlessCheck.err}`);
-        results.advice.push(`Пользовательский порт туннелей VLESS (443) закрыт. Покупатели не смогут подключить интернет, даже если API панель отвечает. Проверьте:
-1. Запущен ли Xray Core внутри веб-интерфейса панели.
-2. Не занят ли порт 443 другими локальными веб-серверами (например, предустановленным Apache или Nginx, мешающим биндингу Xray).
-3. Разрешен ли в фаерволе порт 443: "sudo ufw allow 443/tcp" и "sudo ufw allow 443/udp".`);
-      }
-    }
-
-    // Шаг 3: Тест авторизации (Handshake)
-    if (instance.host) {
-      logs.push(`[API Handshake] Проверка логина и парсинг инбаундов на адресе: ${instance.host}${instance.basePath}...`);
-      try {
-        const loginToken = await instance.login(true);
-        if (loginToken) {
-          results.login_successful = true;
-          logs.push(`✅ [API Handshake] Авторизация на сервере пройдена! Сессия успешно создана.`);
-          
-          logs.push(`[API Inbounds] Запрос активных подключений...`);
-          const inbounds = await instance.getInbounds();
-          logs.push(`✅ [API Inbounds] Найдено инбаундов: ${inbounds?.length || 0}.`);
-          
-          if (!inbounds || inbounds.length === 0) {
-            logs.push(`⚠️ [API Inbounds] На сервере НЕТ настроенных входящих портов! Клиенты не смогут получить доступ к VPN.`);
-            results.advice.push(`На панели 3x-ui нет ни одного инбаунда. Решение: Нажмите обычную кнопку "Проверить" (check connection) на странице управления серверами — IZINET автоматически создаст и пропишет на панели стандартный Reality VLESS инбаунд.`);
-          } else {
-            const hasVless = inbounds.some((i: any) => i.protocol === 'vless');
-            if (!hasVless) {
-              logs.push(`⚠️ [API Inbounds] Отсутствует критический протокол VLESS! (Обнаружены: ${inbounds.map((i: any) => i.protocol).join(', ')})`);
-              results.advice.push(`В панели серверов нет протоколов VLESS Reality, необходимых для клиентов izinet. Добавьте его вручную или воспользуйтесь кнопкой "Проверить" для автоматической конфигурации.`);
-            } else {
-              const vlessInb = inbounds.find((i: any) => i.protocol === 'vless');
-              logs.push(`✅ [API Inbounds] Обнаружен VLESS инбаунд (ID: ${vlessInb.id}, Remark: "${vlessInb.remark || 'нет'}", Port: ${vlessInb.port})`);
-            }
-          }
-        } else {
-          logs.push(`❌ [API Handshake] Ошибка сессии: неправильные учетные данные для веб-панели 3x-ui.`);
-          results.advice.push(`Панель 3x-ui отклонила логин/пароль. Пожалуйста, отредактируйте параметры сервера в списке, сверив Имя пользователя и Пароль с учетными данными администратора.`);
-        }
-      } catch (loginErr: any) {
-        logs.push(`❌ [API Handshake] Исключение при выполнении запроса: ${loginErr.message}`);
-        results.advice.push(`Сбой отправки данных. Проверьте правильность секретного пути в поле IP/домен (например, "/LZ6dkLp"). Если панель работает по HTTP, убедитесь, что не указан протокол HTTPS.`);
-      }
-    } else {
-      logs.push(`❌ Сбой: Хост панели не определен.`);
-    }
-
-    // Траблшутинг для ПК vs Телефона
-    results.advice.push(`💡 ПОЧЕМУ VPN ИДЕАЛЬНО РАБОТАЕТ НА ТЕЛЕФОНЕ, НО ТАЙМАУТИТ НА ПК?
-1. Включенный IPv6 на Windows/MacOS: Домашние провайдеры в РФ часто криво маршрутизируют IPv6 пакеты. Если в клиенте Hiddify на ПК включен "Предпочитать IPv6" (Preferred IPv6), программа пытается слать пакеты Dual-Stack ресурсов (Google, YouTube) по IPv6. Если у сервера нет IPv6 или он настроен без VPN-выхода, пакеты пропадают, вызывая таймаут.
-   👉 РЕШЕНИЕ: Зайдите в Клиент Hiddify на ПК -> Настройки -> Конфигурация -> Выключите переключатель "Включить IPv6" (Enable IPv6). Это раз и навсегда убирает 90% "зависаний" сайтов и серверов на ПК!
-2. Антивирусы Windows (Kaspersky, Windows Defender): Антивирусы со своим файрволом пытаются расшифровывать SSL/TLS трафик (MITM). Это ломает Reality VLESS, поскольку Reality сверяет контрольные суммы оригинального TLS-сертификата (например, microsoft.com). Добавьте исполняемые файлы Hiddify/Xray в белый список исключений антивируса.
-3. DPI фильтры: Мобильные операторы (МТС, Теле2, Билайн) фильтруют протоколы мягче проводных домашних сетей. Если ПК-подключение режется, попробуйте сменить SNI домен в инбаунде на локальный или неблокируемый (например, www.microsoft.com или dl.google.com).`);
-
-    res.json({ success: true, logs, results });
-  } catch (globalErr: any) {
-    logs.push(`❌ Критическая ошибка выполнения диагностики: ${globalErr.message}`);
-    res.status(500).json({ success: false, logs, results });
   }
 });
 
@@ -4006,8 +3814,15 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
 // Health check and configuration status
 app.get('/api/test-xui', async (req, res) => {
   try {
-    const results = await syncAllRoutingToAllPanels();
-    res.json({ results });
+    const { data } = await supabase.from('vpn_servers').select('*').eq('is_active', true).limit(1);
+    if (!data || !data.length) return res.send('no server');
+    const { instance: xuiInstance } = await getXuiForServer(data[0].id);
+    const settings = await xuiInstance.getSettings();
+    res.json({
+      keys: Object.keys(settings),
+      api: JSON.parse(settings.xrayTemplateConfig).api,
+      routingRules: settings.routingRules, // check if this exists
+    });
   } catch (e: any) { res.status(500).json({error: e.message}) }
 });
 

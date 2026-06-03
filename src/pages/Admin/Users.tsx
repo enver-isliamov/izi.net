@@ -353,7 +353,7 @@ export default function AdminUsers() {
                             </button>
                           )}
                         </div>
-                        <span className="text-[10px] text-muted-foreground font-mono break-all line-clamp-1">{user.email}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{user.email}</span>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="font-mono text-xs text-blue-400 font-bold">Баланс: {user.balance || 0} ₽</span>
                           <button
@@ -571,7 +571,7 @@ export default function AdminUsers() {
                         </button>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground font-mono break-all">{user.email}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{user.email}</span>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="font-mono text-xs text-blue-400 font-bold">Баланс: {user.balance || 0} ₽</span>
                       <button
