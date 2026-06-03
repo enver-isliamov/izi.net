@@ -15,8 +15,6 @@ import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import { exec } from 'child_process';
 import fs from 'fs';
-import dns from 'node:dns/promises';
-import net from 'node:net';
 import { Telegraf, Context } from 'telegraf';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
@@ -233,7 +231,7 @@ class XUIService {
         if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
           const originalHost = host;
           const port = parsedUrl.port || '2053';
-          const isDocker = fs.existsSync('/.dockerenv');
+          const isDocker = require('fs').existsSync('/.dockerenv');
           if (isDocker) {
             host = `http://x3-ui:2053${parsedUrl.pathname}`;
             console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
@@ -300,12 +298,8 @@ class XUIService {
 
       let customHeaders: any = {};
       if (csrfData) {
-         if (csrfData.token) {
-            customHeaders['X-CSRF-Token'] = csrfData.token;
-         }
-         if (csrfData.cookieStr) {
-            customHeaders['Cookie'] = csrfData.cookieStr;
-         }
+         customHeaders['X-CSRF-Token'] = csrfData.token;
+         if (csrfData.cookieStr) customHeaders['Cookie'] = csrfData.cookieStr;
       }
 
       try {
@@ -351,14 +345,13 @@ class XUIService {
            csrfToken = csrfRes.data.obj;
         }
         if (csrfRes.headers['set-cookie']) {
-          cookies = cookies.concat(csrfRes.headers['set-cookie']);
+           cookies = cookies.concat(csrfRes.headers['set-cookie']);
         }
       } catch (e) {
         // CSRF endpoint might not exist on older versions, just ignore
       }
 
-      // Always pass cookies if retrieved, even if csrfToken is empty
-      const csrfData = cookies.length > 0 ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
+      const csrfData = csrfToken ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
 
       // 3x-ui almost universally uses /login. Trying others blindly triggers rate limits.
       let response = await tryLogin('/login', csrfData);
@@ -623,7 +616,7 @@ class XUIService {
       // 3x-ui can store reality settings in realitySettings directly or under realitySettings.settings
       const rs = realitySettings.settings || realitySettings;
       
-      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIPOrEmpty ? 'www.microsoft.com' : hostName);
+      const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || (isIPOrEmpty ? 'google.com' : hostName);
       const pbk = rs.publicKey || realitySettings.publicKey || '';
       
       if (!pbk || pbk.includes('m_G-oZ_9a6')) {
@@ -760,11 +753,13 @@ class XUIService {
 
       if (response.data.success) {
         console.log(`✅ Client ${email} updated in 3x-ui [${this.host}] with expiry ${expiryTime}`);
-        return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
+        return true;
       } else {
         const errorMsg = response.data.msg || 'Unknown error';
         console.warn(`⚠️ Failed to update client ${email} in 3x-ui: ${errorMsg}`);
-        return '';
+        // If it failed with "empty client ID" it might be because the ID should be in a different field or structure
+        // but given our investigation, usually it means the UUID didn't match anything.
+        return false;
       }
     } catch (error: any) {
       if (error.response?.status === 401) {
@@ -772,8 +767,13 @@ class XUIService {
         await this.login(true);
         return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
       console.error(`❌ 3x-ui updateClient total failure for ${email}:`, error.message);
-      return '';
+      return false;
     }
   }
 
@@ -801,26 +801,6 @@ class XUIService {
       }
       console.error(`❌ 3x-ui getClientTraffic error for ${email}:`, error.message);
       return null;
-    }
-  }
-
-  async resetClientTraffic(email: string, inboundId: number) {
-    if (!this.sessionCookie) await this.login();
-    try {
-      // 3x-ui API for resetting traffic: POST /panel/api/inbounds/${inboundId}/resetClientTraffics/${email}
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffics/${email}`;
-      const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
-      return response.data.success;
-    } catch(error: any) {
-      if (error.response?.status === 401) {
-        this.sessionCookie = null;
-        await this.login();
-        const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffics/${email}`;
-        await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
-        return true;
-      }
-      console.error(`❌ 3x-ui resetClientTraffics error for ${email}:`, error.message);
-      return false;
     }
   }
 
@@ -916,33 +896,6 @@ class XUIService {
       }
       console.error(`❌ 3x-ui listClients error for ${this.host}:`, e.message);
       return [];
-    }
-  }
-
-  async updateInbound(inboundId: number, inboundObj: any): Promise<boolean> {
-    if (!this.sessionCookie) await this.login();
-    try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inboundId}`;
-      const payload = {
-        id: inboundObj.id,
-        port: inboundObj.port,
-        protocol: inboundObj.protocol,
-        settings: inboundObj.settings,
-        streamSettings: inboundObj.streamSettings,
-        sniffing: inboundObj.sniffing,
-        remark: inboundObj.remark,
-        enable: inboundObj.enable
-      };
-      const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/json', ...this.authHeaders() }));
-      return response.data?.success || false;
-    } catch (e: any) {
-      if (e.response?.status === 401) {
-        this.sessionCookie = null;
-        await this.login(true);
-        return this.updateInbound(inboundId, inboundObj);
-      }
-      console.error(`❌ 3x-ui updateInbound error for ${inboundId}:`, e.message);
-      return false;
     }
   }
 
@@ -1458,86 +1411,14 @@ app.get('/api/admin/servers/health', adminOnly, async (req, res) => {
 async function syncAllRoutingToAllPanels() {
   console.log('🔄 [System] Synchronizing vpn_routing_rules and Xray Config to all XUI servers...');
   try {
-    // 1. Ensure default rules exist by name check and clean legacy unstable geosite entries
-    const { data: geminiRule, error: checkErr1 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Gemini / Google Services').maybeSingle();
-    const safeGeminiDomains = [
-      'geosite:google',
-      'geosite:openai',
-      'domain:ai.com',
-      'domain:anthropic.com',
-      'domain:claude.ai',
-      'domain:aistudio.google.com',
-      'domain:aistudio.google',
-      'domain:gemini.google.com',
-      'domain:gemini.google',
-      'domain:generativeai.google',
-      'domain:makersuite.google.com',
-      'domain:openai.com'
-    ];
-
-    if (!checkErr1) {
-       if (!geminiRule) {
-          console.log('📦 Setup default Gemini / Google Services routing rule...');
-          await supabase.from('vpn_routing_rules').insert([
-            { name: 'Gemini / Google Services', domains: safeGeminiDomains, outbound_tag: 'ipv6-out', is_active: true }
-          ]);
-       } else if (geminiRule.domains && (geminiRule.domains.includes('geosite:gemini') || geminiRule.domains.includes('geosite:anthropic') || !geminiRule.domains.includes('domain:aistudio.google'))) {
-          console.log('🔄 Cleaning up Gemini / Google Services rule in DB (adding direct/T-Level .google domains)...');
-          await supabase.from('vpn_routing_rules').update({
-            domains: safeGeminiDomains
-          }).eq('id', geminiRule.id);
-       }
-    }
-
-    const safeRuDomains = [
-      'domain:ru',
-      'domain:su',
-      'domain:xn--p1ai',
-      'domain:vk.com',
-      'domain:vk.ru',
-      'domain:yandex.ru',
-      'domain:mail.ru',
-      'domain:gosuslugi.ru',
-      'domain:sberbank.ru',
-      'domain:tbank.ru',
-      'domain:tinkoff.ru'
-    ];
-
-    const { data: ruRule, error: checkErr2 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Russia Bypass (GeoIP + GeoSite)').maybeSingle();
-    if (!checkErr2) {
-       if (!ruRule) {
-          console.log('📦 Setup default Russia Bypass routing rule...');
-          await supabase.from('vpn_routing_rules').insert([
-            { name: 'Russia Bypass (GeoIP + GeoSite)', domains: safeRuDomains, ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
-          ]);
-       } else if (ruRule.domains && ruRule.domains.includes('geosite:ru')) {
-          console.log('🔄 Cleaning up Russia Bypass rule in DB (replacing geosite:ru with safe domain matchers)...');
-          await supabase.from('vpn_routing_rules').update({
-            domains: safeRuDomains
-          }).eq('id', ruRule.id);
-       }
-    }
-
-    // Default "Block Torrents" rule setup (out-of-the-box torrent blocking)
-    const safeTorrentDomains = [
-      'domain:torrent',
-      'domain:peer',
-      'domain:tracker',
-      'domain:utorrent',
-      'domain:bittorrent',
-      'domain:rutracker',
-      'domain:rutor',
-      'domain:fast-torrent',
-      'domain:torrent-soft'
-    ];
-    const { data: torrentRule, error: checkErr3 } = await supabase.from('vpn_routing_rules').select('*').eq('name', 'Block Torrents').maybeSingle();
-    if (!checkErr3) {
-       if (!torrentRule) {
-          console.log('📦 Setup default Block Torrents routing rule...');
-          await supabase.from('vpn_routing_rules').insert([
-            { name: 'Block Torrents', domains: safeTorrentDomains, outbound_tag: 'blocked', is_active: true }
-          ]);
-       }
+    // 1. Ensure default rules exist
+    const { data: existing, error: checkErr } = await supabase.from('vpn_routing_rules').select('*').limit(1);
+    if (!checkErr && (!existing || existing.length === 0)) {
+       console.log('📦 Setup out-of-the-box routing rules...');
+       await supabase.from('vpn_routing_rules').insert([
+         { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic', 'domain:aistudio.google.com', 'domain:gemini.google.com'], outbound_tag: 'ipv6-out', is_active: true },
+         { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
+       ]);
     }
 
     const { data: rules, error: rulesErr } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
@@ -1545,29 +1426,7 @@ async function syncAllRoutingToAllPanels() {
 
     const newRules = (rules || []).map(r => {
       const xrayRule: any = { type: "field", outboundTag: r.outbound_tag };
-      
-      // If it's a torrent block rule, automatically bind the "bittorrent" protocol signature
-      if (r.name?.toLowerCase().includes('torrent')) {
-        xrayRule.protocol = ["bittorrent"];
-      }
-
-      if (r.domains && r.domains.length > 0) {
-        const resolvedDomains: string[] = [];
-        for (const d of r.domains) {
-          if (d === 'geosite:gemini' || d === 'geosite:anthropic') {
-            continue; // Skip unstable domains already covered
-          }
-          if (d === 'geosite:ru') {
-            // Unpack geosite:ru to safe string matchers
-            resolvedDomains.push('domain:ru', 'domain:su', 'domain:xn--p1ai');
-          } else {
-            resolvedDomains.push(d);
-          }
-        }
-        if (resolvedDomains.length > 0) {
-          xrayRule.domain = resolvedDomains;
-        }
-      }
+      if (r.domains && r.domains.length > 0) xrayRule.domain = r.domains;
       if (r.ips && r.ips.length > 0) xrayRule.ip = r.ips;
       return xrayRule; 
     });
@@ -1578,18 +1437,12 @@ async function syncAllRoutingToAllPanels() {
     const results = [];
     for (const server of (activeServers || [])) {
       try {
-        if (server.xui_config_state && typeof server.xui_config_state === 'object' && server.xui_config_state.routing_sync_disabled) {
-          console.log(`[Sync Routing] Server ${server.name} has routing sync disabled. Skipping.`);
-          results.push({ server: server.name, success: true, skipped: true, message: 'Синхронизация отключена в настройках' });
-          continue;
-        }
         console.log(`Syncing routing and Xray Config to ${server.name}...`);
         const { instance: xuiInstance } = await getXuiForServer(server.id);
-        if (!xuiInstance['sessionCookie']) await xuiInstance.login();
         const headers = { headers: { ...xuiInstance.authHeaders(), Cookie: xuiInstance['sessionCookie'] } };
         
         // 1. GET Current Xray Settings
-        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, headers.headers, 10000)));
+        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, headers));
         if (!xrayR.data?.success) throw new Error("Failed to fetch Xray config");
         const parsedObj = JSON.parse(xrayR.data.obj);
         let xrayConfig = parsedObj.xraySetting;
@@ -1610,91 +1463,21 @@ async function syncAllRoutingToAllPanels() {
             domainStrategy: "UseIP"
           };
         }
-
-        // Ensure "blocked" blackhole outbound exists for dropping torrent traffic
-        const blockedIndex = xrayConfig.outbounds.findIndex((o: any) => o.tag === 'blocked');
-        if (blockedIndex === -1) {
-          xrayConfig.outbounds.push({
-            tag: "blocked",
-            protocol: "blackhole",
-            settings: {}
-          });
-        }
-
-        // --- AUTOMATIC REPAIR FOR CORRUPTED DNS ---
-        // Instead of deleting the DNS array (which might crash Xray parsing if domainStrategy needs it),
-        // we forcefully set it to reliable public resolvers.
-        if (xrayConfig.dns) {
-          console.log(`⚠️ [System-Migrate] Overwriting custom DNS array on "${server.name}" to use stable resolvers...`);
-          // 127.0.0.11 is the Docker Embedded DNS resolver. 
-          // "localhost" causes "127.0.0.1:53 refused" because Docker DNS runs on .11, not .1.
-          xrayConfig.dns.servers = ["127.0.0.11", "8.8.8.8", "1.1.1.1"];
-        }
-
+        
         // 2. Modify Routing
         if (!xrayConfig.routing) xrayConfig.routing = {};
         if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
         xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
         
         const finalRules = newRules.map(r => ({ ...r, izinet_managed: true }));
-
-        // Append custom server-specific rules from xui_config_state
-        if (server.xui_config_state && typeof server.xui_config_state === 'object') {
-          const stateObj = server.xui_config_state;
-          
-          if (stateObj.custom_direct_domains) {
-            const list = typeof stateObj.custom_direct_domains === 'string'
-              ? stateObj.custom_direct_domains.split(',').map((d: string) => d.trim()).filter(Boolean)
-              : stateObj.custom_direct_domains;
-            if (Array.isArray(list) && list.length > 0) {
-              finalRules.unshift({
-                type: "field",
-                outboundTag: "direct",
-                domain: list,
-                izinet_managed: true
-              });
-            }
-          }
-          
-          if (stateObj.custom_proxy_domains) {
-            const list = typeof stateObj.custom_proxy_domains === 'string'
-              ? stateObj.custom_proxy_domains.split(',').map((d: string) => d.trim()).filter(Boolean)
-              : stateObj.custom_proxy_domains;
-            if (Array.isArray(list) && list.length > 0) {
-              finalRules.unshift({
-                type: "field",
-                outboundTag: "ipv6-out",
-                domain: list,
-                izinet_managed: true
-              });
-            }
-          }
-        }
-
         xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
         
-        // --- SAFEGUARD: Identify if config actually changed before pushing! ---
-        // Avoid blind updates which trigger VPN connection drops and panel restarts.
-        // Deeply check if the arrays match irrespective of stringification formatting jitter
-        const oldRulesStr = JSON.stringify(JSON.parse(parsedObj.xraySetting || '{}').routing?.rules || []);
-        const newRulesStr = JSON.stringify(xrayConfig.routing.rules);
-        
-        // Furthermore, check if DNS was mutated (we safely corrected DoH to localhost earlier) 
-        const oldDnsStr = JSON.stringify(JSON.parse(parsedObj.xraySetting || '{}').dns || {});
-        const newDnsStr = JSON.stringify(xrayConfig.dns || {});
-
-        if (oldRulesStr === newRulesStr && oldDnsStr === newDnsStr) {
-          console.log(`⚡ [System] Config on "${server.name}" is already up-to-date. Skipping update.`);
-          results.push({ server: server.name, success: true, unchanged: true });
-          continue;
-        }
-
         // 3. POST Back to Xray Update
         const updatePayload = new URLSearchParams();
         updatePayload.append("xraySetting", JSON.stringify(xrayConfig));
         if (parsedObj.outboundTestUrl) updatePayload.append("outboundTestUrl", parsedObj.outboundTestUrl);
         
-        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, headers.headers, 10000)));
+        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), headers));
         if (!updateR.data?.success) throw new Error(updateR.data?.msg || "Update failed");
 
         await xuiInstance.restartPanel();
@@ -1712,130 +1495,9 @@ async function syncAllRoutingToAllPanels() {
   }
 }
 
-async function runGlobalSniMigration() {
-  console.log('🔄 [System] Starting active servers Reality SNI check & clean-up...');
-  try {
-    const { data: servers, error: dbErr } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
-    if (dbErr || !servers) {
-      console.error('❌ Sni Migration failed to select servers:', dbErr);
-      return;
-    }
-
-    for (const server of servers) {
-      console.log(`🔍 [System-Migrate] Processing server: ${server.name}...`);
-      try {
-        const { instance } = await getXuiForServer(server.id);
-        const inbounds = await instance.getInbounds();
-        if (!inbounds || inbounds.length === 0) continue;
-
-        let serverUpdated = false;
-        for (const inbound of inbounds) {
-          if (inbound.protocol !== 'vless') continue;
-          let streamSettings: any = {};
-          try {
-            streamSettings = typeof inbound.streamSettings === 'string' 
-              ? JSON.parse(inbound.streamSettings || '{}')
-              : inbound.streamSettings;
-          } catch (e) {
-            continue;
-          }
-
-          let settings: any = {};
-          try {
-            settings = typeof inbound.settings === 'string'
-              ? JSON.parse(inbound.settings || '{}')
-              : inbound.settings;
-          } catch (e) {
-          }
-
-          let settingsUpdated = false;
-          // Restore ALL specific fallbacks to point to local NGINX as per RECO.MD
-          if (!settings.fallbacks || !Array.isArray(settings.fallbacks) || settings.fallbacks.length === 0 || !settings.fallbacks.find((f: any) => !f.name)) {
-             settings.fallbacks = [
-               {name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},
-               {name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},
-               {dest:"host.docker.internal:3443",xver:0}
-             ];
-             inbound.settings = JSON.stringify(settings);
-             settingsUpdated = true;
-             console.log(`✅ [System-Migrate] Restored required NGINX SNI fallbacks at inbound id ${inbound.id} on server "${server.name}".`);
-          }
-
-         let streamUpdated = false;
-          if (streamSettings.security === 'reality') {
-            const reality = streamSettings.realitySettings || {};
-            const serverNames = reality.serverNames || [];
-            
-            // Check if dest/target points to external network (we need local nginx for website fallback)
-            if (reality.dest !== 'host.docker.internal:3443' || reality.target !== 'host.docker.internal:3443' || serverNames.includes("izinet.online")) {
-              console.log(`⚠️ [System-Migrate] Flawed SNI or External Leak found at inbound id ${inbound.id} on server "${server.name}". Restoring REALITY to RECO.MD defaults...`);
-              
-              reality.serverNames = ["www.microsoft.com", "microsoft.com"];
-              reality.target = "host.docker.internal:3443";
-              reality.dest = "host.docker.internal:3443";
-              
-              streamSettings.realitySettings = reality;
-              inbound.streamSettings = JSON.stringify(streamSettings);
-              streamUpdated = true;
-            }
-          }
-
-          if (settingsUpdated || streamUpdated) {
-              const works = await instance.updateInbound(inbound.id, inbound);
-              if (works) {
-                console.log(`✅ [System-Migrate] Inbound ID ${inbound.id} updated to safe configuration.`);
-                serverUpdated = true;
-              } else {
-                console.warn(`❌ [System-Migrate] Failed to update inbound ID ${inbound.id} on panel.`);
-              }
-          }
-        }
-
-        if (serverUpdated) {
-          try {
-            await instance.restartPanel();
-            console.log(`✅ [System-Migrate] Restarted panel on "${server.name}" to apply safe SNI.`);
-          } catch (rErr) {}
-        }
-      } catch (err: any) {
-        console.error(`❌ [System-Migrate] Error during server ${server.name} SNI processing:`, err.message);
-      }
-    }
-
-    // Database subscriptions migration
-    const { data: subs, error: subsErr } = await supabase.from('subscriptions').select('id, v2ray_config');
-    if (!subsErr && subs) {
-      let updatedCount = 0;
-      for (const sub of subs) {
-        if (!sub.v2ray_config) continue;
-        let configStr = sub.v2ray_config;
-        let changed = false;
-        if (configStr.includes('sni=izinet.online')) {
-          configStr = configStr.replace(/sni=izinet\.online/g, 'sni=www.microsoft.com');
-          changed = true;
-        }
-        if (changed) {
-          const { error: updErr } = await supabase.from('subscriptions').update({
-            v2ray_config: configStr,
-            updated_at: new Date().toISOString()
-          }).eq('id', sub.id);
-
-          if (!updErr) updatedCount++;
-        }
-      }
-      if (updatedCount > 0) {
-        console.log(`✅ [System-Migrate] Migrated ${updatedCount} subscriptions v2ray_config records to use www.microsoft.com (Reverted).`);
-      }
-    }
-  } catch (error: any) {
-    console.error('❌ [System-Migrate] Global SNI migration failed:', error.message);
-  }
-}
-
 app.post('/api/admin/system/sync-routing', adminOnly, async (req, res) => {
   try {
     const results = await syncAllRoutingToAllPanels();
-    await runGlobalSniMigration().catch(err => console.error("Global SNI Migration background error:", err));
     res.json({ success: true, results });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -3088,6 +2750,7 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
           streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
+        const axios = require('axios');
         await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
            headers: { ...instance.authHeaders(), Cookie: instance['sessionCookie'], 'Content-Type': 'application/json' }
         });
@@ -3145,6 +2808,7 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
     } else {
       logs.push(`[DNS] Разрешение сетевого адреса "${dnsHost}"...`);
       try {
+        const dns = require('dns').promises;
         const startDns = Date.now();
         const addresses = await dns.resolve4(dnsHost).catch(async () => {
           const lookup = await dns.lookup(dnsHost);
@@ -3161,25 +2825,14 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
     }
 
     // Шаг 2: Проверка TCP-порт панели API (3x-ui)
-    let apiPort = server.api_port || 2053;
-    try {
-      if (instance && instance.host) {
-        const urlOb = new URL(instance.host);
-        if (urlOb.port) {
-          apiPort = parseInt(urlOb.port);
-        } else if (urlOb.protocol === 'https:') {
-          apiPort = 443;
-        } else {
-          apiPort = 80;
-        }
-      }
-    } catch (_) {}
+    const apiPort = server.api_port || 2053;
     const testIp = results.dns_ip || targetIp;
 
     if (!testIp) {
       logs.push(`❌ Пропуск проверки портов: IP-адрес сервера не определен.`);
     } else {
       logs.push(`[Port API] Тестирование доступности API-порта ${apiPort} на IP ${testIp}...`);
+      const net = require('net');
       const startPortConn = Date.now();
       
       const checkPort = (port: number, host: string, timeoutMs = 4000): Promise<{open: boolean, elapsed: number, err?: string}> => {
@@ -3289,9 +2942,8 @@ app.post('/api/admin/servers/:id/diagnose', adminOnly, async (req, res) => {
 
     res.json({ success: true, logs, results });
   } catch (globalErr: any) {
-    console.error('[Diagnose Exception Raw]:', globalErr);
     logs.push(`❌ Критическая ошибка выполнения диагностики: ${globalErr.message}`);
-    res.json({ success: true, logs, results });
+    res.status(500).json({ success: false, logs, results });
   }
 });
 
@@ -3396,12 +3048,14 @@ app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
   }
 });
 
-async function fixLimitIpsOnAllServers() {
+app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
   try {
-    console.log(`[System] Running global limitIp=0 fix on all active servers...`);
+    console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);
     const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (srvErr || !activeServers) return;
+    if (srvErr) throw srvErr;
+    if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
 
+    // Fix limitIp to 0 for all inbound clients directly on XUI to prevent timeouts
     for (const server of activeServers) {
         try {
             console.log(`Fixing limitIp=0 on server ${server.name}...`);
@@ -3438,20 +3092,6 @@ async function fixLimitIpsOnAllServers() {
             console.error(`Error fixing limitIp on ${server.name}:`, e.message);
         }
     }
-  } catch (error: any) {
-    console.error('Failed to run global limitIp fix:', error);
-  }
-}
-
-app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
-  try {
-    console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);
-    const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (srvErr) throw srvErr;
-    if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
-
-    // Fix limitIp to 0 for all inbound clients directly on XUI to prevent timeouts
-    await fixLimitIpsOnAllServers();
 
     const force = req.body?.force === true;
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
@@ -3599,7 +3239,7 @@ app.get('/api/admin/servers', adminOnly, async (req, res) => {
 });
 
 app.post('/api/admin/servers', adminOnly, async (req, res) => {
-  const { name, ip, domain, api_port, username, password, location_code, is_default, xui_config_state } = req.body;
+  const { name, ip, domain, api_port, username, password, location_code, is_default } = req.body;
   
   try {
     const isDefault = !!is_default;
@@ -3620,8 +3260,7 @@ app.post('/api/admin/servers', adminOnly, async (req, res) => {
       username, 
       password, 
       location_code: location_code || 'DE',
-      is_active: true,
-      xui_config_state: xui_config_state || {}
+      is_active: true
     };
 
     // Try adding is_default if available
@@ -3733,11 +3372,9 @@ app.get('/api/sub/:id', async (req, res) => {
 
   const now = new Date();
   const expires = new Date(sub.expires_at);
-  const isInactive = sub.status !== 'active' || expires < now;
-
-  if (isInactive) {
+  if (sub.status !== 'active' || expires < now) {
     console.warn(`[SubAPI][${requestId}] Inactive or expired: ${id}. Status: ${sub.status}, Expires: ${sub.expires_at}`);
-    // DO NOT return 403. Return a valid empty response with headers so Hiddify processes the exhaustion naturally.
+    return res.status(403).send('Subscription expired or inactive');
   }
 
   // Retrieve all servers to distinguish between active, inactive, and legacy links
@@ -3768,26 +3405,34 @@ app.get('/api/sub/:id', async (req, res) => {
   }
 
   // V2Ray apps expect Base64 encoded list of links
-  let configLines = configText.split('\n')
+  const configLines = configText.split('\n')
     .map(l => l.trim())
     .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
     .filter(line => {
+      // Check if it belongs to an explicitly inactive server
       const isExplicitlyInactive = inactiveSuffices.some((suffix: string) => line.endsWith(suffix));
-      if (isExplicitlyInactive) return false;
+      if (isExplicitlyInactive) return false; // Drop dead links
+
+      // If it belongs to an active server, absolutely keep it
       const isActive = activeSuffices.some((suffix: string) => line.endsWith(suffix));
       if (isActive) return true;
+
+      // If it matches neither (meaning it has no #Server_Name suffix), it's a legacy link! Keep it so users don't lose internet.
       return true;
     })
     .join('\n');
-    
-  if (isInactive) {
-    configLines = "";
-  }
   
+  if (!configLines) {
+    console.warn(`⚠️ No valid links found for subscription: ${id}`);
+    return res.status(200).send(''); 
+  }
+
   const base64Config = Buffer.from(configLines).toString('base64');
   
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=60');
+  
+  // Standard headers for V2Ray/Hiddify
   res.setHeader('profile-title', 'izinet-vpn');
   res.setHeader('profile-update-interval', '6'); // update every 6 hours
   
@@ -3795,11 +3440,6 @@ app.get('/api/sub/:id', async (req, res) => {
   const total = Math.floor((sub.traffic_limit_mb || 0) * 1024 * 1024);
   const expireAt = Math.floor(new Date(sub.expires_at).getTime() / 1000);
   res.setHeader('Subscription-Userinfo', `upload=0; download=${used}; total=${total}; expire=${expireAt}`);
-  
-  if (!configLines) {
-    console.warn(`⚠️ No valid links found for subscription: ${id} (Or inactive)`);
-    return res.status(200).send(base64Config); 
-  }
   
   console.log(`[SubAPI][${requestId}] ✅ Delivered nodes: ${configLines.split('\n').filter(Boolean).length}`);
   console.log(`[SubAPI][${requestId}] 📋 Config sample: ${configLines.substring(0, 100)}...`);
@@ -4447,16 +4087,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', config: configStatus });
 });
 
-app.get('/api/diagnose_custom.sh', (req, res) => {
-  const filePath = path.join(process.cwd(), 'diagnose_custom.sh');
-  if (fs.existsSync(filePath)) {
-    res.setHeader('Content-Type', 'text/x-sh');
-    res.sendFile(filePath);
-  } else {
-    res.status(404).send('Diagnostics script not found on server.');
-  }
-});
-
 // --- Subscription Routes ---
 app.get('/api/subscription/plans', async (req, res) => {
   try {
@@ -4766,11 +4396,6 @@ app.post('/api/subscription/buy', async (req, res) => {
         try {
           console.log(`♻️ Syncing expiration for device ${tDevice.email} on server [${server.name}]`);
           const { instance: xuiInstance } = await getXuiForServer(server.id);
-          // We must reset traffic in XUI so the limited user is unblocked
-          try {
-            await xuiInstance.resetClientTraffic(tDevice.email, inboundId);
-          } catch(e) {}
-          
           const rawConfig = await xuiInstance.updateClient(tDevice.email, tDevice.uuid, inboundId, newExpiresAt.getTime(), limitBytes);
           
           if (rawConfig && !rawConfig.includes('security=none') && rawConfig.trim() !== '') {
@@ -4808,10 +4433,8 @@ app.post('/api/subscription/buy', async (req, res) => {
           period_months: periodMonths || 1,
           server_type: serverType || lastSub.server_type,
           device_limit: lastSub.device_limit ? Math.max(lastSub.device_limit, globalDeviceLimit) : globalDeviceLimit,
-          traffic_limit_mb: trafficLimitMb,
           v2ray_config: finalConfigJson,
           server_id: serverId,
-          traffic_used_mb: 0,
           updated_at: new Date().toISOString()
         })
         .eq('id', lastSub.id)
@@ -5294,23 +4917,14 @@ async function syncUserTraffic(userId: string) {
   const trafficUsedMb = Math.round(totalUsedBytes / (1024 * 1024));
   const trafficLimitMb = maxLimitBytes > 0 ? Math.round(maxLimitBytes / (1024 * 1024)) : sub.traffic_limit_mb || 102400;
 
-  const isOverLimit = trafficLimitMb > 0 && trafficUsedMb >= trafficLimitMb;
-  
-  const updateData: any = { 
-    traffic_used_mb: trafficUsedMb,
-    traffic_limit_mb: trafficLimitMb,
-    v2ray_config: JSON.stringify(devices)
-  };
-
-  if (isOverLimit) {
-    updateData.status = 'limited';
-    console.log(`[TrafficSync] Sub ${sub.id} automatically marked as limited. ${trafficUsedMb}MB used of ${trafficLimitMb}MB.`);
-  }
-
   // 4. Update the subscription in DB, saving back the updated devices JSON
   const { data, error } = await supabase
     .from('subscriptions')
-    .update(updateData)
+    .update({ 
+      traffic_used_mb: trafficUsedMb,
+      traffic_limit_mb: trafficLimitMb,
+      v2ray_config: JSON.stringify(devices)
+    })
     .eq('id', sub.id)
     .select()
     .maybeSingle();
@@ -5757,10 +5371,7 @@ async function startServer() {
   }
 
   // Ensure routing and out-of-the-box system config is booted and synced
-  syncAllRoutingToAllPanels()
-    .then(() => runGlobalSniMigration())
-    .then(() => fixLimitIpsOnAllServers())
-    .catch(err => console.error("System Boot Sync Error:", err));
+  syncAllRoutingToAllPanels().catch(err => console.error("System Boot Sync Error:", err));
 
   setupRealtimeListener();
   syncTrafficStats();

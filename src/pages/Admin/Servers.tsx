@@ -28,8 +28,7 @@ export function AdminServersList() {
   const [isDiagServerLoading, setIsDiagServerLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false,
-    custom_direct_domains: '', custom_proxy_domains: ''
+    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
   });
 
   const fetchServers = async () => {
@@ -80,34 +79,13 @@ export function AdminServersList() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const serverConfigState = editingId 
-        ? { 
-            ...(servers.find(s => s.id === editingId)?.xui_config_state || {}), 
-            routing_sync_disabled: formData.routing_sync_disabled,
-            custom_direct_domains: formData.custom_direct_domains,
-            custom_proxy_domains: formData.custom_proxy_domains
-          }
-        : { 
-            routing_sync_disabled: formData.routing_sync_disabled,
-            custom_direct_domains: formData.custom_direct_domains,
-            custom_proxy_domains: formData.custom_proxy_domains
-          };
-
-      const submitPayload = {
-        ...formData,
-        xui_config_state: serverConfigState
-      };
-      delete (submitPayload as any).routing_sync_disabled;
-      delete (submitPayload as any).custom_direct_domains;
-      delete (submitPayload as any).custom_proxy_domains;
-
       if (editingId) {
-        await axios.put(`/api/admin/servers/${editingId}`, submitPayload, {
+        await axios.put(`/api/admin/servers/${editingId}`, formData, {
           headers: { Authorization: `Bearer ${session?.access_token}` }
         });
         toast.success('Сервер обновлен (API)');
       } else {
-        await axios.post('/api/admin/servers', submitPayload, {
+        await axios.post('/api/admin/servers', formData, {
           headers: { Authorization: `Bearer ${session?.access_token}` }
         });
         toast.success('Сервер добавлен (API)');
@@ -115,10 +93,7 @@ export function AdminServersList() {
       
       setIsAdding(false);
       setEditingId(null);
-      setFormData({ 
-        name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false,
-        custom_direct_domains: '', custom_proxy_domains: ''
-      });
+      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
       fetchServers();
     } catch (e: any) {
       const errorMsg = e.response?.data?.error || e.message || 'Ошибка сохранения сервера';
@@ -232,24 +207,12 @@ export function AdminServersList() {
         setDiagLogs(data.logs || []);
         setDiagResultsObj(data.results || null);
       } else {
-        if (data.logs && data.logs.length > 0) {
-          setDiagLogs(data.logs);
-        } else {
-          setDiagLogs(prev => [...prev, '❌ Сбой диагностики.', `Ошибка: ${data.message || 'Неизвестная ошибка'}`]);
-        }
-        setDiagResultsObj(data.results || null);
+        setDiagLogs(prev => [...prev, '❌ Сбой диагностики.', `Ошибка: ${data.message || 'Неизвестная ошибка'}`]);
       }
     } catch (e: any) {
       console.error('Diagnosis request error:', e);
-      if (e.response?.data?.logs && e.response.data.logs.length > 0) {
-        setDiagLogs(e.response.data.logs);
-        if (e.response.data.results) {
-          setDiagResultsObj(e.response.data.results);
-        }
-      } else {
-        const errMsg = e.response?.data?.error || e.message || 'Не удалось связаться с сервером';
-        setDiagLogs(prev => [...prev, `❌ Критическая ошибка: ${errMsg}`]);
-      }
+      const errMsg = e.response?.data?.error || e.message || 'Не удалось связаться с сервером';
+      setDiagLogs(prev => [...prev, `❌ Критическая ошибка: ${errMsg}`]);
     } finally {
       setIsDiagServerLoading(false);
     }
@@ -265,10 +228,7 @@ export function AdminServersList() {
       username: server.username || '',
       password: server.password || '',
       location_code: server.location_code || 'DE',
-      is_default: !!server.is_default,
-      routing_sync_disabled: !!server.xui_config_state?.routing_sync_disabled,
-      custom_direct_domains: server.xui_config_state?.custom_direct_domains || '',
-      custom_proxy_domains: server.xui_config_state?.custom_proxy_domains || ''
+      is_default: !!server.is_default
     });
     setIsAdding(true);
   };
@@ -276,10 +236,7 @@ export function AdminServersList() {
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
-    setFormData({ 
-      name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false, routing_sync_disabled: false,
-      custom_direct_domains: '', custom_proxy_domains: ''
-    });
+    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
   };
 
   const toggleServer = async (id: string, active: boolean) => {
@@ -471,65 +428,17 @@ export function AdminServersList() {
                 onChange={e => setFormData({...formData, password: e.target.value})}
                 required
               />
-              <div className="md:col-span-2 flex flex-col gap-3.5 px-1 py-1">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    id="is_default"
-                    checked={formData.is_default}
-                    onChange={e => setFormData({...formData, is_default: e.target.checked})}
-                    className="w-4 h-4 accent-blue-600"
-                  />
-                  <label htmlFor="is_default" className="text-sm text-muted-foreground cursor-pointer">
-                    Сделать сервером по умолчанию для новых пользователей
-                  </label>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    id="routing_sync_disabled"
-                    checked={formData.routing_sync_disabled}
-                    onChange={e => setFormData({...formData, routing_sync_disabled: e.target.checked})}
-                    className="w-4 h-4 accent-red-600 mt-1"
-                  />
-                  <label htmlFor="routing_sync_disabled" className="text-sm text-muted-foreground cursor-pointer flex flex-col leading-tight gap-1">
-                    <span>Исключить из автоматической синхронизации маршрутов Xray</span>
-                    <span className="text-[10px] text-red-500 select-none">После исправления багов с geosite (SYS-26, SYS-27) синхронизация полностью безопасна. Исключайте, только если на этом сервере (например, Amster) полностью кастомные настройки outbounds/DNS.</span>
-                  </label>
-                </div>
-
-                <div className="md:col-span-2 flex flex-col gap-2 pt-3 border-t border-white/5">
-                  <span className="text-xs font-semibold text-white">Кастомные правила маршрутизации сервера</span>
-                  <p className="text-[11px] text-muted-foreground leading-normal">Кастомные правила, применяемые к Xray-конфигурации данного сервера при автоматической синхронизации маршрутов (актуально, если НЕ исключено из синхронизации выше).</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1">
-                    <div>
-                      <label htmlFor="custom_direct_domains" className="text-[11px] text-muted-foreground block mb-1">
-                        Локальный доступ (Direct / Bypass VPN) — домены через запятую:
-                      </label>
-                      <textarea
-                        id="custom_direct_domains"
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500 h-16 resize-none"
-                        placeholder="domain:ok.ru, domain:rutube.ru"
-                        value={formData.custom_direct_domains}
-                        onChange={e => setFormData({...formData, custom_direct_domains: e.target.value})}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="custom_proxy_domains" className="text-[11px] text-muted-foreground block mb-1">
-                        Проксирование (IPv6-out / VPN) — домены через запятую:
-                      </label>
-                      <textarea
-                        id="custom_proxy_domains"
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500 h-16 resize-none"
-                        placeholder="domain:customblock.com, domain:spotify.com"
-                        value={formData.custom_proxy_domains}
-                        onChange={e => setFormData({...formData, custom_proxy_domains: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                </div>
+              <div className="md:col-span-2 flex items-center gap-3 px-1">
+                <input
+                  type="checkbox"
+                  id="is_default"
+                  checked={formData.is_default}
+                  onChange={e => setFormData({...formData, is_default: e.target.checked})}
+                  className="w-4 h-4 accent-blue-600"
+                />
+                <label htmlFor="is_default" className="text-sm text-muted-foreground cursor-pointer">
+                  Сделать сервером по умолчанию для новых пользователей
+                </label>
               </div>
               <div className="md:col-span-2 flex gap-2">
                 <button type="submit" className="px-6 py-2 bg-blue-600 rounded-xl text-sm font-medium">

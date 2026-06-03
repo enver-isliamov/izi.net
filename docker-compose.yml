@@ -31,7 +31,6 @@ services:
       - "41758:2053" # Map host 41758 to container 2053 where x-ui is running
       - "8443:8443" # Alternate panel / VPN port
       - "443:443" # Run VLESS on port 443
-      - "22053:22053" # VLESS on port 22053 for backwards compatibility
     dns:
       - 8.8.8.8
       - 1.1.1.1

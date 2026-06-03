@@ -13,26 +13,7 @@ echo -e "${GREEN}🚀 Начинаем установку izinet на ваш VPS
 
 # 1. Обновление системы и установка зависимостей
 echo "📦 Обновляем системные пакеты..."
-sudo apt-get update && sudo apt-get install -y curl git jq cron sqlite3
-
-# Настройка авто-синхронизации времени через HTTP Google Date (особенно важно, если UDP NTP 123 закрыт провайдером)
-echo "⏰ Настройка синхронизации времени..."
-sudo timedatectl set-ntp true || true
-sudo systemctl enable cron || true
-sudo systemctl start cron || true
-
-# Выравниваем локальное время системы через HTTP Date (обязательно вырезая \r из заголовков во избежание "invalid date" ошибок)
-HTTP_DATE=$(curl -sI --max-time 5 https://www.google.com | grep -i '^date:' | cut -d' ' -f2- | tr -d '\r')
-if [ -n "$HTTP_DATE" ]; then
-    echo "Синхронизация через Google HTTP: $HTTP_DATE"
-    sudo date -s "$HTTP_DATE" || true
-else
-    echo "⚠️ Не удалось получить время от Google HTTP, используем системное"
-fi
-
-# Вносим в крон циклическую проверку (удаляем застрявшие \r для стабильной работы команды date -s)
-(crontab -l 2>/dev/null | grep -v "date -s" ; echo "*/15 * * * * [ -n \"\$(curl -sI --max-time 5 https://www.google.com | grep -i '^date:' | cut -d' ' -f2- | tr -d '\\r')\" ] && sudo date -s \"\$(curl -sI --max-time 5 https://www.google.com | grep -i '^date:' | cut -d' ' -f2- | tr -d '\\r')\" > /dev/null 2>&1") | crontab -
-echo "✅ Задача авто-синхронизации времени через HTTP внесена в cron!"
+sudo apt-get update && sudo apt-get install -y curl git jq
 
 # 2. Установка Docker, если он не установлен
 if ! [ -x "$(command -v docker)" ]; then
@@ -61,7 +42,7 @@ if [ ! -f "docker-compose.yml" ]; then
     cd $INSTALL_DIR
 fi
 
-# 4. Настройка .env (Интерактивно / С поддержкой автоматического режима)
+# 4. Настройка .env (Интерактивно)
 ENV_NEEDS_CONFIG=false
 if [ ! -f .env ]; then
     ENV_NEEDS_CONFIG=true
@@ -73,31 +54,14 @@ else
 fi
 
 if [ "$ENV_NEEDS_CONFIG" = "true" ]; then
-    # Проверяем, переданы ли переменные окружения напрямую (unattended-режим)
-    if [ -n "$VITE_SUPABASE_URL" ] && [ -n "$VITE_SUPABASE_ANON_KEY" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-        echo -e "${GREEN}⚙️ Обнаружены предустановленные переменные окружения. Выполняем авто-конфигурацию...${NC}"
-        SB_URL="$VITE_SUPABASE_URL"
-        SB_ANON="$VITE_SUPABASE_ANON_KEY"
-        SB_SERVICE="$SUPABASE_SERVICE_ROLE_KEY"
-        TG_TOKEN="$TELEGRAM_BOT_TOKEN"
-        TG_NAME="$VITE_TELEGRAM_BOT_NAME"
-        TG_ADMIN="${TELEGRAM_ADMIN_ID:-}"
-        ENOT_MERCH="${ENOT_MERCHANT_ID:-}"
-        ENOT_S1="${ENOT_SECRET_KEY:-}"
-        ENOT_S2="${ENOT_SECRET_KEY2:-}"
-    else
-        echo -e "${GREEN}⚙️ Настройка окружения. Нам нужны ваши ключи Supabase:${NC}"
-        # Считываем данные с терминала напрямую
-        read -p "Supabase URL (например, https://xxx.supabase.co): " SB_URL < /dev/tty
-        read -p "Supabase Anon Key: " SB_ANON < /dev/tty
-        read -p "Supabase Service Role Key: " SB_SERVICE < /dev/tty
-        read -p "Telegram Bot Token: " TG_TOKEN < /dev/tty
-        read -p "Telegram Bot Name (без @): " TG_NAME < /dev/tty
-        read -p "Telegram Admin ID (опционально): " TG_ADMIN < /dev/tty
-        read -p "Enot ID кассы (опционально): " ENOT_MERCH < /dev/tty
-        read -p "Enot Secret Key #1 (опционально): " ENOT_S1 < /dev/tty
-        read -p "Enot Secret #2 (опционально): " ENOT_S2 < /dev/tty
-    fi
+    echo -e "${GREEN}⚙️ Настройка окружения. Нам нужны ваши ключи Supabase:${NC}"
+    
+    # Считываем данные с терминала напрямую
+    read -p "Supabase URL (например, https://xxx.supabase.co): " SB_URL < /dev/tty
+    read -p "Supabase Anon Key: " SB_ANON < /dev/tty
+    read -p "Supabase Service Role Key: " SB_SERVICE < /dev/tty
+    read -p "Telegram Bot Token: " TG_TOKEN < /dev/tty
+    read -p "Telegram Bot Name (без @): " TG_NAME < /dev/tty
 
     cp .env.example .env
     
@@ -107,11 +71,6 @@ if [ "$ENV_NEEDS_CONFIG" = "true" ]; then
     sed -i "s|SUPABASE_SERVICE_ROLE_KEY=.*|SUPABASE_SERVICE_ROLE_KEY=$SB_SERVICE|" .env
     sed -i "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=$TG_TOKEN|" .env
     sed -i "s|VITE_TELEGRAM_BOT_NAME=.*|VITE_TELEGRAM_BOT_NAME=$TG_NAME|" .env
-    
-    if [ -n "$TG_ADMIN" ]; then sed -i "s|TELEGRAM_ADMIN_ID=.*|TELEGRAM_ADMIN_ID=$TG_ADMIN|" .env; fi
-    if [ -n "$ENOT_MERCH" ]; then sed -i "s|ENOT_MERCHANT_ID=.*|ENOT_MERCHANT_ID=$ENOT_MERCH|" .env; fi
-    if [ -n "$ENOT_S1" ]; then sed -i "s|ENOT_SECRET_KEY=.*|ENOT_SECRET_KEY=$ENOT_S1|" .env; fi
-    if [ -n "$ENOT_S2" ]; then sed -i "s|ENOT_SECRET_KEY2=.*|ENOT_SECRET_KEY2=$ENOT_S2|" .env; fi
     
     # Настройки для встроенного 3x-ui
     sed -i "s|XUI_HOST=.*|XUI_HOST=http://x3-ui:2053|" .env
