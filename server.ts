@@ -1748,20 +1748,9 @@ async function runGlobalSniMigration() {
           }
 
           let settingsUpdated = false;
+          // Restore original fallback logic natively
           if (settings.fallbacks && Array.isArray(settings.fallbacks)) {
-             const originalLength = settings.fallbacks.length;
-             // Remove any default fallback (no name) that routes to docker.internal or internal network
-             settings.fallbacks = settings.fallbacks.filter((f: any) => {
-               if (!f.name && f.dest && (f.dest.includes('docker.internal') || f.dest.includes('127.0.0.1'))) {
-                 return false;
-               }
-               return true;
-             });
-             if (settings.fallbacks.length !== originalLength) {
-               inbound.settings = JSON.stringify(settings);
-               settingsUpdated = true;
-               console.log(`⚠️ [System-Migrate] Removed dangerous default catch-all fallback causing cert leak on server "${server.name}".`);
-             }
+             // Fallbacks are handled natively by XUI config, we do not filter them natively.
           }
 
           let streamUpdated = false;
@@ -1771,13 +1760,11 @@ async function runGlobalSniMigration() {
             const hasGoogle = serverNames.some((n: string) => n.toLowerCase().includes('google.com'));
             
             // Check if SNI is wrong OR if dest/target points to our internal network (which destroys Reality camouflage)
-            const hasInternalLeak = (reality.dest && reality.dest.includes('docker.internal')) || (reality.target && reality.target.includes('docker.internal'));
-
-            if (hasGoogle || serverNames.length === 0 || hasInternalLeak) {
-              console.log(`⚠️ [System-Migrate] Flawed SNI or Internal Leak found at inbound id ${inbound.id} on server "${server.name}". Cleaning REALITY camouflage...`);
+            if (hasGoogle || serverNames.length === 0) {
+              console.log(`⚠️ [System-Migrate] Flawed SNI found at inbound id ${inbound.id} on server "${server.name}". Cleaning REALITY camouflage...`);
               reality.serverNames = ["www.microsoft.com", "microsoft.com"];
-              reality.target = "www.microsoft.com:443";
-              reality.dest = "www.microsoft.com:443";
+              reality.target = "host.docker.internal:3443";
+              reality.dest = "host.docker.internal:3443";
               
               streamSettings.realitySettings = reality;
               inbound.streamSettings = JSON.stringify(streamSettings);
@@ -3087,8 +3074,8 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
         const payload = {
           up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
           listen: "", port: 443, protocol: "vless",
-          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0}]}),
-          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"www.microsoft.com:443", dest:"www.microsoft.com:443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
+          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
+          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
         await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
