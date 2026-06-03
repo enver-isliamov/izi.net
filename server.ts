@@ -3401,14 +3401,12 @@ app.post('/api/admin/servers/:id/restore', adminOnly, async (req, res) => {
   }
 });
 
-app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
+async function fixLimitIpsOnAllServers() {
   try {
-    console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);
+    console.log(`[System] Running global limitIp=0 fix on all active servers...`);
     const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (srvErr) throw srvErr;
-    if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
+    if (srvErr || !activeServers) return;
 
-    // Fix limitIp to 0 for all inbound clients directly on XUI to prevent timeouts
     for (const server of activeServers) {
         try {
             console.log(`Fixing limitIp=0 on server ${server.name}...`);
@@ -3445,6 +3443,20 @@ app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
             console.error(`Error fixing limitIp on ${server.name}:`, e.message);
         }
     }
+  } catch (error: any) {
+    console.error('Failed to run global limitIp fix:', error);
+  }
+}
+
+app.post('/api/admin/system/sync-servers', adminOnly, async (req, res) => {
+  try {
+    console.log(`[SyncServers] Manual synchronization of users to active servers triggered`);
+    const { data: activeServers, error: srvErr } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (srvErr) throw srvErr;
+    if (!activeServers || activeServers.length === 0) return res.json({ status: 'ok', msg: 'No active servers' });
+
+    // Fix limitIp to 0 for all inbound clients directly on XUI to prevent timeouts
+    await fixLimitIpsOnAllServers();
 
     const force = req.body?.force === true;
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
@@ -5752,6 +5764,7 @@ async function startServer() {
   // Ensure routing and out-of-the-box system config is booted and synced
   syncAllRoutingToAllPanels()
     .then(() => runGlobalSniMigration())
+    .then(() => fixLimitIpsOnAllServers())
     .catch(err => console.error("System Boot Sync Error:", err));
 
   setupRealtimeListener();
