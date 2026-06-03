@@ -1585,10 +1585,11 @@ async function syncAllRoutingToAllPanels() {
         }
         console.log(`Syncing routing and Xray Config to ${server.name}...`);
         const { instance: xuiInstance } = await getXuiForServer(server.id);
+        if (!xuiInstance['sessionCookie']) await xuiInstance.login();
         const headers = { headers: { ...xuiInstance.authHeaders(), Cookie: xuiInstance['sessionCookie'] } };
         
         // 1. GET Current Xray Settings
-        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, headers));
+        const xrayR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, {}, getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/`, headers.headers, 10000)));
         if (!xrayR.data?.success) throw new Error("Failed to fetch Xray config");
         const parsedObj = JSON.parse(xrayR.data.obj);
         let xrayConfig = parsedObj.xraySetting;
@@ -1693,7 +1694,7 @@ async function syncAllRoutingToAllPanels() {
         updatePayload.append("xraySetting", JSON.stringify(xrayConfig));
         if (parsedObj.outboundTestUrl) updatePayload.append("outboundTestUrl", parsedObj.outboundTestUrl);
         
-        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), headers));
+        const updateR = await import('axios').then(a => a.default.post(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, updatePayload.toString(), getRequestConfig(`${xuiInstance['host']}${xuiInstance['basePath']}/panel/xray/update`, headers.headers, 10000)));
         if (!updateR.data?.success) throw new Error(updateR.data?.msg || "Update failed");
 
         await xuiInstance.restartPanel();
@@ -1748,9 +1749,24 @@ async function runGlobalSniMigration() {
           }
 
           let settingsUpdated = false;
-          // Restore original fallback logic natively
-          if (settings.fallbacks && Array.isArray(settings.fallbacks)) {
-             // Fallbacks are handled natively by XUI config, we do not filter them natively.
+          // Restore ONLY specific fallbacks for our website without a catch-all to prevent Reality dest bypass
+          if (!settings.fallbacks || !Array.isArray(settings.fallbacks) || settings.fallbacks.length === 0) {
+             settings.fallbacks = [
+               {name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},
+               {name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0}
+             ];
+             inbound.settings = JSON.stringify(settings);
+             settingsUpdated = true;
+             console.log(`✅ [System-Migrate] Restored required NGINX SNI fallbacks at inbound id ${inbound.id} on server "${server.name}".`);
+          } else {
+             // Remove any default fallback (no name) so that unrecognized SNI goes to Reality dest (Microsoft)
+             const hasDefault = settings.fallbacks.findIndex((f: any) => !f.name && f.dest);
+             if (hasDefault !== -1) {
+                settings.fallbacks.splice(hasDefault, 1);
+                inbound.settings = JSON.stringify(settings);
+                settingsUpdated = true;
+                console.log(`✅ [System-Migrate] Removed default fallback to prevent DPI leakage at inbound id ${inbound.id} on server "${server.name}".`);
+             }
           }
 
           let streamUpdated = false;
@@ -3074,7 +3090,7 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
         const payload = {
           up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
           listen: "", port: 443, protocol: "vless",
-          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
+          settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0}]}),
           streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"www.microsoft.com:443", dest:"www.microsoft.com:443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
