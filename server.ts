@@ -1761,18 +1761,16 @@ async function runGlobalSniMigration() {
              console.log(`✅ [System-Migrate] Restored required NGINX SNI fallbacks at inbound id ${inbound.id} on server "${server.name}".`);
           }
 
-          let streamUpdated = false;
+         let streamUpdated = false;
           if (streamSettings.security === 'reality') {
             const reality = streamSettings.realitySettings || {};
             const serverNames = reality.serverNames || [];
             
             // Check if dest/target points to external network (we need local nginx for website fallback)
-            if (reality.dest !== 'host.docker.internal:3443' || reality.target !== 'host.docker.internal:3443') {
-              console.log(`⚠️ [System-Migrate] Flawed SNI or External Leak found at inbound id ${inbound.id} on server "${server.name}". Cleaning REALITY camouflage to local NGINX...`);
-              // We'll keep whatever serverNames are there, but ensure izinet is present just in case
-              if (!serverNames.includes("izinet.online")) {
-                 reality.serverNames.push("izinet.online", "www.izinet.online");
-              }
+            if (reality.dest !== 'host.docker.internal:3443' || reality.target !== 'host.docker.internal:3443' || serverNames.includes("izinet.online")) {
+              console.log(`⚠️ [System-Migrate] Flawed SNI or External Leak found at inbound id ${inbound.id} on server "${server.name}". Restoring REALITY to RECO.MD defaults...`);
+              
+              reality.serverNames = ["www.microsoft.com", "microsoft.com"];
               reality.target = "host.docker.internal:3443";
               reality.dest = "host.docker.internal:3443";
               
@@ -1812,11 +1810,8 @@ async function runGlobalSniMigration() {
         if (!sub.v2ray_config) continue;
         let configStr = sub.v2ray_config;
         let changed = false;
-        if (configStr.includes('sni=www.microsoft.com') || configStr.includes('sni=microsoft.com') || configStr.includes('sni=google.com')) {
-          configStr = configStr.replace(/sni=www\.microsoft\.com/g, 'sni=izinet.online');
-          configStr = configStr.replace(/sni=microsoft\.com/g, 'sni=izinet.online');
-          configStr = configStr.replace(/sni=google\.com/g, 'sni=izinet.online');
-          configStr = configStr.replace(/sni=dl\.google\.com/g, 'sni=izinet.online');
+        if (configStr.includes('sni=izinet.online')) {
+          configStr = configStr.replace(/sni=izinet\.online/g, 'sni=www.microsoft.com');
           changed = true;
         }
         if (changed) {
@@ -1829,7 +1824,7 @@ async function runGlobalSniMigration() {
         }
       }
       if (updatedCount > 0) {
-        console.log(`✅ [System-Migrate] Migrated ${updatedCount} subscriptions v2ray_config records to use izinet.online.`);
+        console.log(`✅ [System-Migrate] Migrated ${updatedCount} subscriptions v2ray_config records to use www.microsoft.com (Reverted).`);
       }
     }
   } catch (error: any) {
@@ -3090,7 +3085,7 @@ app.post('/api/admin/servers/:id/check', adminOnly, async (req, res) => {
           up: 0, down: 0, total: 0, remark: "IZINET VLESS REALITY", enable: true, expiryTime: 0,
           listen: "", port: 443, protocol: "vless",
           settings: JSON.stringify({clients:[], decryption:"none", fallbacks:[{name:"izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{name:"www.izinet.online",alpn:"",path:"",dest:"host.docker.internal:3443",xver:0},{dest:"host.docker.internal:3443",xver:0}]}),
-          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["izinet.online","www.izinet.online"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
+          streamSettings: JSON.stringify({network:"tcp", security:"reality", realitySettings:{show:false, target:"host.docker.internal:3443", dest:"host.docker.internal:3443", xver:0, serverNames:["www.microsoft.com","microsoft.com"], privateKey:"ABiVSJTP0fEMzgsHghSAsQJp-bYAJAAt0jErpzaGtEo", publicKey:"CXL0o8BEC7wz-TluA7w-QBbJladSsb9xL7G6UB410Xw", shortIds:["","0123456789abcdef"]}, tcpSettings:{acceptProxyProtocol:false, header:{type:"none"}}}),
           sniffing: JSON.stringify({enabled:true, destOverride:["http","tls"], routeOnly:false})
         };
         await axios.post(`${instance['host']}${instance['basePath']}/panel/api/inbounds/add`, payload, {
