@@ -8,9 +8,7 @@ import time
 DB_PATH = "/opt/izinet/xui-db/x-ui.db"
 PROJECT_DIR = "/opt/izinet"
 
-def run_cmd(cmd_list, desc=""):
-    if desc:
-        print(f"\n⚡ {desc}...")
+def run_cmd(cmd_list):
     try:
         res = subprocess.run(cmd_list, capture_output=True, text=True, timeout=30)
         return True, res.stdout
@@ -19,7 +17,7 @@ def run_cmd(cmd_list, desc=""):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET EMERGENCY: DISABLING BROKEN PORT 8443")
+    print("🛠️  IZINET FINAL OPTIMIZATION: STABILITY & DPI BYPASS")
     print("====================================================")
     
     if not os.path.exists(DB_PATH):
@@ -29,12 +27,13 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 1. Жестко отключаем все инбаунды на порту 8443
-    print("🛑 Disabling all inbounds on port 8443 to stop Xray crashes...")
-    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port = 8443;")
-    
-    # 2. Проверяем 443 порт (Reality)
-    print("⚙️  Checking Reality configuration on port 443...")
+    # 1. Очистка проблемных настроек панели (ExternalTrafficInformURI)
+    print("🧹 Cleaning up problematic panel settings (Fixing Log Spam)...")
+    # Мы ищем настройки, которые вызывают ошибки 'missing port in address'
+    cursor.execute("UPDATE settings SET value = '' WHERE key = 'ExternalTrafficInformURI';")
+
+    # 2. Оптимизация 443 порта (Reality) для обхода блокировок
+    print("⚙️  Optimizing Reality SNI and parameters for better stability...")
     cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
     inbound = cursor.fetchone()
     if inbound:
@@ -42,44 +41,52 @@ def main():
         settings = json.loads(settings_str)
         stream = json.loads(stream_str)
         
-        # Гарантируем Reality
-        stream["security"] = "reality"
+        # Используем dl.google.com - он крайне стабилен и редко блокируется
+        # Также добавляем параметры для Reality, которые лучше работают в сложных сетях
         if "realitySettings" not in stream:
             stream["realitySettings"] = {}
-        
-        # Ставим корректный fallback
-        settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
-        stream["realitySettings"]["dest"] = "host.docker.internal:3443"
-        stream["realitySettings"]["target"] = "host.docker.internal:3443"
-        
-        # Удаляем TLS настройки если они остались от старых попыток
-        if "tlsSettings" in stream:
-            del stream["tlsSettings"]
             
+        rs = stream["realitySettings"]
+        rs["dest"] = "dl.google.com:443"
+        rs["serverNames"] = ["dl.google.com"]
+        
+        # Гарантируем правильные fallbacks на локальный сайт
+        settings["fallbacks"] = [
+            {"dest": "host.docker.internal:3443", "xver": 0},
+            {"name": "izinet.online", "dest": "host.docker.internal:3443", "xver": 0}
+        ]
+        
+        # Настройка TCP/Vision
+        stream["network"] = "tcp"
+        stream["security"] = "reality"
+        
         cursor.execute("UPDATE inbounds SET settings = ?, stream_settings = ?, enable = 1 WHERE id = ?;", 
                        (json.dumps(settings), json.dumps(stream), iid))
     
+    # 3. Отключаем всё лишнее на порту 8443
+    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port = 8443;")
+    
     conn.commit()
     conn.close()
-    print("✅ Database cleaned.")
+    print("✅ Database optimized.")
 
-    # 3. Перезапуск
-    print("🔄 Restarting containers...")
-    subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
-    subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
+    # 4. Перезапуск системы
+    print("🔄 Applying changes (Docker restart)...")
+    subprocess.run(["docker", "compose", "restart"], cwd=PROJECT_DIR)
     
-    print("⏳ Waiting for Xray startup...")
+    print("⏳ Waiting for stabilization...")
     time.sleep(5)
     
-    # 4. Проверка логов
-    _, logs = run_cmd(["docker", "logs", "x3-ui", "--tail", "10"])
-    print("\n📝 Current Xray Logs:")
+    # 5. Проверка логов
+    _, logs = run_cmd(["docker", "logs", "x3-ui", "--tail", "15"])
+    print("\n📝 Final Status Logs:")
     print(logs)
     
-    if "Failed to start" in logs:
-        print("\n❌ Xray STILL failing. Please check if there are other broken ports in the panel.")
+    if "Xray" in logs and "started" in logs:
+        print("\n🟢 SYSTEM IS LIVE AND OPTIMIZED!")
+        print("💡 TIP: If PC connection is slow, enable 'Fragment' in Hiddify settings.")
     else:
-        print("\n🟢 Xray should be working now! Check your site and VPN.")
+        print("\n⚠️ System started with warnings. Please check the logs above.")
 
 if __name__ == "__main__":
     main()
