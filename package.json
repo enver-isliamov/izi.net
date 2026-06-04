@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx --insecure-http-parser server.ts",
+    "dev": "tsx --insecure-http-parser server/src/index.ts",
     "build": "vite build",
-    "start": "tsx --insecure-http-parser server.ts",
+    "start": "tsx --insecure-http-parser server/src/index.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
