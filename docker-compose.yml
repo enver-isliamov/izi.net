@@ -24,6 +24,8 @@ services:
       - "2053:2053"
     volumes:
       - ./xui-db:/etc/x-ui
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - izinet-net
 
