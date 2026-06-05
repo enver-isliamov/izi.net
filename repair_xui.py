@@ -10,7 +10,7 @@ PROJECT_DIR = "/opt/izinet"
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET COMPATIBILITY RECOVERY & UI FIX")
+    print("🛠️  IZINET ULTIMATE STABILITY REPAIR")
     print("====================================================")
     
     if not os.path.exists(DB_PATH):
@@ -20,12 +20,12 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 1. ВОССТАНОВЛЕНИЕ ОРИГИНАЛЬНОГО КЛЮЧА REALITY (для совместимости со старыми ссылками)
-    # Эти ключи соответствуют тем, что прописаны в базе подписок сайта
+    # 1. СТРОГОЕ ВОССТАНОВЛЕНИЕ REALITY (Microsoft SNI + Fixed Keys)
+    # Эти ключи должны на 100% совпадать с тем, что в Hiddify
     ORIGINAL_PRIV_KEY = "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo"
     ORIGINAL_PUB_KEY = "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw"
     
-    print("⚙️  Restoring original Reality keys for link compatibility...")
+    print("⚙️  Enforcing Reality stability configuration...")
     cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
     inbound = cursor.fetchone()
     if inbound:
@@ -33,7 +33,7 @@ def main():
         settings = json.loads(sett_str)
         stream = json.loads(stream_str)
         
-        # Настройка Reality
+        # Фиксируем параметры Reality
         stream["security"] = "reality"
         if "realitySettings" not in stream: stream["realitySettings"] = {}
         rs = stream["realitySettings"]
@@ -41,50 +41,48 @@ def main():
         rs["privateKey"] = ORIGINAL_PRIV_KEY
         rs["dest"] = "www.microsoft.com:443"
         rs["serverNames"] = ["www.microsoft.com", "microsoft.com"]
+        rs["shortIds"] = ["79b27cf7799d5b4c"] # Фиксируем SID чтобы ссылки не "бились"
         
-        # В некоторых версиях XUI ключи лежат в settings внутри realitySettings
         if "settings" not in rs: rs["settings"] = {}
         rs["settings"]["publicKey"] = ORIGINAL_PUB_KEY
-        rs["publicKey"] = ORIGINAL_PUB_KEY # Дублируем для надежности
+        rs["publicKey"] = ORIGINAL_PUB_KEY
         
-        # Настройка Fallback (чтобы сайт открывался через 443 порт)
-        settings["fallbacks"] = [
-            {"dest": "host.docker.internal:3443", "xver": 0},
-            {"name": "izinet.online", "dest": "host.docker.internal:3443", "xver": 0}
-        ]
+        # Fallback на локальный Nginx (сайт)
+        settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
         
         cursor.execute("UPDATE inbounds SET settings = ?, stream_settings = ?, enable = 1 WHERE id = ?;", 
                        (json.dumps(settings), json.dumps(stream), iid))
-        print("✅ Original keys and fallback restored on port 443.")
+        print("✅ Port 443: Reality (Microsoft) + Fallback fixed.")
 
-    # 2. ОТКЛЮЧЕНИЕ ПРОБЛЕМНЫХ ПОРТОВ (чтобы Xray не падал)
-    print("🧹 Disabling broken port 8443...")
-    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port = 8443;")
-
-    # 3. ОЧИСТКА СПАМА В ЛОГАХ (чтобы API сайта работало быстрее)
-    print("🧹 Cleaning panel settings table...")
+    # 2. ПОЛНОЕ УСТРАНЕНИЕ СПАМА В ЛОГАХ
+    print("🧹 Fixing panel settings (Cleaning Log Spam)...")
     try:
-        # Мы ставим фиктивный валидный адрес, чтобы XUI не ругался на 'missing port'
-        cursor.execute("UPDATE settings SET value = 'http://127.0.0.1:2053/ignore' WHERE key = 'ExternalTrafficInformURI';")
+        # Мы ставим локальный адрес приложения, чтобы XUI не ругался на отсутствие порта
+        cursor.execute("UPDATE settings SET value = 'http://127.0.0.1:3005/api/ignore' WHERE key = 'ExternalTrafficInformURI';")
         cursor.execute("UPDATE settings SET value = 'false' WHERE key = 'TgBotEnable';")
     except: pass
+
+    # 3. ОТКЛЮЧЕНИЕ ВСЕХ ЛИШНИХ ПОРТОВ
+    print("🛑 Disabling all non-standard inbounds...")
+    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port != 443 AND port != 2053 AND port != 2096;")
 
     conn.commit()
     conn.close()
 
-    # 4. ПЕРЕЗАПУСК ВСЕЙ СИСТЕМЫ
-    print("\n🔄 Restarting all services for synchronization...")
-    # Гарантируем, что системный nginx выключен
-    subprocess.run(["sudo", "systemctl", "stop", "nginx"], capture_output=True)
-    
+    # 4. ПЕРЕЗАПУСК ВСЕХ КОНТЕЙНЕРОВ
+    print("\n🔄 Hard restarting all containers to apply optimizations...")
     subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
     subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
     
-    print("\n⏳ Waiting 5s for Xray to sync with the Backend...")
-    time.sleep(5)
+    print("\n⏳ Waiting for system to settle (10s)...")
+    time.sleep(10)
+    
+    print("\n--- FINAL SYSTEM STATUS ---")
+    subprocess.run(["docker", "ps"], cwd=PROJECT_DIR)
     
     print("\n====================================================")
-    print("✅ ВСЕ ССЫЛКИ ВОССТАНОВЛЕНЫ. СКЕЛЕТОНЫ ДОЛЖНЫ ИСЧЕЗНУТЬ.")
+    print("🚀 ВСЁ ИСПРАВЛЕНО! САЙТ И ВПН ДОЛЖНЫ ЛЕТАТЬ.")
+    print("💡 СОВЕТ: Удалите мертвые серверы в админке (вкладка Серверы)!")
     print("====================================================")
 
 if __name__ == "__main__":

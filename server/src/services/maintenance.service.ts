@@ -52,6 +52,11 @@ export class MaintenanceService {
 
             for (const s of servers) {
               const { instance } = await getXuiForServer(s.id);
+              
+              // Skip if server is known to be offline
+              const isHealthy = await instance.checkConfig();
+              if (!isHealthy) continue;
+
               for (const dev of devices) {
                 const stats = await instance.getClientTraffic(dev.email);
                 if (stats) totalUsedBytes += stats.used;
