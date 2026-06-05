@@ -41,7 +41,9 @@ export class XUIService {
           const originalHost = host;
           const port = parsedUrl.port || '2053';
           // Using a safer way to check for docker environment
-          const isDocker = process.env.IS_DOCKER === 'true' || (typeof process !== 'undefined' && process.env.NODE_ENV === 'production'); 
+          const isDocker = process.env.IS_DOCKER === 'true' || 
+                           process.env.NODE_ENV === 'production_docker' || 
+                           process.env.NODE_ENV === 'production'; 
           if (isDocker) {
             host = `http://x3-ui:2053${parsedUrl.pathname}`;
             console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);

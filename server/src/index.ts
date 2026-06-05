@@ -6,6 +6,8 @@ import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
 import adminRoutes from './routes/admin';
 import paymentRoutes from './routes/payments';
+import userRoutes from './routes/user';
+import configRoutes from './routes/config';
 
 dotenv.config();
 
@@ -16,6 +18,8 @@ app.use(cors());
 app.use(express.json());
 
 // API Routes
+app.use('/api', userRoutes);
+app.use('/api', configRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/pay', paymentRoutes);
 

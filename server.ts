@@ -972,6 +972,23 @@ async function getXuiForServer(serverId?: string | null) {
     }
   }
 
+  // --- Docker Router Optimization ---
+  try {
+    const url = new URL(host);
+    const hn = url.hostname;
+    // If the server IP or domain matches the local server, use internal docker name
+    if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
+      const isDocker = process.env.NODE_ENV === 'production_docker' || process.env.IS_DOCKER === 'true';
+      if (isDocker) {
+        const originalHost = host;
+        const internalPort = url.port || '2053';
+        host = `http://x3-ui:${internalPort}${url.pathname}`;
+        console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+      }
+    }
+  } catch (e) {}
+  // ----------------------------------
+
   const newInstance = new XUIService({
     host,
     username: server.username,

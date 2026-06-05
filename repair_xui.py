@@ -10,7 +10,7 @@ PROJECT_DIR = "/opt/izinet"
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET EMERGENCY RECOVERY: FIXING TIMEOUTS")
+    print("🛠️  IZINET COMPATIBILITY RECOVERY & UI FIX")
     print("====================================================")
     
     if not os.path.exists(DB_PATH):
@@ -20,17 +20,12 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 1. ОТКЛЮЧАЕМ ВСЕ ИНБАУНДЫ КРОМЕ 443
-    print("🧹 Disabling all inbounds except port 443...")
-    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port != 443;")
-
-    # 2. ОЧИСТКА НАСТРОЕК (ExternalTrafficInformURI)
-    print("🧹 Cleaning settings to stop log spam...")
-    # Ставим корректный пустой URL или null
-    cursor.execute("UPDATE settings SET value = '' WHERE key = 'ExternalTrafficInformURI';")
+    # 1. ВОССТАНОВЛЕНИЕ ОРИГИНАЛЬНОГО КЛЮЧА REALITY (для совместимости со старыми ссылками)
+    # Эти ключи соответствуют тем, что прописаны в базе подписок сайта
+    ORIGINAL_PRIV_KEY = "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo"
+    ORIGINAL_PUB_KEY = "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw"
     
-    # 3. НАСТРОЙКА REALITY НА 443 (Возврат на Microsoft)
-    print("⚙️  Reverting SNI to www.microsoft.com (more stable for Crimea)...")
+    print("⚙️  Restoring original Reality keys for link compatibility...")
     cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
     inbound = cursor.fetchone()
     if inbound:
@@ -38,44 +33,56 @@ def main():
         settings = json.loads(sett_str)
         stream = json.loads(stream_str)
         
-        # Reality Settings
+        # Настройка Reality
+        stream["security"] = "reality"
         if "realitySettings" not in stream: stream["realitySettings"] = {}
         rs = stream["realitySettings"]
+        
+        rs["privateKey"] = ORIGINAL_PRIV_KEY
         rs["dest"] = "www.microsoft.com:443"
         rs["serverNames"] = ["www.microsoft.com", "microsoft.com"]
-        stream["security"] = "reality"
         
-        # Fallback
-        settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
+        # В некоторых версиях XUI ключи лежат в settings внутри realitySettings
+        if "settings" not in rs: rs["settings"] = {}
+        rs["settings"]["publicKey"] = ORIGINAL_PUB_KEY
+        rs["publicKey"] = ORIGINAL_PUB_KEY # Дублируем для надежности
+        
+        # Настройка Fallback (чтобы сайт открывался через 443 порт)
+        settings["fallbacks"] = [
+            {"dest": "host.docker.internal:3443", "xver": 0},
+            {"name": "izinet.online", "dest": "host.docker.internal:3443", "xver": 0}
+        ]
         
         cursor.execute("UPDATE inbounds SET settings = ?, stream_settings = ?, enable = 1 WHERE id = ?;", 
                        (json.dumps(settings), json.dumps(stream), iid))
-        print("✅ Port 443 re-configured.")
+        print("✅ Original keys and fallback restored on port 443.")
+
+    # 2. ОТКЛЮЧЕНИЕ ПРОБЛЕМНЫХ ПОРТОВ (чтобы Xray не падал)
+    print("🧹 Disabling broken port 8443...")
+    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port = 8443;")
+
+    # 3. ОЧИСТКА СПАМА В ЛОГАХ (чтобы API сайта работало быстрее)
+    print("🧹 Cleaning panel settings table...")
+    try:
+        cursor.execute("UPDATE settings SET value = '' WHERE key = 'ExternalTrafficInformURI';")
+    except: pass
 
     conn.commit()
-    
-    # 4. ДАМП ДАННЫХ ДЛЯ ДИАГНОСТИКИ
-    print("\n--- Diagnostic Dump ---")
-    cursor.execute("SELECT id, port, protocol, enable, remark FROM inbounds;")
-    for row in cursor.fetchall():
-        print(f"Inbound: ID={row[0]}, Port={row[1]}, Proto={row[2]}, Enabled={row[3]}, Remark={row[4]}")
-    
     conn.close()
 
-    # 5. ПЕРЕЗАПУСК
-    print("\n🔄 Restarting system...")
+    # 4. ПЕРЕЗАПУСК ВСЕЙ СИСТЕМЫ
+    print("\n🔄 Restarting all services for synchronization...")
+    # Гарантируем, что системный nginx выключен
+    subprocess.run(["sudo", "systemctl", "stop", "nginx"], capture_output=True)
+    
     subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
     subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
     
-    print("\n⏳ Waiting for startup...")
+    print("\n⏳ Waiting 5s for Xray to sync with the Backend...")
     time.sleep(5)
     
-    res = subprocess.run(["docker", "logs", "x3-ui", "--tail", "10"], capture_output=True, text=True)
-    print("\n📝 Logs snapshot:")
-    print(res.stdout)
-
     print("\n====================================================")
-    print("✅ RECOVERY COMPLETE. PLEASE GENERATE A NEW LINK!")
+    print("✅ ВСЕ ССЫЛКИ ВОССТАНОВЛЕНЫ. СКЕЛЕТОНЫ ДОЛЖНЫ ИСЧЕЗНУТЬ.")
     print("====================================================")
 
 if __name__ == "__main__":
