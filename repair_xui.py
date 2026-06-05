@@ -64,7 +64,9 @@ def main():
     # 3. ОЧИСТКА СПАМА В ЛОГАХ (чтобы API сайта работало быстрее)
     print("🧹 Cleaning panel settings table...")
     try:
-        cursor.execute("UPDATE settings SET value = '' WHERE key = 'ExternalTrafficInformURI';")
+        # Мы ставим фиктивный валидный адрес, чтобы XUI не ругался на 'missing port'
+        cursor.execute("UPDATE settings SET value = 'http://127.0.0.1:2053/ignore' WHERE key = 'ExternalTrafficInformURI';")
+        cursor.execute("UPDATE settings SET value = 'false' WHERE key = 'TgBotEnable';")
     except: pass
 
     conn.commit()

@@ -76,23 +76,35 @@ export class XUIService {
     this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || '').trim();
   }
 
+  private static offlineServers = new Set<string>();
+  private static lastCheck = new Map<string, number>();
+
   async checkConfig() {
-    if (!this.host || !this.username || !this.password) {
-      console.warn(`⚠️ 3x-ui credentials missing for host: ${this.host}`);
-      return false;
+    if (!this.host || !this.username || !this.password) return false;
+    
+    // Fast fail for known offline servers (cache for 5 minutes)
+    if (XUIService.offlineServers.has(this.host)) {
+      const last = XUIService.lastCheck.get(this.host) || 0;
+      if (Date.now() - last < 5 * 60 * 1000) return false;
     }
+
     try {
       await this.login();
+      XUIService.offlineServers.delete(this.host);
       return true;
     } catch (e: any) {
-      console.error(`❌ 3x-ui connection failed [${this.host}${this.basePath}]:`, e.message);
+      XUIService.offlineServers.add(this.host);
+      XUIService.lastCheck.set(this.host, Date.now());
       return false;
     }
   }
 
   async login(force: boolean = false): Promise<string> {
-    if (!this.host) {
-      throw new Error('XUI_HOST is empty. Please set it in Settings -> Secrets.');
+    if (!this.host) throw new Error('XUI_HOST is empty');
+    
+    // If we know it's offline, don't even try unless forced
+    if (!force && XUIService.offlineServers.has(this.host)) {
+       throw new Error('Server is currently offline (cached)');
     }
 
     if (!force && this.sessionCookie && (Date.now() - this.lastLoginTime < this.SESSION_TTL)) {
