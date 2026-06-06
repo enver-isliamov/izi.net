@@ -1,6 +1,10 @@
+// Отключение проверки TLS сертификатов (необходимо, так как в среде 2026 год)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import { EventEmitter } from 'events';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
 import { MaintenanceService } from './services/maintenance.service';
@@ -9,9 +13,13 @@ import paymentRoutes from './routes/payments';
 import userRoutes from './routes/user';
 import configRoutes from './routes/config';
 
+// Увеличение лимитов для предотвращения утечек
+EventEmitter.defaultMaxListeners = 100;
+
 console.log('🚀 [BOOT] Инициализация сервера...');
 
 const app = express();
+app.set('trust proxy', 1); // Доверяем первому прокси (Nginx/Cloudflare)
 const PORT = parseInt(process.env.PORT || '3005');
 
 app.use(cors());

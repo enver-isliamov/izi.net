@@ -20,7 +20,7 @@ export const sharedHttpAgent = new http.Agent({
  */
 export function getRequestConfig(url: string, headers: any = {}, customTimeout?: number) {
   const isHttps = url.startsWith('https');
-  const timeout = customTimeout || 3000; // Reduced from 7s to 3s for snappier UI
+  const timeout = customTimeout || 7000; // Таймаут увеличен до 7с для стабильности (стандарт Production)
   return {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

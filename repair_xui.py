@@ -5,16 +5,17 @@ import json
 import subprocess
 import time
 
-# Пути к файлам
+# Пути к файлам на сервере
 DB_PATH = "/opt/izinet/xui-db/x-ui.db"
 PROJECT_DIR = "/opt/izinet"
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 
 def load_env_manual(path):
+    """Загрузка переменных из .env без сторонних библиотек"""
     env_vars = {}
     if not os.path.exists(path): return env_vars
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith('#'): continue
@@ -27,26 +28,26 @@ def load_env_manual(path):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (DIAGNOSTIC VERSION)")
+    print("🛠️  IZINET MASTER DOCTOR (PRODUCTION-GRADE)")
     print("====================================================")
     
-    # 1. Проверка .env
-    print("🔍 Проверка файла .env...")
+    # 1. Проверка окружения
     env = load_env_manual(ENV_PATH)
-    required_keys = ["DOMAIN", "VITE_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "XUI_REALITY_PRIV_KEY", "XUI_REALITY_PUB_KEY"]
-    found_keys = [k for k in required_keys if k in env]
-    print(f"✅ Найдено ключей в .env: {len(found_keys)} из {len(required_keys)}")
-    if len(found_keys) < len(required_keys):
-        missing = set(required_keys) - set(found_keys)
-        print(f"⚠️ Отсутствуют важные ключи: {', '.join(missing)}")
-
     DOMAIN = env.get("DOMAIN", "izinet.online")
     PRIV_KEY = env.get("XUI_REALITY_PRIV_KEY", "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo")
     PUB_KEY = env.get("XUI_REALITY_PUB_KEY", "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw")
 
-    # 2. Настройка Базы XUI
+    # 2. Настройка Firewall (UFW) - как в Production
+    if os.path.exists("/usr/sbin/ufw"):
+        print("🛡️ Настройка Firewall (UFW)...")
+        for port in ["80", "443", "3443", "2053", "3005"]:
+            subprocess.run(["ufw", "allow", f"{port}/tcp"], capture_output=True)
+        subprocess.run(["ufw", "reload"], capture_output=True)
+        print("✅ Порты открыты: 80, 443, 3443, 2053, 3005")
+
+    # 3. Настройка Базы XUI
     if os.path.exists(DB_PATH):
-        print("⚙️  Обновление настроек Xray в базе данных...")
+        print("⚙️  Синхронизация Xray и Nginx...")
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
@@ -59,55 +60,55 @@ def main():
             settings = json.loads(sett_str)
             stream = json.loads(stream_str)
             
-            # ВАЖНО: Используем имя контейнера 'nginx' для Fallback внутри Docker
+            # Настройка Fallback (используем имя контейнера для Docker-сети)
             FALLBACK_DEST = "nginx:3443"
-            settings["fallbacks"] = [{"name": DOMAIN, "dest": FALLBACK_DEST, "xver": 0}, {"dest": FALLBACK_DEST, "xver": 0}]
+            settings["fallbacks"] = [
+                {"name": DOMAIN, "dest": FALLBACK_DEST, "xver": 0},
+                {"dest": FALLBACK_DEST, "xver": 0}
+            ]
             
-            # Маскировка под Microsoft
+            # Маскировка Reality под Microsoft (Золотой стандарт стабильности)
             stream["security"] = "reality"
-            if "realitySettings" not in stream: stream["realitySettings"] = {}
-            rs = stream["realitySettings"]
+            rs = stream.get("realitySettings", {})
             rs["dest"] = "www.microsoft.com:443"
             rs["serverNames"] = ["www.microsoft.com", "microsoft.com"]
             rs["privateKey"] = PRIV_KEY
             rs["publicKey"] = PUB_KEY
+            stream["realitySettings"] = rs
             
             cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, enable=1 WHERE id=?;", 
                            (json.dumps(settings), json.dumps(stream), iid))
-            print("✅ Настройки порта 443 обновлены.")
+            print("✅ Xray настроен на маскировку Microsoft и Fallback на Nginx.")
         
         conn.commit()
         conn.close()
-    else:
-        print("⚠️ База данных XUI не найдена, пропускаю настройку Xray.")
 
-    # 3. Очистка отравленных файлов и перезапуск
-    print("\n🧹 Очистка временных файлов и сборка Docker...")
-    # Удаляем package-lock.json, если он попал из Windows
-    lock_file = os.path.join(PROJECT_DIR, "package-lock.json")
-    if os.path.exists(lock_file):
-        print("🗑️ Удаление Windows package-lock.json для чистой сборки...")
-        os.remove(lock_file)
+    # 4. Очистка и Перезапуск
+    print("\n🧹 Очистка и запуск Docker...")
+    # Удаляем лок-файлы, которые могут мешать сборке
+    for f in ["package-lock.json", "dist"]:
+        path = os.path.join(PROJECT_DIR, f)
+        if os.path.exists(path):
+            if os.path.isdir(path):
+                import shutil
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
 
     try:
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
-        # Собираем БЕЗ использования кеша для критических слоев, чтобы убрать следы Windows
         subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=PROJECT_DIR)
         
-        print("\n⏳ Ожидание запуска бекенда (15 сек)...")
-        time.sleep(15)
+        print("\n⏳ Ожидание полной инициализации (20 сек)...")
+        time.sleep(20)
         
-        print("\n📝 ФИНАЛЬНЫЕ ЛОГИ БЕКЕНДА (izinet-app):")
+        print("\n📝 ФИНАЛЬНЫЕ ЛОГИ БЕКЕНДА:")
         subprocess.run(["docker", "logs", "--tail", "50", "izinet-app"], cwd=PROJECT_DIR)
-        
-        print("\n📝 СТАТУС NGINX:")
-        subprocess.run(["docker", "ps", "--filter", "name=nginx-proxy"], cwd=PROJECT_DIR)
-        
     except Exception as e:
-        print(f"❌ Ошибка Docker: {e}")
+        print(f"❌ Ошибка: {e}")
     
     print("\n====================================================")
-    print(f"🚀 Если в логах выше написано 'Сервер запущен', проверьте: https://{DOMAIN}")
+    print(f"🚀 Система готова. Проверьте сайт: https://{DOMAIN}")
     print("====================================================")
 
 if __name__ == "__main__":
