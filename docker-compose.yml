@@ -10,11 +10,8 @@ services:
     ports:
       - "3005:3005"
     dns:
-      - 77.88.8.8
-      - 94.140.14.14
-      - 9.9.9.9
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - NODE_ENV=production
       - XUI_HOST=http://x3-ui:2053
@@ -23,17 +20,6 @@ services:
       - .env
     depends_on:
       - x3-ui
-    networks:
-      - izinet-net
-
-  xui-bootstrap:
-    image: python:3.12-alpine
-    container_name: xui-bootstrap
-    restart: "no"
-    command: ["python", "/opt/izinet/xui_bootstrap.py", "--wait-db", "2"]
-    volumes:
-      - ./xui-db:/opt/izinet/xui-db
-      - ./xui_bootstrap.py:/opt/izinet/xui_bootstrap.py:ro
     networks:
       - izinet-net
 
@@ -46,17 +32,13 @@ services:
       - "443:443"
       - "8443:8443"
     dns:
-      - 77.88.8.8
-      - 94.140.14.14
-      - 9.9.9.9
+      - 8.8.8.8
+      - 1.1.1.1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./xui-db:/etc/x-ui
       - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      xui-bootstrap:
-        condition: service_completed_successfully
     networks:
       - izinet-net
     healthcheck:
