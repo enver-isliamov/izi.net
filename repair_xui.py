@@ -10,7 +10,7 @@ PROJECT_DIR = "/opt/izinet"
 
 def main():
     print("====================================================")
-    print("🛡️  IZINET PROFESSIONAL RESTORATION (STANDARDS-BASED)")
+    print("🛠️  IZINET MASTER DOCTOR (DOCKER VERSION)")
     print("====================================================")
     
     if not os.path.exists(DB_PATH):
@@ -20,80 +20,71 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 1. СБРОС ШАБЛОНА (REVERT TO FACTORY DEFAULT)
-    # Убираем кастомные шаблоны, чтобы XUI сам генерировал чистый конфиг
-    print("⚙️  Resetting Xray template to default...")
+    # 1. СБРОС ШАБЛОНА
+    print("⚙️  Resetting Xray template...")
     cursor.execute("UPDATE settings SET value = '' WHERE key = 'xrayTemplateConfig';")
 
-    # 2. НАСТРОЙКА ОСНОВНОГО ПОРТА 443 (REALITY)
-    print("⚙️  Configuring Inbound 443 (VLESS + Reality + Fallback)...")
+    # 2. НАСТРОЙКА ПОРТА 443 (REALITY)
+    print("⚙️  Configuring Port 443 (Reality + Fallbacks)...")
     cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
     inbound = cursor.fetchone()
     
     if inbound:
         iid, sett_str, stream_str = inbound
-        settings = json.loads(sett_str)
-        stream = json.loads(stream_str)
+        settings = json.loads(sett_str) if sett_str else {}
+        stream = json.loads(stream_str) if stream_str else {}
         
-        # А) Снимаем ограничения (limitIp: 0)
+        # А) Снимаем все ограничения
         if "clients" in settings:
             for client in settings["clients"]:
                 client["limitIp"] = 0
-                client["totalGB"] = 0 # No traffic limit by default for stability
+                client["totalGB"] = 0
         
-        # Б) Настраиваем Fallback на Nginx (через имя сервиса Docker)
-        # Это стандартный способ связи контейнеров
+        # Б) Правильные Fallbacks (по стандартам ветки work)
         settings["fallbacks"] = [
-            {"dest": "nginx:3443", "xver": 0},
-            {"name": "izinet.online", "dest": "nginx:3443", "xver": 0}
+            {"name": "izinet.online", "dest": "host.docker.internal:3443", "xver": 0},
+            {"name": "www.izinet.online", "dest": "host.docker.internal:3443", "xver": 0},
+            {"dest": "host.docker.internal:3443", "xver": 0}
         ]
         
-        # В) Параметры Reality (Стабильные и проверенные)
+        # В) Параметры Reality (Original Keys)
         stream["security"] = "reality"
         if "realitySettings" not in stream: stream["realitySettings"] = {}
         rs = stream["realitySettings"]
-        
         rs["dest"] = "www.microsoft.com:443"
         rs["serverNames"] = ["www.microsoft.com", "microsoft.com"]
         rs["privateKey"] = "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo"
-        rs["shortIds"] = ["79b27cf7799d5b4c"]
+        rs["shortIds"] = ["79b27cf7799d5b4c", "0248", "36b963e7713fa1", "34d587", "ff"]
         
         if "settings" not in rs: rs["settings"] = {}
         rs["settings"]["publicKey"] = "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw"
+        rs["publicKey"] = "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw"
         
-        cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, enable=1 WHERE id=?;", 
-                       (json.dumps(settings), json.dumps(stream), iid))
-        print("✅ Port 443 configured correctly.")
+        # Г) ВКЛЮЧАЕМ SNIFFING (Критично для Fallbacks!)
+        sniffing = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False}
+        
+        cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, sniffing=?, enable=1 WHERE id=?;", 
+                       (json.dumps(settings), json.dumps(stream), json.dumps(sniffing), iid))
+        print("✅ Port 443 configured with SNI Sniffing and multi-fallbacks.")
 
     # 3. ОЧИСТКА ГЛОБАЛЬНЫХ НАСТРОЕК
-    print("🧹 Cleaning global settings (Traffic Notifications)...")
-    # Мы полностью отключаем проблемные уведомления
-    cursor.execute("UPDATE settings SET value = '' WHERE key = 'ExternalTrafficInformURI';")
+    print("🧹 Cleaning global settings...")
+    cursor.execute("UPDATE settings SET value = 'http://127.0.0.1:2053/ignore' WHERE key = 'ExternalTrafficInformURI';")
     cursor.execute("UPDATE settings SET value = 'false' WHERE key = 'TgBotEnable';")
 
-    # 4. ОТКЛЮЧЕНИЕ ВСЕХ КОНФЛИКТУЮЩИХ ПОРТОВ
-    print("🛑 Disabling secondary ports (8443, etc.)...")
-    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port != 443 AND port != 2053;")
+    # 4. ОТКЛЮЧЕНИЕ ВСЕГО ЛИШНЕГО
+    cursor.execute("UPDATE inbounds SET enable = 0 WHERE port NOT IN (443, 2053, 2096);")
 
     conn.commit()
     conn.close()
 
-    # 5. ПЕРЕЗАПУСК СИСТЕМЫ С ОЧИСТКОЙ СЕТИ
-    print("\n🔄 Performing standard Docker restart...")
+    # 5. ПЕРЕЗАПУСК (HARD RESTART)
+    print("\n🔄 Hard restarting system...")
     subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
-    subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
+    # Используем --build чтобы применить изменения в коде
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=PROJECT_DIR)
     
-    print("\n⏳ System is stabilizing (10s)...")
-    time.sleep(10)
-    
-    # ФИНАЛЬНАЯ ПРОВЕРКА
-    print("\n--- FINAL STATUS CHECK ---")
-    subprocess.run(["docker", "ps"], cwd=PROJECT_DIR)
-    
-    print("\n====================================================")
-    print("✅ ВСЁ ВОССТАНОВЛЕНО ПО СТАНДАРТАМ.")
-    print("👉 Проверьте сайт: https://izinet.online")
-    print("👉 Проверьте VPN: Используйте СТАРЫЙ ключ (он должен ожить).")
+    print("\n⏳ System is ready. Check https://izinet.online")
     print("====================================================")
 
 if __name__ == "__main__":

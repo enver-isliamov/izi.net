@@ -304,20 +304,18 @@ export class XUIService {
     const security = streamSettings.security || 'none';
     const port = inbound.port;
     
-    // Enforce correct domain detection
+    // Original working hostname detection
     let hostName = this.displayDomain || process.env.PUBLIC_URL?.replace(/^https?:\/\//, '') || 'izinet.online';
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
-    const isIPOrEmpty = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName) || hostName === '';
 
     if (security === 'reality') {
       const rs = streamSettings.realitySettings?.settings || streamSettings.realitySettings || {};
-      const sni = (rs.serverNames?.[0]) || (isIPOrEmpty ? 'www.microsoft.com' : hostName);
+      const sni = (rs.serverNames?.[0]) || 'www.microsoft.com';
       const pbk = rs.publicKey || '';
       const sid = (rs.shortIds?.[0]) || '';
       const fp = rs.fingerprint || 'chrome';
       const spiderX = rs.spiderX || '/';
       
-      // Standard VLESS Reality link
       let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {

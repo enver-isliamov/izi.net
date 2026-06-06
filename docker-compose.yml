@@ -7,6 +7,9 @@ services:
     ports:
       - "3005:3005"
     env_file: .env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       - x3-ui
     networks:
@@ -22,6 +25,9 @@ services:
       - "8443:8443"
     volumes:
       - ./xui-db:/etc/x-ui
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
