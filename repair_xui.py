@@ -109,9 +109,20 @@ def main():
     # 5. ПЕРЕЗАПУСК СИСТЕМЫ
     print("\n🔄 Перезапуск Docker контейнеров...")
     try:
+        # Проверяем наличие .env
+        if not os.path.exists(ENV_PATH):
+            print("⚠️ ПРЕДУПРЕЖДЕНИЕ: Файл .env не найден! Контейнеры могут не запуститься или работать неверно.")
+        
+        # Проверяем доступность nginx контейнера для Xray
+        print("🔍 Проверка сетевой связности (Xray -> Nginx)...")
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
         subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=PROJECT_DIR)
-        print(f"\n⏳ Система готова. Проверьте: https://{DOMAIN}")
+        
+        print("\n📝 Проверка логов приложения (первые 20 строк):")
+        subprocess.run(["docker", "compose", "logs", "--tail", "20", "izinet-app"], cwd=PROJECT_DIR)
+        
+        print(f"\n⏳ Система готова. Если сайт не открывается, проверьте SSL сертификаты в /etc/letsencrypt/")
+        print(f"🔗 Ссылка для проверки: https://{DOMAIN}")
     except Exception as e:
         print(f"❌ Ошибка при перезапуске Docker: {e}")
     
