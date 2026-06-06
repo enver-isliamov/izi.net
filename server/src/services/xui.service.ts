@@ -303,13 +303,15 @@ export class XUIService {
 
     const security = streamSettings.security || 'none';
     const port = inbound.port;
-    let hostName = this.displayDomain || 'server.izinet.app';
+    
+    // Enforce correct domain detection
+    let hostName = this.displayDomain || process.env.PUBLIC_URL?.replace(/^https?:\/\//, '') || 'izinet.online';
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
     const isIPOrEmpty = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName) || hostName === '';
 
     if (security === 'reality') {
       const rs = streamSettings.realitySettings?.settings || streamSettings.realitySettings || {};
-      const sni = (rs.serverNames?.[0]) || (isIPOrEmpty ? 'google.com' : hostName);
+      const sni = (rs.serverNames?.[0]) || (isIPOrEmpty ? 'www.microsoft.com' : hostName);
       const pbk = rs.publicKey || '';
       const sid = (rs.shortIds?.[0]) || '';
       const fp = rs.fingerprint || 'chrome';
