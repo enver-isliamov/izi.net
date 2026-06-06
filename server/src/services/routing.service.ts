@@ -13,7 +13,7 @@ export class RoutingService {
       const { data: existing } = await supabase.from('vpn_routing_rules').select('*').limit(1);
       if (!existing || existing.length === 0) {
         await supabase.from('vpn_routing_rules').insert([
-          { name: 'Self-Bypass (Critical)', domains: ['domain:izinet.online', 'full:izinet.online'], outbound_tag: 'direct', is_active: true },
+          { name: 'Self-Bypass (Critical)', domains: ['domain:izinet.online', 'full:izinet.online', 'domain:izinet.online'], outbound_tag: 'direct', is_active: true },
           { name: 'Google/Gemini Services', domains: ['geosite:google', 'geosite:openai'], outbound_tag: 'direct', is_active: true },
           { name: 'Russia Bypass', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
         ]);
