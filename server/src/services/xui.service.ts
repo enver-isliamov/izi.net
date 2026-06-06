@@ -37,21 +37,35 @@ export class XUIService {
       try {
         const parsedUrl = new URL(host);
         const hn = parsedUrl.hostname;
-        if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
+        const configDomain = (process.env.DOMAIN || '').trim();
+        const publicUrl = (process.env.PUBLIC_URL || '').trim();
+        
+        // Проверяем, является ли хост локальным или совпадает с нашим доменом
+        const isLocalHost = hn === 'localhost' || hn === '127.0.0.1' || hn === '0.0.0.0';
+        const isMainDomain = configDomain && (hn === configDomain || hn === `vpn.${configDomain}` || hn === `www.${configDomain}`);
+        const isPublicUrl = publicUrl && publicUrl.includes(hn);
+
+        if (isLocalHost || isMainDomain || isPublicUrl) {
           const originalHost = host;
           const port = parsedUrl.port || '2053';
-          // Using a safer way to check for docker environment
-          const isDocker = process.env.IS_DOCKER === 'true' || (typeof process !== 'undefined' && process.env.NODE_ENV === 'production'); 
+          
+          // Проверяем, запущено ли приложение в Docker
+          const isDocker = process.env.IS_DOCKER === 'true' || 
+                           process.env.NODE_ENV === 'production_docker' || 
+                           process.env.NODE_ENV === 'production'; 
+
           if (isDocker) {
+            // Внутри Docker используем имя сервиса 'x3-ui'
             host = `http://x3-ui:2053${parsedUrl.pathname}`;
-            console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal docker path: ${host}`);
+            console.log(`[XUI Router] Оптимизация маршрута (Docker): ${originalHost} -> ${host}`);
           } else {
+            // Вне Docker используем localhost
             host = `http://127.0.0.1:${port}${parsedUrl.pathname}`;
-            console.log(`[XUI Router] Optimized local routing: rewritten ${originalHost} -> to internal host path: ${host}`);
+            console.log(`[XUI Router] Оптимизация маршрута (Host): ${originalHost} -> ${host}`);
           }
         }
       } catch (e) {
-        console.error(`[XUI Router] Error parsing URL for local routing optimization:`, e);
+        console.error(`[XUI Router] Ошибка при оптимизации маршрута:`, e);
       }
     }
 
@@ -74,23 +88,35 @@ export class XUIService {
     this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || '').trim();
   }
 
+  private static offlineServers = new Set<string>();
+  private static lastCheck = new Map<string, number>();
+
   async checkConfig() {
-    if (!this.host || !this.username || !this.password) {
-      console.warn(`⚠️ 3x-ui credentials missing for host: ${this.host}`);
-      return false;
+    if (!this.host || !this.username || !this.password) return false;
+    
+    // Fast fail for known offline servers (cache for 5 minutes)
+    if (XUIService.offlineServers.has(this.host)) {
+      const last = XUIService.lastCheck.get(this.host) || 0;
+      if (Date.now() - last < 5 * 60 * 1000) return false;
     }
+
     try {
       await this.login();
+      XUIService.offlineServers.delete(this.host);
       return true;
     } catch (e: any) {
-      console.error(`❌ 3x-ui connection failed [${this.host}${this.basePath}]:`, e.message);
+      XUIService.offlineServers.add(this.host);
+      XUIService.lastCheck.set(this.host, Date.now());
       return false;
     }
   }
 
   async login(force: boolean = false): Promise<string> {
-    if (!this.host) {
-      throw new Error('XUI_HOST is empty. Please set it in Settings -> Secrets.');
+    if (!this.host) throw new Error('XUI_HOST is empty');
+    
+    // If we know it's offline, don't even try unless forced
+    if (!force && XUIService.offlineServers.has(this.host)) {
+       throw new Error('Server is currently offline (cached)');
     }
 
     if (!force && this.sessionCookie && (Date.now() - this.lastLoginTime < this.SESSION_TTL)) {
@@ -289,13 +315,14 @@ export class XUIService {
 
     const security = streamSettings.security || 'none';
     const port = inbound.port;
-    let hostName = this.displayDomain || 'server.izinet.app';
+    
+    // Original working hostname detection
+    let hostName = this.displayDomain || process.env.PUBLIC_URL?.replace(/^https?:\/\//, '') || 'izinet.online';
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
-    const isIPOrEmpty = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostName) || hostName === '';
 
     if (security === 'reality') {
       const rs = streamSettings.realitySettings?.settings || streamSettings.realitySettings || {};
-      const sni = (rs.serverNames?.[0]) || (isIPOrEmpty ? 'google.com' : hostName);
+      const sni = (rs.serverNames?.[0]) || 'www.microsoft.com';
       const pbk = rs.publicKey || '';
       const sid = (rs.shortIds?.[0]) || '';
       const fp = rs.fingerprint || 'chrome';
