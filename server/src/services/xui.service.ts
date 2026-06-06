@@ -236,9 +236,22 @@ export class XUIService {
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
 
-    let flow = "";
+    // Автоматический поиск правильного inbound по порту 443 (Reality)
+    let targetInboundId = inboundId;
     try {
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const inbounds = await this.getInbounds();
+      const realityInbound = inbounds.find((ib: any) => ib.port === 443);
+      if (realityInbound) {
+        targetInboundId = realityInbound.id;
+        console.log(`[XUI] Автоматически выбран Inbound ID: ${targetInboundId} на порту 443`);
+      }
+    } catch (e) {
+      console.warn(`[XUI] Не удалось получить список inbounds, используем дефолтный ID: ${inboundId}`);
+    }
+
+    let flow = "xtls-rprx-vision";
+    try {
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${targetInboundId}`;
       const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
       if (resp.data.success) {
         const streamSettings = JSON.parse(resp.data.obj.streamSettings || '{}');
@@ -249,7 +262,7 @@ export class XUIService {
     } catch (e) {}
 
     const clientData = {
-      id: inboundId,
+      id: targetInboundId,
       settings: JSON.stringify({
         clients: [
           {
@@ -272,13 +285,13 @@ export class XUIService {
       const response = await axios.post(addClientUrl, clientData, getRequestConfig(addClientUrl, this.authHeaders({ 'Content-Type': 'application/json' })));
 
       if (response.data.success) {
-        return this.getInboundLink(inboundId, uuid, email);
+        return this.getInboundLink(targetInboundId, uuid, email);
       } else {
         const msg = response.data.msg || '';
         if (msg.includes('Duplicate email')) {
-          const serverClient = await this.getClientByEmail(inboundId, email);
+          const serverClient = await this.getClientByEmail(targetInboundId, email);
           const effectiveUuid = serverClient?.id || uuid;
-          const effectiveInboundId = serverClient?.inboundId || inboundId;
+          const effectiveInboundId = serverClient?.inboundId || targetInboundId;
           await this.updateClient(email, effectiveUuid, effectiveInboundId, expiryTime, limitBytes);
           return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
         }
@@ -287,7 +300,7 @@ export class XUIService {
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
-        return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
+        return this.addClient(email, uuid, targetInboundId, expiryTime, limitBytes);
       }
       throw error;
     }
@@ -296,11 +309,19 @@ export class XUIService {
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     if (!this.sessionCookie) await this.login();
     
-    const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+    // Пытаемся найти правильный Inbound ID для ссылки, если передан дефолтный
+    let targetId = inboundId;
+    try {
+      const inbounds = await this.getInbounds();
+      const realityInbound = inbounds.find((ib: any) => ib.port === 443);
+      if (realityInbound) targetId = realityInbound.id;
+    } catch (e) {}
+
+    const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${targetId}`;
     const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders(), 10000));
     
     if (!resp.data.success || !resp.data.obj) {
-      throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${inboundId}.`);
+      throw new Error(`[XUI] Не удалось получить настройки входящего соединения ${targetId}.`);
     }
     
     const inbound = resp.data.obj;
@@ -324,17 +345,16 @@ export class XUIService {
     if (security === 'reality') {
       const rs = streamSettings.realitySettings?.settings || streamSettings.realitySettings || {};
       
-      // Динамически определяем SNI: используем DOMAIN проекта, так как сервер настроен на fallback через него
-      // Это критично для Hiddify: SNI клиента должен совпадать с тем, что ожидает Xray (см. repair_xui.py)
-      const sni = configDomain || rs.serverNames?.[0] || hostName;
+      // ВАЖНО: Используем microsoft.com для классической маскировки (должно совпадать с repair_xui.py)
+      const sni = 'www.microsoft.com';
       
-      // Публичный ключ берем из переменной окружения или из настроек сервера
       const pbk = process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '';
       const sid = (rs.shortIds?.[0]) || '79b27cf7799d5b4c';
       const fp = rs.fingerprint || 'chrome';
       const spiderX = rs.spiderX || '/';
       
-      // Формируем ссылку с принудительным XTLS-Vision flow (требование Hiddify для Reality)
+      console.log(`[XUI] Генерация Reality ссылки: SNI=${sni}, Flow=XTLS-Vision`);
+      
       let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
