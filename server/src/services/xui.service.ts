@@ -316,18 +316,25 @@ export class XUIService {
     const security = streamSettings.security || 'none';
     const port = inbound.port;
     
-    // Original working hostname detection
-    let hostName = this.displayDomain || process.env.PUBLIC_URL?.replace(/^https?:\/\//, '') || 'izinet.online';
+    // Определение имени хоста и параметров проекта
+    const configDomain = (process.env.DOMAIN || 'izinet.online').trim();
+    let hostName = this.displayDomain || configDomain;
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
 
     if (security === 'reality') {
       const rs = streamSettings.realitySettings?.settings || streamSettings.realitySettings || {};
-      const sni = (rs.serverNames?.[0]) || 'www.microsoft.com';
-      const pbk = rs.publicKey || '';
-      const sid = (rs.shortIds?.[0]) || '';
+      
+      // Динамически определяем SNI: используем DOMAIN проекта, так как сервер настроен на fallback через него
+      // Это критично для Hiddify: SNI клиента должен совпадать с тем, что ожидает Xray (см. repair_xui.py)
+      const sni = configDomain || rs.serverNames?.[0] || hostName;
+      
+      // Публичный ключ берем из переменной окружения или из настроек сервера
+      const pbk = process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '';
+      const sid = (rs.shortIds?.[0]) || '79b27cf7799d5b4c';
       const fp = rs.fingerprint || 'chrome';
       const spiderX = rs.spiderX || '/';
       
+      // Формируем ссылку с принудительным XTLS-Vision flow (требование Hiddify для Reality)
       let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
