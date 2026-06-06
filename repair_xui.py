@@ -113,16 +113,24 @@ def main():
         if not os.path.exists(ENV_PATH):
             print("⚠️ ПРЕДУПРЕЖДЕНИЕ: Файл .env не найден! Контейнеры могут не запуститься или работать неверно.")
         
-        # Проверяем доступность nginx контейнера для Xray
-        print("🔍 Проверка сетевой связности (Xray -> Nginx)...")
+        # Полный перезапуск с пересборкой
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
         subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=PROJECT_DIR)
         
-        print("\n📝 Проверка логов приложения (первые 20 строк):")
-        subprocess.run(["docker", "compose", "logs", "--tail", "20", "izinet-app"], cwd=PROJECT_DIR)
+        # Даем время на запуск
+        print("⏳ Ожидание запуска сервисов (10 сек)...")
+        time.sleep(10)
+
+        print("\n📊 СТАТУС КОНТЕЙНЕРОВ:")
+        subprocess.run(["docker", "ps"], cwd=PROJECT_DIR)
+
+        print("\n📝 ЛОГИ ПРИЛОЖЕНИЯ (izinet-app):")
+        subprocess.run(["docker", "logs", "--tail", "50", "izinet-app"], cwd=PROJECT_DIR)
         
-        print(f"\n⏳ Система готова. Если сайт не открывается, проверьте SSL сертификаты в /etc/letsencrypt/")
-        print(f"🔗 Ссылка для проверки: https://{DOMAIN}")
+        print("\n📝 ЛОГИ NGINX (nginx-proxy):")
+        subprocess.run(["docker", "logs", "--tail", "20", "nginx-proxy"], cwd=PROJECT_DIR)
+        
+        print(f"\n🚀 Система готова. Проверьте: https://{DOMAIN}")
     except Exception as e:
         print(f"❌ Ошибка при перезапуске Docker: {e}")
     

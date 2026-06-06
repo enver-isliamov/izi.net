@@ -7,15 +7,32 @@ router.get('/sub/:id', async (req, res) => {
   const { id } = req.params;
   const { deviceId } = req.query;
   
+  console.log(`[Subscription] Запрос на обновление для ID: ${id}`);
+  
   try {
-    const { data: sub } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
-    if (!sub || sub.status !== 'active') return res.status(404).send('Subscription not found');
+    const { data: sub, error: subError } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    
+    if (subError) {
+      console.error(`[Subscription] Ошибка Supabase при получении подписки:`, subError.message);
+      return res.status(500).send('Database Error');
+    }
+
+    if (!sub || sub.status !== 'active') {
+      console.warn(`[Subscription] Подписка не найдена или неактивна: ${id}`);
+      return res.status(404).send('Subscription not found');
+    }
 
     const now = new Date();
-    if (new Date(sub.expires_at) < now) return res.status(403).send('Expired');
+    if (new Date(sub.expires_at) < now) {
+      console.warn(`[Subscription] Срок действия подписки истек: ${id}`);
+      return res.status(403).send('Expired');
+    }
 
-    // Retrieve all servers to distinguish between active, inactive, and legacy links
-    const { data: allServers } = await supabase.from('vpn_servers').select('name, is_active');
+    // Получаем все сервера для фильтрации ссылок
+    const { data: allServers, error: serverError } = await supabase.from('vpn_servers').select('name, is_active');
+    if (serverError) {
+      console.error(`[Subscription] Ошибка при получении серверов:`, serverError.message);
+    }
     const activeSuffices = (allServers || []).filter(s => s.is_active).map((s: any) => `#${s.name.replace(/\s+/g,'_')}`);
     const inactiveSuffices = (allServers || []).filter(s => !s.is_active).map((s: any) => `#${s.name.replace(/\s+/g,'_')}`);
 
