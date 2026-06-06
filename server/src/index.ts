@@ -35,8 +35,6 @@ app.get('*', (req, res) => {
 async function start() {
   await checkDatabase();
   botService.init();
-  // Maintenance disabled for stability during recovery
-  // MaintenanceService.init(); 
   
   // Включаем службу обслуживания для синхронизации трафика и правил маршрутизации
   MaintenanceService.init(); 
