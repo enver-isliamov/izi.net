@@ -4,7 +4,6 @@ import path from 'path';
 import * as dotenv from 'dotenv';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
-import { MaintenanceService } from './services/maintenance.service';
 import adminRoutes from './routes/admin';
 import paymentRoutes from './routes/payments';
 import userRoutes from './routes/user';
@@ -36,7 +35,8 @@ app.get('*', (req, res) => {
 async function start() {
   await checkDatabase();
   botService.init();
-  MaintenanceService.init();
+  // Maintenance disabled for stability during recovery
+  // MaintenanceService.init(); 
   
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Modular Server started on port ${PORT}`);
@@ -45,11 +45,5 @@ async function start() {
 
 start().catch(console.error);
 
-process.once('SIGINT', () => {
-  botService.stop('SIGINT');
-  MaintenanceService.stop();
-});
-process.once('SIGTERM', () => {
-  botService.stop('SIGTERM');
-  MaintenanceService.stop();
-});
+process.once('SIGINT', () => botService.stop('SIGINT'));
+process.once('SIGTERM', () => botService.stop('SIGTERM'));
