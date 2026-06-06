@@ -2,6 +2,8 @@ import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
 import { parseVpnDevices } from '../utils/vpn';
 
+import { RoutingService } from './routing.service';
+
 export class MaintenanceService {
   private static interval: NodeJS.Timeout | null = null;
   private static isSyncing = false;
@@ -11,11 +13,16 @@ export class MaintenanceService {
 
     console.log('📦 Maintenance Service initialized (Lightweight Sync)');
     
-    // Run sync every 30 minutes, but with heavy optimizations
-    this.interval = setInterval(() => this.syncTraffic(), 30 * 60 * 1000);
+    // Run sync every 30 minutes
+    this.interval = setInterval(() => this.runFullMaintenance(), 30 * 60 * 1000);
     
-    // Run initial sync after a short delay to not block startup
-    setTimeout(() => this.syncTraffic(), 10000);
+    // Initial run
+    setTimeout(() => this.runFullMaintenance(), 10000);
+  }
+
+  static async runFullMaintenance() {
+    await this.syncTraffic();
+    await RoutingService.syncAll();
   }
 
   static async syncTraffic() {

@@ -317,7 +317,9 @@ export class XUIService {
       const fp = rs.fingerprint || 'chrome';
       const spiderX = rs.spiderX || '/';
       
-      let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
+      // Inject Fragment for Crimea/DPI bypass
+      const fragment = "10-20";
+      let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=${fp}&sid=${sid}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision&fragment=${fragment}`;
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
       const tlsSettings = streamSettings.tlsSettings || {};
