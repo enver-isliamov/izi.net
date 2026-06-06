@@ -2,14 +2,15 @@
 
 React + Vite личный кабинет для VPN-подписок с backend на Express, Supabase, 3x-ui, Telegram bot и Enot.io.
 
-## ⚡️ Быстрый старт (One-line Installation)
+## Быстрый старт (One-line Installation)
 
-Если у вас чистый VPS (Ubuntu/Debian), вы можете развернуть весь стэк (izinet + 3x-ui панель) одной командой:
+Если у вас чистый VPS (Ubuntu/Debian), вы можете развернуть весь стек (izinet + 3x-ui панель) одной командой:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/enverphoto/izinet/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/enver-isliamov/izi.net/main/install.sh | bash
 ```
-*Скрипт установит Docker, клонирует репозиторий и попросит ввести ключи Supabase.*
+
+Скрипт установит Docker, клонирует репозиторий в `/opt/izinet`, создаст `.env`, запустит контейнеры и автоматически подготовит 3x-ui SQLite-базу для VLESS Reality: создаст inbound на 443 при пустой базе, включит sniffing, отключит `externalTraffic`-спам и выставит DNS/fallback-настройки для стабильной работы.
 
 ## Текущая архитектура
 
@@ -95,6 +96,15 @@ npm run build
 ## Operational notes
 
 - Vercel does not run the API directly. It proxies `/api/*` to the VPS backend from `vercel.json`.
-- After backend code changes, deploy and restart the process on `YOUR_VPS_IP:3005`.
+- For the current VPS deployment, run:
+
+```bash
+cd /opt/izinet && \
+git pull && \
+docker compose up -d --build && \
+docker image prune -f
+```
+
+- `docker-compose.yml` now runs `xui-bootstrap` before 3x-ui so persistent 3x-ui DB settings are repaired on normal updates.
 - `fix.md` contains only currently open issues.
 - `PAYMENT_SETUP.md` contains the current payment/database setup.
