@@ -4,6 +4,7 @@ import path from 'path';
 import * as dotenv from 'dotenv';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
+import { MaintenanceService } from './services/maintenance.service';
 import adminRoutes from './routes/admin';
 import paymentRoutes from './routes/payments';
 import userRoutes from './routes/user';
