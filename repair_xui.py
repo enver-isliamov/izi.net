@@ -23,20 +23,19 @@ def load_env(path):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (AUTH & REALITY FIX)")
+    print("🛠️  IZINET MASTER DOCTOR (AUTH & REALITY FIX - FINAL)")
     print("====================================================")
 
     # 1. Проверка переменных окружения
     print("🔍 Проверка файла .env...")
     env = load_env(ENV_PATH)
     
-    # Критичные ключи для авторизации на сайте
+    # Ключи для авторизации на сайте
     required = ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "DOMAIN"]
     missing = [k for k in required if k not in env or not env[k] or "<NEW_" in env[k]]
     
     if missing:
-        print(f"❌ ОШИБКА: В .env отсутствуют важные ключи: {', '.join(missing)}")
-        print("Без них сайт и авторизация работать НЕ БУДУТ.")
+        print(f"❌ ОШИБКА: В .env отсутствуют ключи: {', '.join(missing)}")
         return
 
     DOMAIN = env["DOMAIN"]
@@ -49,16 +48,12 @@ def main():
             print("⚙️  Синхронизация Xray (Reality + Microsoft SNI)...")
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            
-            # Находим 443 порт
             cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
             inbound = cursor.fetchone()
             if inbound:
                 iid, sett_str, stream_str = inbound
                 settings = json.loads(sett_str) if sett_str else {}
                 stream = json.loads(stream_str) if stream_str else {}
-                
-                # Маскировка под Microsoft (самый стабильный вариант для Hiddify)
                 settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
                 stream["security"] = "reality"
                 rs = stream.get("realitySettings", {})
@@ -67,7 +62,6 @@ def main():
                 rs["privateKey"] = PRIV_KEY
                 rs["publicKey"] = PUB_KEY
                 stream["realitySettings"] = rs
-                
                 cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, enable=1 WHERE id=?;", 
                                (json.dumps(settings), json.dumps(stream), iid))
                 print("✅ База XUI настроена.")
@@ -76,13 +70,12 @@ def main():
         except Exception as e:
             print(f"⚠️ Ошибка базы: {e}")
 
-    # 3. Перезапуск с принудительной передачей переменных для ФРОНТЕНДА
+    # 3. Перезапуск и сборка (С ПЕРЕДАЧЕЙ КЛЮЧЕЙ SUPABASE)
     print("\n🔄 Пересборка Docker (с передачей ключей Supabase)...")
     try:
-        # Останавливаем всё старое
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
         
-        # Очистка лок-файлов
+        # Глубокая очистка
         for f in ["package-lock.json", "dist"]:
             p = os.path.join(PROJECT_DIR, f)
             if os.path.exists(p):
@@ -95,24 +88,20 @@ def main():
             "--build-arg", f"VITE_SUPABASE_URL={env['VITE_SUPABASE_URL']}",
             "--build-arg", f"VITE_SUPABASE_ANON_KEY={env['VITE_SUPABASE_ANON_KEY']}"
         ]
+        print(f"⚡ Запуск: {' '.join(build_cmd)}")
         subprocess.run(build_cmd, cwd=PROJECT_DIR)
         
-        # Запуск
         subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
         
         print("\n⏳ Ожидание запуска (15 сек)...")
         time.sleep(15)
-        
-        # Проверка логов
-        print("\n📝 ФИНАЛЬНЫЕ ЛОГИ ПРИЛОЖЕНИЯ:")
         subprocess.run(["docker", "logs", "--tail", "20", "izinet-app"], cwd=PROJECT_DIR)
         
     except Exception as e:
         print(f"❌ Ошибка Docker: {e}")
 
     print("\n====================================================")
-    print(f"🏆 РЕЗУЛЬТАТ: Если сайт открывается, но не логинит —")
-    print(f"проверьте VITE_SUPABASE_ANON_KEY в файле .env!")
+    print(f"🚀 Сборка завершена. Проверьте: https://{DOMAIN}")
     print("====================================================")
 
 if __name__ == "__main__":
