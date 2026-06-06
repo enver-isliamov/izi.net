@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
-import * as dotenv from 'dotenv';
 
-dotenv.config();
-
+// Docker внедряет переменные напрямую в process.env, чтение .env здесь не требуется
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || ''; 
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.warn('⚠️ SUPABASE credentials missing in environment variables!');
+  console.warn('⚠️ [Supabase] Учетные данные отсутствуют в process.env!');
+} else {
+  console.log('📡 [Supabase] Конфигурация найдена, подключаюсь к:', supabaseUrl);
 }
 
 export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
@@ -18,19 +18,17 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   }
 });
 
-// Health check for Database
 export async function checkDatabase() {
   try {
     const { count, error } = await supabase.from('vpn_servers').select('*', { count: 'exact', head: true });
     if (error) {
-      console.error('❌ Database connection error on startup:', error.message);
+      console.error('❌ [Supabase] Ошибка подключения:', error.message);
       return false;
-    } else {
-      console.log('✅ Database connected successfully. Active servers in table:', count || 0);
-      return true;
     }
+    console.log('✅ [Supabase] База данных подключена. Серверов в таблице:', count || 0);
+    return true;
   } catch (err) {
-    console.error('❌ Failed to connect to database:', err);
+    console.error('❌ [Supabase] Непредвиденная ошибка подключения:', err);
     return false;
   }
 }
