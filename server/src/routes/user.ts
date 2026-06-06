@@ -26,9 +26,9 @@ router.get('/subscription/plans', async (req, res) => {
 
     const periods = [
       { id: '1m', label: '1 месяц', days: 30, price: basePrice },
-      { id: '2m', label: '2 месяца', days: 60, price: basePrice * 2 * 0.95 }, // 5% discount
-      { id: '6m', label: '6 месяцев', days: 180, price: basePrice * 6 * 0.85 }, // 15% discount
-      { id: '12m', label: '1 год', days: 365, price: basePrice * 12 * 0.75 } // 25% discount
+      { id: '2m', label: '2 месяца', days: 60, price: Math.round(basePrice * 2) },
+      { id: '6m', label: '6 месяцев', days: 180, price: Math.round(basePrice * 6) },
+      { id: '12m', label: '1 год', days: 365, price: Math.round(basePrice * 12) }
     ];
 
     const serverTypes = [
@@ -47,29 +47,95 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
   if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
 
   try {
-    // 1. Balance check
+    // 1. Проверка баланса
     const { data: balanceData } = await supabase.from('balances').select('amount').eq('user_id', userId).maybeSingle();
     if (!balanceData || balanceData.amount < price) return res.status(400).json({ error: 'Insufficient balance' });
 
-    // 2. Provisioning logic (simplified for out-of-the-box work)
+    // 2. Получение активных серверов
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (!activeServers || activeServers.length === 0) throw new Error('No active servers');
+    if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
 
-    // ... Implementation of provisioning ...
-    // To keep it simple, I'll return success and deduct balance
+    // 3. Генерация учетных данных
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const trafficLimitMb = 102400; // 100 GB default
+    const limitBytes = trafficLimitMb * 1024 * 1024;
+    const email = `user_${userId.slice(0, 8)}_${Math.random().toString(36).substring(2, 6)}`;
+    const uuid = crypto.randomUUID();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + (durationDays || 30));
+
+    // 4. Создание клиента на всех серверах
+    let configLines: string[] = [];
+    for (const server of activeServers) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
+        if (rawConfig) {
+          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
+          configLines.push(configWithSuffix);
+        }
+      } catch (e: any) {
+        console.error(`❌ Ошибка на сервере ${server.name}:`, e.message);
+      }
+    }
+
+    if (configLines.length === 0) throw new Error('Не удалось создать конфигурацию ни на одном сервере');
+
+    const devices: VpnDevice[] = [{
+      id: 'primary',
+      label: deviceName || 'Основное устройство',
+      config: configLines.join('\n'),
+      email,
+      uuid,
+      expiresAt: expiresAt.toISOString(),
+      serverType: serverType || 'WIFI',
+      trafficUsedBytes: 0,
+      serverId: activeServers[0].id
+    }];
+
+    // 5. Создание или обновление подписки в БД
+    const { data: existingSub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
+    
+    if (existingSub) {
+      // Продление
+      const newExpiry = new Date(existingSub.expires_at);
+      newExpiry.setDate(newExpiry.getDate() + (durationDays || 30));
+      await supabase.from('subscriptions').update({
+        expires_at: newExpiry.toISOString(),
+        v2ray_config: JSON.stringify(devices),
+        updated_at: new Date().toISOString()
+      }).eq('id', existingSub.id);
+    } else {
+      // Новая подписка
+      await supabase.from('subscriptions').insert({
+        user_id: userId,
+        status: 'active',
+        plan_type: planId,
+        expires_at: expiresAt.toISOString(),
+        v2ray_config: JSON.stringify(devices),
+        traffic_limit_mb: trafficLimitMb,
+        traffic_used_mb: 0,
+        device_limit: deviceLimit || 2,
+        server_id: activeServers[0].id
+      });
+    }
+
+    // 6. Списание баланса
     await supabase.from('balances').update({ amount: balanceData.amount - price }).eq('user_id', userId);
     
-    // Log transaction
+    // 7. Логирование транзакции
     await supabase.from('transactions').insert({
       user_id: userId,
       amount: -price,
+      currency: 'RUB',
       type: 'withdrawal',
       status: 'completed',
-      description: `Purchase: ${planId}`
+      description: `Покупка подписки: ${planId}`
     });
 
-    res.json({ success: true, message: 'Subscription processed' });
+    res.json({ success: true, message: 'Подписка успешно оформлена' });
   } catch (err: any) {
+    console.error('❌ Ошибка покупки подписки:', err);
     res.status(500).json({ error: err.message });
   }
 });

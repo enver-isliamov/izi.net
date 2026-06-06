@@ -23,6 +23,7 @@
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
     "crypto-js": "^4.2.0",
+    "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",

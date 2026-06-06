@@ -61,11 +61,26 @@ router.get('/sub/:id', async (req, res) => {
         if (isExplicitlyInactive) return false;
         const isActive = activeSuffices.some((suffix: string) => line.endsWith(suffix));
         if (isActive) return true;
-        return true; // Keep legacy links
+        return true; // Сохраняем старые ссылки
       })
       .join('\n');
     
-    if (!configLines) return res.status(200).send('');
+    // Резервный вариант (Fix 3): если фильтр удалил всё, возвращаем исходный список без фильтрации
+    if (!configLines) {
+      const fallbackLines = configText.split('\n')
+        .map(l => l.trim())
+        .filter(line => line.startsWith('vless://') || line.startsWith('vmess://') || line.startsWith('trojan://'))
+        .join('\n');
+      
+      if (!fallbackLines) {
+        console.warn(`[Subscription] Не найдено ни одной валидной конфигурации для ID: ${id}`);
+        return res.status(404).send('No valid configs found');
+      }
+      
+      const fallbackBase64 = Buffer.from(fallbackLines).toString('base64');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.send(fallbackBase64);
+    }
 
     const base64Config = Buffer.from(configLines).toString('base64');
     

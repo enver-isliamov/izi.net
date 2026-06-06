@@ -17,7 +17,7 @@ export class XUIService {
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
   private csrfToken: string | null = null;
-  private readonly SESSION_TTL = 2 * 60 * 1000; // 2 minutes cache for session cookie
+  private readonly SESSION_TTL = 10 * 60 * 1000; // 10 минут (Fix 6)
 
   constructor(serverConfigs?: ServerConfig) {
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
@@ -345,10 +345,16 @@ export class XUIService {
     if (security === 'reality') {
       const rs = streamSettings.realitySettings?.settings || streamSettings.realitySettings || {};
       
-      // ВАЖНО: Используем microsoft.com для классической маскировки (должно совпадать с repair_xui.py)
+      // ИСПОЛЬЗУЕМ MICROSOFT ДЛЯ МАСКИРОВКИ (должно совпадать с repair_xui.py)
       const sni = 'www.microsoft.com';
       
       const pbk = process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '';
+      
+      // Проверка наличия публичного ключа (Fix 2)
+      if (!pbk) {
+        throw new Error(`[XUI] Reality public key не найден для сервера ${this.host}. Проверьте XUI_REALITY_PUB_KEY в .env`);
+      }
+
       const sid = (rs.shortIds?.[0]) || '79b27cf7799d5b4c';
       const fp = rs.fingerprint || 'chrome';
       const spiderX = rs.spiderX || '/';
@@ -359,7 +365,11 @@ export class XUIService {
       return `${link}#${encodedEmail}`;
     } else if (security === 'tls') {
       const tlsSettings = streamSettings.tlsSettings || {};
-      const sni = tlsSettings.serverName || (isIPOrEmpty ? "" : hostName); 
+      
+      // Исправление ReferenceError: определяем является ли хост IP-адресом (Fix 2)
+      const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostName);
+      const sni = tlsSettings.serverName || (isIpAddress ? "" : hostName); 
+      
       let sniPart = sni ? `&sni=${sni}` : "";
       return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls${sniPart}#${encodedEmail}`;
     } else {
