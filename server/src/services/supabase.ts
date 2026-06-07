@@ -28,20 +28,26 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 export async function checkDatabase() {
   try {
     console.log('📡 [Supabase] Проверка связи с таблицей vpn_servers...');
-    const { data, count, error } = await supabase.from('vpn_servers').select('*', { count: 'exact', head: false });
+    const { data, error } = await supabase.from('vpn_servers').select('*');
     
     if (error) {
       console.error('❌ [Supabase] Ошибка связи:', error.message);
       return false;
     }
     
-    console.log(`✅ [Supabase] База данных доступна. Найдено серверов: ${data?.length || 0}`);
+    console.log(`✅ [Supabase] База данных доступна. Найдено записей: ${data?.length || 0}`);
     if (data && data.length > 0) {
-      data.forEach(s => console.log(`   📍 Сервер: ${s.name} (${s.host}) - ${s.is_active ? 'Активен' : 'Выключен'}`));
+      const s = data[0];
+      console.log('📊 [Supabase] Доступные поля в vpn_servers:', Object.keys(s).join(', '));
+      data.forEach(srv => {
+        // Пытаемся определить адрес сервера из разных возможных полей
+        const address = srv.host || srv.ip_address || srv.domain || srv.ip || 'НЕИЗВЕСТНО';
+        console.log(`   📍 Сервер: ${srv.name} (${address}) - ${srv.is_active ? 'Активен' : 'Выключен'}`);
+      });
     }
     return true;
   } catch (err: any) {
-    console.error('❌ [Supabase] Непредвиденная ошибка подключения:', err.message || err);
+    console.error('❌ [Supabase] Ошибка подключения:', err.message || err);
     return false;
   }
 }

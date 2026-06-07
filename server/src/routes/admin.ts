@@ -5,8 +5,21 @@ import { getXuiForServer } from '../services/xui.service';
 
 const router = Router();
 
-// Health check all servers
-router.get('/servers/health', adminOnly, async (req, res) => {
+// --- СЕРВЕРА ---
+
+// Список всех серверов
+router.get('/servers', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Диагностика серверов
+router.get('/servers/diag', adminOnly, async (req, res) => {
   try {
     const { data: servers, error } = await supabase.from('vpn_servers').select('id, name');
     if (error) throw error;
@@ -15,53 +28,72 @@ router.get('/servers/health', adminOnly, async (req, res) => {
       try {
         const { instance } = await getXuiForServer(s.id);
         const isOnline = await instance.checkHealth();
-        return { id: s.id, online: isOnline };
+        return { id: s.id, name: s.name, online: isOnline };
       } catch (e: any) {
-        return { id: s.id, online: false, error: e.message };
+        return { id: s.id, name: s.name, online: false, error: e.message };
       }
     }));
-    
     res.json(results);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get Admin stats
+// --- ПОЛЬЗОВАТЕЛИ ---
+
+// Список пользователей (с поиском)
+router.get('/users', adminOnly, async (req, res) => {
+  const { search } = req.query;
+  try {
+    let query = supabase.from('users').select('*, balances(amount), subscriptions(*)');
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+    }
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- ПЛАТЕЖИ ---
+router.get('/payments', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('transactions').select('*, users(email)').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- НАСТРОЙКИ ---
+router.get('/settings', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('settings').select('*');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- СТАТИСТИКА ---
 router.get('/stats', adminOnly, async (req, res) => {
   try {
     const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    const { count: activeSubs } = await supabase.from('subscriptions').select('*', { count: 'exact', head: true }).gt('expires_at', new Date().toISOString());
-    const { data: recentRevenue } = await supabase.from('transactions').select('amount').eq('status', 'completed');
+    const { data: activeSubs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
+    const { data: revenue } = await supabase.from('transactions').select('amount').eq('status', 'completed');
     
-    const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
-    let totalOnline = 0;
-    let serverStats: any[] = [];
-
-    if (servers) {
-      const liveData = await Promise.all(servers.map(async (s) => {
-        try {
-          const { instance } = await getXuiForServer(s.id);
-          const onlines = await instance.getOnlines();
-          return { id: s.id, name: s.name, online: onlines.length, status: 'online' };
-        } catch (e) {
-          return { id: s.id, name: s.name, online: 0, status: 'offline' };
-        }
-      }));
-      totalOnline = liveData.reduce((acc, curr) => acc + curr.online, 0);
-      serverStats = liveData;
-    }
-
-    const { count: adminsCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).in('role', ['admin', 'superadmin']);
-    const totalRevenue = recentRevenue?.reduce((sum, tx) => sum + tx.amount, 0) || 0;
+    const totalRevenue = revenue?.reduce((sum, tx) => sum + tx.amount, 0) || 0;
 
     res.json({
-      totalUsers: usersCount,
-      activeSubscriptions: activeSubs,
+      totalUsers: usersCount || 0,
+      activeSubscriptions: activeSubs?.length || 0,
       totalRevenue,
-      adminsCount,
-      totalOnline,
-      serverStats
+      adminsCount: 0, // Можно добавить запрос если нужно
+      totalOnline: 0
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

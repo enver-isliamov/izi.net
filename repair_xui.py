@@ -12,7 +12,6 @@ DB_PATH = os.path.join(PROJECT_DIR, "xui-db/x-ui.db")
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 
 def load_env_safe(path):
-    """Загружает .env, игнорируя комментарии и очищая ключи от мусора"""
     env = {}
     if not os.path.exists(path): return env
     with open(path, 'r', encoding='utf-8') as f:
@@ -22,7 +21,6 @@ def load_env_safe(path):
             if '=' in line:
                 key, value = line.split('=', 1)
                 key = key.strip()
-                # Убираем комментарии и очищаем от мусора
                 value = value.split('#')[0].strip().strip('"').strip("'")
                 if "REALITY" in key:
                     value = ''.join(c for c in value if c.isalnum() or c in '+/=-_')
@@ -31,23 +29,21 @@ def load_env_safe(path):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (LOGS & PROXY UPGRADE)")
+    print("🛠️  IZINET MASTER DOCTOR (ADMIN & VPN FIX)")
     print("====================================================")
 
-    # 1. Анализ .env
+    # 1. Анализ окружения
     env = load_env_safe(ENV_PATH)
     DOMAIN = env.get("DOMAIN", "izinet.online")
     PRIV_KEY = env.get("XUI_REALITY_PRIV_KEY", "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo")
     PUB_KEY = env.get("XUI_REALITY_PUB_KEY", "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw")
 
-    # 2. Настройка Xray (Глубокая чистка)
+    # 2. Настройка Xray (Глубокая чистка + Sniffing)
     if os.path.exists(DB_PATH):
         try:
-            print("⚙️  Полный сброс и настройка Xray (Sniffing + Reality)...")
+            print("⚙️  Синхронизация Xray...")
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            
-            # Чистим все кеши и шаблоны
             cursor.execute("UPDATE settings SET value = '{}' WHERE key = 'xrayTemplateConfig';")
             
             cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
@@ -57,7 +53,7 @@ def main():
                 settings = json.loads(sett_str) if sett_str else {}
                 stream = json.loads(stream_str) if stream_str else {}
                 
-                # Включаем всё необходимое
+                # Sniffing - ГЛАЗ СЕРВЕРА
                 sniffing = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False}
                 settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
                 
@@ -71,14 +67,13 @@ def main():
                 
                 cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, sniffing=?, enable=1 WHERE id=?;", 
                                (json.dumps(settings), json.dumps(stream), json.dumps(sniffing), iid))
-                print(f"✅ База XUI настроена. Используем PUB KEY: {PUB_KEY[:10]}...")
-            
+                print(f"✅ VPN настроен (PUB KEY: {PUB_KEY[:10]}...).")
             conn.commit()
             conn.close()
         except Exception as e:
             print(f"⚠️ Ошибка базы: {e}")
 
-    # 3. Пересборка Docker
+    # 3. Полная очистка и пересборка Docker (API FIX)
     print("\n🔄 Пересборка системы...")
     try:
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
@@ -97,18 +92,16 @@ def main():
         subprocess.run(build_cmd, cwd=PROJECT_DIR)
         subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
         
-        print("\n⏳ Ожидание запуска и сбор логов (20 сек)...")
+        print("\n⏳ Ожидание и логи (20 сек)...")
         time.sleep(20)
-        
-        print("\n📝 КРИТИЧЕСКИЕ ЛОГИ ПРИЛОЖЕНИЯ:")
         subprocess.run(["docker", "logs", "--tail", "50", "izinet-app"], cwd=PROJECT_DIR)
         
     except Exception as e:
         print(f"❌ Ошибка Docker: {e}")
 
     print("\n====================================================")
-    print(f"🚀 Сборка завершена. Проверьте: https://{DOMAIN}")
-    print("Изучите раздел 'КРИТИЧЕСКИЕ ЛОГИ' выше — там будет список серверов!")
+    print(f"🚀 ВСЁ ГОТОВО! Теперь админка и VPN должны ожить.")
+    print(f"Проверьте сайт: https://{DOMAIN}")
     print("====================================================")
 
 if __name__ == "__main__":
