@@ -31,7 +31,7 @@ def load_env_safe(path):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (API PROXY & KEY SYNC)")
+    print("🛠️  IZINET MASTER DOCTOR (LOGS & PROXY UPGRADE)")
     print("====================================================")
 
     # 1. Анализ .env
@@ -40,12 +40,14 @@ def main():
     PRIV_KEY = env.get("XUI_REALITY_PRIV_KEY", "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo")
     PUB_KEY = env.get("XUI_REALITY_PUB_KEY", "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw")
 
-    # 2. Настройка Xray
+    # 2. Настройка Xray (Глубокая чистка)
     if os.path.exists(DB_PATH):
         try:
-            print("⚙️  Синхронизация Xray (Sniffing + Reality)...")
+            print("⚙️  Полный сброс и настройка Xray (Sniffing + Reality)...")
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
+            
+            # Чистим все кеши и шаблоны
             cursor.execute("UPDATE settings SET value = '{}' WHERE key = 'xrayTemplateConfig';")
             
             cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
@@ -54,8 +56,11 @@ def main():
                 iid, sett_str, stream_str = inbound
                 settings = json.loads(sett_str) if sett_str else {}
                 stream = json.loads(stream_str) if stream_str else {}
+                
+                # Включаем всё необходимое
                 sniffing = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False}
                 settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
+                
                 stream["security"] = "reality"
                 rs = stream.get("realitySettings", {})
                 rs["dest"] = "www.microsoft.com:443"
@@ -63,16 +68,18 @@ def main():
                 rs["privateKey"] = PRIV_KEY
                 rs["publicKey"] = PUB_KEY
                 stream["realitySettings"] = rs
+                
                 cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, sniffing=?, enable=1 WHERE id=?;", 
                                (json.dumps(settings), json.dumps(stream), json.dumps(sniffing), iid))
-                print("✅ Настройки VPN обновлены (Sniffing ON).")
+                print(f"✅ База XUI настроена. Используем PUB KEY: {PUB_KEY[:10]}...")
+            
             conn.commit()
             conn.close()
         except Exception as e:
             print(f"⚠️ Ошибка базы: {e}")
 
-    # 3. Сборка Docker
-    print("\n🔄 Пересборка системы (с фиксацией API PROXY)...")
+    # 3. Пересборка Docker
+    print("\n🔄 Пересборка системы...")
     try:
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
         for item in ["package-lock.json", "dist", "node_modules", ".vite"]:
@@ -90,15 +97,18 @@ def main():
         subprocess.run(build_cmd, cwd=PROJECT_DIR)
         subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
         
-        print("\n⏳ Ожидание запуска (20 сек)...")
+        print("\n⏳ Ожидание запуска и сбор логов (20 сек)...")
         time.sleep(20)
-        subprocess.run(["docker", "logs", "--tail", "20", "izinet-app"], cwd=PROJECT_DIR)
+        
+        print("\n📝 КРИТИЧЕСКИЕ ЛОГИ ПРИЛОЖЕНИЯ:")
+        subprocess.run(["docker", "logs", "--tail", "50", "izinet-app"], cwd=PROJECT_DIR)
         
     except Exception as e:
         print(f"❌ Ошибка Docker: {e}")
 
     print("\n====================================================")
     print(f"🚀 Сборка завершена. Проверьте: https://{DOMAIN}")
+    print("Изучите раздел 'КРИТИЧЕСКИЕ ЛОГИ' выше — там будет список серверов!")
     print("====================================================")
 
 if __name__ == "__main__":

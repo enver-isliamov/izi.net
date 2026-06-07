@@ -3,10 +3,10 @@ dotenv.config();
 
 // Санитарная очистка ключей Reality (Fix таймаутов из-за русских комментов в .env)
 if (process.env.XUI_REALITY_PUB_KEY) {
-  process.env.XUI_REALITY_PUB_KEY = process.env.XUI_REALITY_PUB_KEY.split('#')[0].trim().replace(/[^a-zA-Z0-9\-_]/g, '');
+  process.env.XUI_REALITY_PUB_KEY = process.env.XUI_REALITY_PUB_KEY.split('#')[0].strip().replace(/[^a-zA-Z0-9\-_]/g, '');
 }
 if (process.env.XUI_REALITY_PRIV_KEY) {
-  process.env.XUI_REALITY_PRIV_KEY = process.env.XUI_REALITY_PRIV_KEY.split('#')[0].trim().replace(/[^a-zA-Z0-9\-_]/g, '');
+  process.env.XUI_REALITY_PRIV_KEY = process.env.XUI_REALITY_PRIV_KEY.split('#')[0].strip().replace(/[^a-zA-Z0-9\-_]/g, '');
 }
 
 // Отключение проверки TLS (для 2026 года)
@@ -36,31 +36,43 @@ const PORT = parseInt(process.env.PORT || '3005');
 app.use(cors());
 app.use(express.json());
 
-// --- Supabase Proxy (Fix 404 Auth) ---
-// Этот маршрут жизненно необходим для работы авторизации на фронтенде
+// --- Transparent Supabase Proxy (Fix Admin Panel Data) ---
 app.all('/api/supabase-proxy/*', async (req, res) => {
   const targetPath = req.params[0];
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   
   if (!supabaseUrl) return res.status(500).json({ error: 'Supabase URL not configured' });
 
-  const url = `${supabaseUrl}/${targetPath}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
+  // Формируем полный URL с учетом всех параметров запроса
+  const queryString = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
+  const url = `${supabaseUrl}/${targetPath}${queryString}`;
   
   try {
+    // Копируем все важные заголовки для REST запросов
+    const proxyHeaders: any = {
+      'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
+      'Authorization': req.headers.authorization || `Bearer ${process.env.VITE_SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json'
+    };
+    
+    // Пробрасываем заголовки фильтрации и пагинации Supabase
+    if (req.headers['range']) proxyHeaders['range'] = req.headers['range'];
+    if (req.headers['prefer']) proxyHeaders['prefer'] = req.headers['prefer'];
+
+    console.log(`📡 [Proxy] ${req.method} ${targetPath} ${queryString || ''}`);
+
     const response = await axios({
       method: req.method,
       url: url,
       data: req.body,
-      headers: {
-        'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
-        'Authorization': req.headers.authorization || `Bearer ${process.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      validateStatus: () => true // Пропускаем любые статусы от Supabase
+      headers: proxyHeaders,
+      validateStatus: () => true
     });
+
+    // Передаем статус и данные обратно на фронтенд
     res.status(response.status).json(response.data);
   } catch (error: any) {
-    console.error(`❌ [Proxy Error] ${url}:`, error.message);
+    console.error(`❌ [Proxy Error] ${targetPath}:`, error.message);
     res.status(500).json({ error: 'Proxy failed' });
   }
 });
@@ -84,17 +96,21 @@ async function start() {
   console.log('🚀 [BOOT] Проверка Supabase...');
   const dbOk = await checkDatabase();
   
-  botService.init();
-  MaintenanceService.init(); 
+  if (dbOk) {
+    console.log('🚀 [BOOT] Инициализация сервисов...');
+    botService.init();
+    MaintenanceService.init(); 
+  } else {
+    console.error('⚠️ [BOOT] Сервисы запущены в ограниченном режиме из-за проблем с БД');
+  }
   
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ [BOOT] Сервер запущен на порту ${PORT}`);
-    console.log(`✅ [BOOT] Прокси Supabase активен по адресу /api/supabase-proxy`);
+    console.log(`✅ [BOOT] Сервер успешно запущен на порту ${PORT}`);
   });
 }
 
 start().catch(err => {
-  console.error('❌ [BOOT] ФАТАЛЬНЫЙ СБОЙ:', err);
+  console.error('❌ [BOOT] ФАТАЛЬНЫЙ СБОЙ ПРИ ЗАПУСКЕ:', err);
   process.exit(1);
 });
 

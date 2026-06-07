@@ -27,15 +27,21 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 
 export async function checkDatabase() {
   try {
-    const { data, error } = await supabase.from('vpn_servers').select('id').limit(1);
+    console.log('📡 [Supabase] Проверка связи с таблицей vpn_servers...');
+    const { data, count, error } = await supabase.from('vpn_servers').select('*', { count: 'exact', head: false });
+    
     if (error) {
       console.error('❌ [Supabase] Ошибка связи:', error.message);
       return false;
     }
-    console.log('✅ [Supabase] Соединение установлено.');
+    
+    console.log(`✅ [Supabase] База данных доступна. Найдено серверов: ${data?.length || 0}`);
+    if (data && data.length > 0) {
+      data.forEach(s => console.log(`   📍 Сервер: ${s.name} (${s.host}) - ${s.is_active ? 'Активен' : 'Выключен'}`));
+    }
     return true;
   } catch (err: any) {
-    console.error('❌ [Supabase] Непредвиденная ошибка:', err.message || err);
+    console.error('❌ [Supabase] Непредвиденная ошибка подключения:', err.message || err);
     return false;
   }
 }
