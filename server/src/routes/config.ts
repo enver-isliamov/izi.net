@@ -3,6 +3,15 @@ import { supabase } from '../services/supabase';
 
 const router = Router();
 
+// ⚙️ Global App Config (Needed by frontend)
+router.get('/config', (req, res) => {
+  res.json({
+    telegramBotName: process.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot',
+    publicUrl: process.env.PUBLIC_URL || 'https://izinet.online',
+    maintenance: false
+  });
+});
+
 router.get('/sub/:id', async (req, res) => {
   const { id } = req.params;
   const { deviceId } = req.query;
@@ -65,7 +74,7 @@ router.get('/sub/:id', async (req, res) => {
       })
       .join('\n');
     
-    // Резервный вариант (Fix 3): если фильтр удалил всё, возвращаем исходный список без фильтрации
+    // Резервный вариант: если фильтр удалил всё, возвращаем исходный список
     if (!configLines) {
       const fallbackLines = configText.split('\n')
         .map(l => l.trim())
@@ -73,7 +82,6 @@ router.get('/sub/:id', async (req, res) => {
         .join('\n');
       
       if (!fallbackLines) {
-        console.warn(`[Subscription] Не найдено ни одной валидной конфигурации для ID: ${id}`);
         return res.status(404).send('No valid configs found');
       }
       

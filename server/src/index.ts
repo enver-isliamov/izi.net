@@ -1,12 +1,21 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+// Санитарная очистка ключей Reality (Fix таймаутов из-за русских комментов в .env)
+if (process.env.XUI_REALITY_PUB_KEY) {
+  process.env.XUI_REALITY_PUB_KEY = process.env.XUI_REALITY_PUB_KEY.split('#')[0].trim().replace(/[^a-zA-Z0-9\-_]/g, '');
+}
+if (process.env.XUI_REALITY_PRIV_KEY) {
+  process.env.XUI_REALITY_PRIV_KEY = process.env.XUI_REALITY_PRIV_KEY.split('#')[0].trim().replace(/[^a-zA-Z0-9\-_]/g, '');
+}
+
 // Отключение проверки TLS (для 2026 года)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import axios from 'axios';
 import { EventEmitter } from 'events';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
@@ -27,11 +36,42 @@ const PORT = parseInt(process.env.PORT || '3005');
 app.use(cors());
 app.use(express.json());
 
+// --- Supabase Proxy (Fix 404 Auth) ---
+// Этот маршрут жизненно необходим для работы авторизации на фронтенде
+app.all('/api/supabase-proxy/*', async (req, res) => {
+  const targetPath = req.params[0];
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  
+  if (!supabaseUrl) return res.status(500).json({ error: 'Supabase URL not configured' });
+
+  const url = `${supabaseUrl}/${targetPath}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
+  
+  try {
+    const response = await axios({
+      method: req.method,
+      url: url,
+      data: req.body,
+      headers: {
+        'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
+        'Authorization': req.headers.authorization || `Bearer ${process.env.VITE_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      validateStatus: () => true // Пропускаем любые статусы от Supabase
+    });
+    res.status(response.status).json(response.data);
+  } catch (error: any) {
+    console.error(`❌ [Proxy Error] ${url}:`, error.message);
+    res.status(500).json({ error: 'Proxy failed' });
+  }
+});
+
+// Маршруты API
 app.use('/api', userRoutes);
 app.use('/api', configRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/pay', paymentRoutes);
 
+// Статика фронтенда
 const distPath = path.join(process.cwd(), 'dist');
 app.use(express.static(distPath));
 
@@ -49,6 +89,7 @@ async function start() {
   
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ [BOOT] Сервер запущен на порту ${PORT}`);
+    console.log(`✅ [BOOT] Прокси Supabase активен по адресу /api/supabase-proxy`);
   });
 }
 
