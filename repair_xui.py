@@ -20,7 +20,6 @@ def load_env_safe(path):
             if not line or line.startswith('#'): continue
             if '=' in line:
                 key, value = line.split('=', 1)
-                key = key.strip()
                 value = value.split('#')[0].strip().strip('"').strip("'")
                 if "REALITY" in key:
                     value = ''.join(c for c in value if c.isalnum() or c in '+/=-_')
@@ -29,7 +28,7 @@ def load_env_safe(path):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (ADMIN & VPN FIX)")
+    print("🛠️  IZINET MASTER DOCTOR (DB-SCHEMA SYNC)")
     print("====================================================")
 
     # 1. Анализ окружения
@@ -52,11 +51,8 @@ def main():
                 iid, sett_str, stream_str = inbound
                 settings = json.loads(sett_str) if sett_str else {}
                 stream = json.loads(stream_str) if stream_str else {}
-                
-                # Sniffing - ГЛАЗ СЕРВЕРА
                 sniffing = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False}
                 settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
-                
                 stream["security"] = "reality"
                 rs = stream.get("realitySettings", {})
                 rs["dest"] = "www.microsoft.com:443"
@@ -64,7 +60,6 @@ def main():
                 rs["privateKey"] = PRIV_KEY
                 rs["publicKey"] = PUB_KEY
                 stream["realitySettings"] = rs
-                
                 cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, sniffing=?, enable=1 WHERE id=?;", 
                                (json.dumps(settings), json.dumps(stream), json.dumps(sniffing), iid))
                 print(f"✅ VPN настроен (PUB KEY: {PUB_KEY[:10]}...).")
@@ -94,6 +89,8 @@ def main():
         
         print("\n⏳ Ожидание и логи (20 сек)...")
         time.sleep(20)
+        
+        print("\n📝 КРИТИЧЕСКИЕ ЛОГИ ПРИЛОЖЕНИЯ:")
         subprocess.run(["docker", "logs", "--tail", "50", "izinet-app"], cwd=PROJECT_DIR)
         
     except Exception as e:
@@ -101,7 +98,7 @@ def main():
 
     print("\n====================================================")
     print(f"🚀 ВСЁ ГОТОВО! Теперь админка и VPN должны ожить.")
-    print(f"Проверьте сайт: https://{DOMAIN}")
+    print("Проверьте таблицу пользователей в админке.")
     print("====================================================")
 
 if __name__ == "__main__":
