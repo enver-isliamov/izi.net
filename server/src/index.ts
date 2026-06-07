@@ -1,12 +1,20 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-// Санитарная очистка ключей Reality (Fix таймаутов из-за русских комментов в .env)
+// Глобальные обработчики ошибок (Fix: Логирование перед падением)
+process.on('uncaughtException', (err) => {
+  console.error('🔥 [CRITICAL] Необработанное исключение:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔥 [CRITICAL] Необработанный промис:', promise, 'причина:', reason);
+});
+
+// Санитарная очистка ключей Reality (Fix: замена .strip() на .trim())
 if (process.env.XUI_REALITY_PUB_KEY) {
-  process.env.XUI_REALITY_PUB_KEY = process.env.XUI_REALITY_PUB_KEY.split('#')[0].strip().replace(/[^a-zA-Z0-9\-_]/g, '');
+  process.env.XUI_REALITY_PUB_KEY = process.env.XUI_REALITY_PUB_KEY.split('#')[0].trim().replace(/[^a-zA-Z0-9\-_]/g, '');
 }
 if (process.env.XUI_REALITY_PRIV_KEY) {
-  process.env.XUI_REALITY_PRIV_KEY = process.env.XUI_REALITY_PRIV_KEY.split('#')[0].strip().replace(/[^a-zA-Z0-9\-_]/g, '');
+  process.env.XUI_REALITY_PRIV_KEY = process.env.XUI_REALITY_PRIV_KEY.split('#')[0].trim().replace(/[^a-zA-Z0-9\-_]/g, '');
 }
 
 // Отключение проверки TLS (для 2026 года)
@@ -27,7 +35,7 @@ import configRoutes from './routes/config';
 
 EventEmitter.defaultMaxListeners = 100;
 
-console.log('🚀 [BOOT] Сервер запускается...');
+console.log('🚀 [BOOT] Инициализация сервера...');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -43,23 +51,18 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
   
   if (!supabaseUrl) return res.status(500).json({ error: 'Supabase URL not configured' });
 
-  // Формируем полный URL с учетом всех параметров запроса
   const queryString = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
   const url = `${supabaseUrl}/${targetPath}${queryString}`;
   
   try {
-    // Копируем все важные заголовки для REST запросов
     const proxyHeaders: any = {
       'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
       'Authorization': req.headers.authorization || `Bearer ${process.env.VITE_SUPABASE_ANON_KEY}`,
       'Content-Type': 'application/json'
     };
     
-    // Пробрасываем заголовки фильтрации и пагинации Supabase
     if (req.headers['range']) proxyHeaders['range'] = req.headers['range'];
     if (req.headers['prefer']) proxyHeaders['prefer'] = req.headers['prefer'];
-
-    console.log(`📡 [Proxy] ${req.method} ${targetPath} ${queryString || ''}`);
 
     const response = await axios({
       method: req.method,
@@ -69,7 +72,6 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
       validateStatus: () => true
     });
 
-    // Передаем статус и данные обратно на фронтенд
     res.status(response.status).json(response.data);
   } catch (error: any) {
     console.error(`❌ [Proxy Error] ${targetPath}:`, error.message);
@@ -101,7 +103,7 @@ async function start() {
     botService.init();
     MaintenanceService.init(); 
   } else {
-    console.error('⚠️ [BOOT] Сервисы запущены в ограниченном режиме из-за проблем с БД');
+    console.error('⚠️ [BOOT] База данных недоступна. Проверьте .env');
   }
   
   app.listen(PORT, '0.0.0.0', () => {
