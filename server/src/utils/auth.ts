@@ -13,26 +13,30 @@ export async function adminOnly(req: any, res: any, next: any) {
     return res.status(401).json({ error: 'Invalid Session' });
   }
 
+  // Спец-доступ для владельца
   if (user.email === 'enverphoto@gmail.com') {
     req.user = { ...user, role: 'superadmin' };
     return next();
   }
 
+  // Проверка через таблицу profiles (согласно схеме БД)
   const { data: profile, error: profileError } = await supabase
-    .from('users')
-    .select('role, email')
+    .from('profiles')
+    .select('is_admin, email')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
   if (profileError || !profile) {
-    return res.status(403).json({ error: 'Profile Error' });
+    console.error('👮 [Auth] Ошибка проверки прав админа:', profileError?.message);
+    return res.status(403).json({ error: 'Profile not found or error' });
   }
 
-  if (profile.role !== 'admin' && profile.role !== 'superadmin') {
+  if (profile.is_admin !== true) {
+    console.warn(`👮 [Auth] Отказ в доступе: ${user.email} не является админом`);
     return res.status(403).json({ error: 'Insufficient Permissions' });
   }
 
-  req.user = { ...user, role: profile.role };
+  req.user = { ...user, role: 'admin' };
   next();
 }
 
