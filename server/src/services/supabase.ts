@@ -5,60 +5,34 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || ''; 
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || ''; 
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('❌ [Supabase] ОШИБКА: URL или SERVICE_ROLE_KEY не найдены!');
-}
-
 export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-    detectSessionInUrl: false
-  },
-  global: {
-    // @ts-ignore
-    headers: { 'x-client-info': 'izinet-app' }
-  },
-  realtime: {
-    // @ts-ignore
-    transport: WebSocket
-  }
+  auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  global: { headers: { 'x-client-info': 'izinet-app' } },
+  realtime: { transport: WebSocket }
 });
 
 export async function checkDatabase() {
   try {
-    console.log('📡 [Supabase] Проверка соответствия схеме из Supabase.md...');
+    console.log('📡 [Supabase] Глубокая диагностика таблиц...');
     
-    // Проверка таблицы users (а не profiles!)
-    const { data: users, error: uErr } = await supabase.from('users').select('*').limit(1);
-    if (uErr) {
-      console.error('❌ [Supabase] Таблица public.users не найдена или недоступна:', uErr.message);
-    } else {
-      console.log('✅ [Supabase] Таблица public.users активна.');
+    // Проверка всех ключевых таблиц из обеих схем
+    const tables = ['users', 'profiles', 'settings', 'vpn_servers', 'balances', 'subscriptions'];
+    for (const table of tables) {
+      const { error } = await supabase.from(table).select('count', { count: 'exact', head: true }).limit(1);
+      if (error) console.error(`❌ [Supabase] Таблица ${table}:`, error.message);
+      else console.log(`✅ [Supabase] Таблица ${table} активна.`);
     }
 
-    // Проверка таблицы settings
-    const { data: settings, error: sErr } = await supabase.from('settings').select('*').limit(1);
-    if (sErr) {
-      console.error('❌ [Supabase] Таблица public.settings не найдена:', sErr.message);
-    } else {
-      console.log('✅ [Supabase] Таблица public.settings активна.');
-    }
-
-    const { data: servers, error: srvErr } = await supabase.from('vpn_servers').select('*');
-    if (srvErr) {
-      console.error('❌ [Supabase] Ошибка таблицы vpn_servers:', srvErr.message);
-      return false;
-    }
-    
-    console.log(`✅ [Supabase] Найдено серверов в БД: ${servers?.length || 0}`);
+    const { data: servers } = await supabase.from('vpn_servers').select('*');
+    console.log(`✅ [Supabase] Найдено серверов: ${servers?.length || 0}`);
     servers?.forEach(srv => {
-      console.log(`   📍 Сервер: ${srv.name} (IP: ${srv.ip}, Domain: ${srv.domain}) - ${srv.is_active ? 'Активен' : 'Выключен'}`);
+      const address = srv.ip || srv.domain || srv.host || '???';
+      console.log(`   📍 [DB] ${srv.name}: ${address} (Active: ${srv.is_active})`);
     });
 
     return true;
   } catch (err: any) {
-    console.error('❌ [Supabase] Критическая ошибка диагностики:', err.message || err);
+    console.error('❌ [Supabase] Сбой диагностики:', err.message);
     return false;
   }
 }
