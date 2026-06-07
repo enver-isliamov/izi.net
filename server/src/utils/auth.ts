@@ -19,24 +19,24 @@ export async function adminOnly(req: any, res: any, next: any) {
     return next();
   }
 
-  // Проверка через таблицу profiles (согласно схеме БД)
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('is_admin, email')
+  // Проверка через таблицу public.users (согласно Supabase.md)
+  const { data: dbUser, error: dbError } = await supabase
+    .from('users')
+    .select('role, email')
     .eq('id', user.id)
     .maybeSingle();
 
-  if (profileError || !profile) {
-    console.error('👮 [Auth] Ошибка проверки прав админа:', profileError?.message);
-    return res.status(403).json({ error: 'Profile not found or error' });
+  if (dbError || !dbUser) {
+    console.error('👮 [Auth] Ошибка проверки прав через таблицу users:', dbError?.message);
+    return res.status(403).json({ error: 'User record not found' });
   }
 
-  if (profile.is_admin !== true) {
-    console.warn(`👮 [Auth] Отказ в доступе: ${user.email} не является админом`);
+  if (dbUser.role !== 'admin' && dbUser.role !== 'superadmin') {
+    console.warn(`👮 [Auth] Отказ в доступе: ${user.email} (роль: ${dbUser.role})`);
     return res.status(403).json({ error: 'Insufficient Permissions' });
   }
 
-  req.user = { ...user, role: 'admin' };
+  req.user = { ...user, role: dbUser.role };
   next();
 }
 

@@ -22,7 +22,6 @@ router.get('/servers', adminOnly, async (req, res) => {
 
 // 2. Статус здоровья серверов (health)
 router.get('/servers/health', adminOnly, async (req, res) => {
-  console.log('👨‍💻 [Admin] Проверка здоровья всех серверов...');
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, name');
     const results = await Promise.all((servers || []).map(async (s) => {
@@ -42,7 +41,6 @@ router.get('/servers/health', adminOnly, async (req, res) => {
 
 // 3. Диагностика серверов (diag)
 router.get('/servers/diag', adminOnly, async (req, res) => {
-  console.log('👨‍💻 [Admin] Запрос диагностики серверов...');
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, name');
     const results = await Promise.all((servers || []).map(async (s) => {
@@ -63,7 +61,6 @@ router.get('/servers/diag', adminOnly, async (req, res) => {
 // 4. Проверка конкретного сервера
 router.get('/servers/:id/check', adminOnly, async (req, res) => {
   const { id } = req.params;
-  console.log(`👨‍💻 [Admin] Проверка сервера: ${id}`);
   try {
     const { instance } = await getXuiForServer(id);
     const online = await instance.checkHealth();
@@ -75,34 +72,34 @@ router.get('/servers/:id/check', adminOnly, async (req, res) => {
 
 // --- ПОЛЬЗОВАТЕЛИ ---
 
-// 5. Список пользователей (Fix Relationship Error)
+// 5. Список пользователей (Используем public.users согласно Supabase.md)
 router.get('/users', adminOnly, async (req, res) => {
   const { search } = req.query;
-  console.log(`👨‍💻 [Admin] Запрос пользователей (поиск: ${search || 'все'})...`);
+  console.log(`👨‍💻 [Admin] Запрос пользователей из public.users...`);
   
   try {
-    // Шаг 1: Получаем профили
-    let query = supabase.from('profiles').select('*');
+    // Согласно Supabase.md, таблица называется public.users
+    let query = supabase.from('users').select('*');
     if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
-    const { data: profiles, error: pErr } = await query.order('created_at', { ascending: false });
+    const { data: users, error: pErr } = await query.order('created_at', { ascending: false });
     if (pErr) throw pErr;
 
-    if (!profiles || profiles.length === 0) return res.json([]);
+    if (!users || users.length === 0) return res.json([]);
 
-    const profileIds = profiles.map(p => p.id);
+    const userIds = users.map(u => u.id);
 
-    // Шаг 2: Получаем балансы и подписки отдельными запросами (Fix Relationship Error)
+    // Получаем балансы и подписки отдельными запросами (Fix Relationship Error)
     const [balancesRes, subsRes] = await Promise.all([
-      supabase.from('balances').select('*').in('user_id', profileIds),
-      supabase.from('subscriptions').select('*').in('user_id', profileIds)
+      supabase.from('balances').select('*').in('user_id', userIds),
+      supabase.from('subscriptions').select('*').in('user_id', userIds)
     ]);
 
-    // Шаг 3: Объединяем данные вручную
-    const enrichedUsers = profiles.map(p => {
+    // Объединяем данные
+    const enrichedUsers = users.map(u => {
       return {
-        ...p,
-        balances: (balancesRes.data || []).filter(b => b.user_id === p.id),
-        subscriptions: (subsRes.data || []).filter(s => s.user_id === p.id)
+        ...u,
+        balances: (balancesRes.data || []).filter(b => b.user_id === u.id),
+        subscriptions: (subsRes.data || []).filter(s => s.user_id === u.id)
       };
     });
 
@@ -121,13 +118,12 @@ router.get('/payments', adminOnly, async (req, res) => {
 
     if (!txs || txs.length === 0) return res.json([]);
 
-    // Обогащаем данными о почте (email)
     const userIds = Array.from(new Set(txs.map(t => t.user_id)));
-    const { data: profiles } = await supabase.from('profiles').select('id, email').in('id', userIds);
+    const { data: users } = await supabase.from('users').select('id, email').in('id', userIds);
 
     const enrichedTxs = txs.map(t => ({
       ...t,
-      profiles: (profiles || []).find(p => p.id === t.user_id) || { email: 'Unknown' }
+      users: (users || []).find(u => u.id === t.user_id) || { email: 'Unknown' }
     }));
 
     res.json(enrichedTxs);
@@ -137,35 +133,35 @@ router.get('/payments', adminOnly, async (req, res) => {
 });
 
 // --- НАСТРОЙКИ ---
-
-// 6. Список настроек
 router.get('/settings', adminOnly, async (req, res) => {
-  console.log('👨‍💻 [Admin] Запрос настроек...');
   try {
     const { data, error } = await supabase.from('settings').select('*');
-    if (error) throw error;
+    if (error) {
+       console.error('❌ [Admin] Ошибка таблицы settings:', error.message);
+       throw error;
+    }
     res.json(data || []);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 7. Общая диагностика системы (diag)
+// --- ДИАГНОСТИКА ---
 router.get('/diag', adminOnly, async (req, res) => {
-  console.log('👨‍💻 [Admin] Общая диагностика системы...');
   try {
-    const envStatus = {
-      enot: !!process.env.ENOT_MERCHANT_ID,
-      supabase: !!process.env.VITE_SUPABASE_URL,
-      telegram: !!process.env.TELEGRAM_BOT_TOKEN
-    };
-    
-    // Проверка таблицы настроек
     const { error: settingsErr } = await supabase.from('settings').select('key').limit(1);
+    const { error: usersErr } = await supabase.from('users').select('id').limit(1);
     
     res.json({
-      env: envStatus,
-      dbSettingsTable: !settingsErr,
+      env: {
+        enot: !!process.env.ENOT_MERCHANT_ID,
+        supabase: !!process.env.VITE_SUPABASE_URL,
+        telegram: !!process.env.TELEGRAM_BOT_TOKEN
+      },
+      db: {
+        settingsTable: !settingsErr,
+        usersTable: !usersErr
+      },
       nodeVersion: process.version,
       date: new Date().toISOString()
     });
@@ -177,7 +173,7 @@ router.get('/diag', adminOnly, async (req, res) => {
 // --- СТАТИСТИКА ---
 router.get('/stats', adminOnly, async (req, res) => {
   try {
-    const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+    const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
     const { data: activeSubs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
     const { data: revenue } = await supabase.from('transactions').select('amount').eq('status', 'completed');
     

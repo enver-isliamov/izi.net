@@ -27,27 +27,38 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 
 export async function checkDatabase() {
   try {
-    console.log('📡 [Supabase] Проверка связи с таблицей vpn_servers...');
-    const { data, error } = await supabase.from('vpn_servers').select('*');
+    console.log('📡 [Supabase] Проверка соответствия схеме из Supabase.md...');
     
-    if (error) {
-      console.error('❌ [Supabase] Ошибка связи:', error.message);
+    // Проверка таблицы users (а не profiles!)
+    const { data: users, error: uErr } = await supabase.from('users').select('*').limit(1);
+    if (uErr) {
+      console.error('❌ [Supabase] Таблица public.users не найдена или недоступна:', uErr.message);
+    } else {
+      console.log('✅ [Supabase] Таблица public.users активна.');
+    }
+
+    // Проверка таблицы settings
+    const { data: settings, error: sErr } = await supabase.from('settings').select('*').limit(1);
+    if (sErr) {
+      console.error('❌ [Supabase] Таблица public.settings не найдена:', sErr.message);
+    } else {
+      console.log('✅ [Supabase] Таблица public.settings активна.');
+    }
+
+    const { data: servers, error: srvErr } = await supabase.from('vpn_servers').select('*');
+    if (srvErr) {
+      console.error('❌ [Supabase] Ошибка таблицы vpn_servers:', srvErr.message);
       return false;
     }
     
-    console.log(`✅ [Supabase] База данных доступна. Найдено записей: ${data?.length || 0}`);
-    if (data && data.length > 0) {
-      const s = data[0];
-      console.log('📊 [Supabase] Доступные поля в vpn_servers:', Object.keys(s).join(', '));
-      data.forEach(srv => {
-        // Пытаемся определить адрес сервера из разных возможных полей
-        const address = srv.host || srv.ip_address || srv.domain || srv.ip || 'НЕИЗВЕСТНО';
-        console.log(`   📍 Сервер: ${srv.name} (${address}) - ${srv.is_active ? 'Активен' : 'Выключен'}`);
-      });
-    }
+    console.log(`✅ [Supabase] Найдено серверов в БД: ${servers?.length || 0}`);
+    servers?.forEach(srv => {
+      console.log(`   📍 Сервер: ${srv.name} (IP: ${srv.ip}, Domain: ${srv.domain}) - ${srv.is_active ? 'Активен' : 'Выключен'}`);
+    });
+
     return true;
   } catch (err: any) {
-    console.error('❌ [Supabase] Ошибка подключения:', err.message || err);
+    console.error('❌ [Supabase] Критическая ошибка диагностики:', err.message || err);
     return false;
   }
 }
