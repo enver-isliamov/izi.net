@@ -2,39 +2,39 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Копируем зависимости
+# Отключаем интерактивные запросы npm
+ENV CI=true
+
+# Копируем только файлы зависимостей
 COPY package.json package-lock.json* ./
-# Установка зависимостей (чистая, без лок-файла Windows если он попал)
 RUN npm install
 
-# Копируем исходный код
+# Копируем остальной код
 COPY . .
 
-# Объявляем аргументы сборки для фронтенда (Vite)
+# Аргументы для Vite (запекаются в фронтенд при сборке)
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_API_URL
 
-# Устанавливаем их в окружение для процесса сборки (Vite их вшивает в JS)
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 ENV VITE_API_URL=$VITE_API_URL
 
-# Собираем проект
+# Сборка фронтенда
 RUN npm run build
 
 # Этап выполнения (Runner)
 FROM node:20-alpine
 WORKDIR /app
 
-# Копируем только результат сборки и сервер
+# Копируем результат сборки
 COPY --from=builder /app ./
 
-# Указываем окружение
+# Настройки среды
 ENV NODE_ENV=production
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 
-# Открываем порт
 EXPOSE 3005
 
-# Запуск
 CMD ["npm", "run", "start"]

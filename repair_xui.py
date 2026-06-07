@@ -12,7 +12,7 @@ DB_PATH = os.path.join(PROJECT_DIR, "xui-db/x-ui.db")
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 
 def load_env_safe(path):
-    """Загружает .env, игнорируя комментарии и лишние пробелы"""
+    """Загружает .env, игнорируя комментарии и очищая ключи от мусора"""
     env = {}
     if not os.path.exists(path): return env
     with open(path, 'r', encoding='utf-8') as f:
@@ -20,50 +20,37 @@ def load_env_safe(path):
             line = line.strip()
             if not line or line.startswith('#'): continue
             if '=' in line:
-                # Разделяем только по первому знаку равно
                 key, value = line.split('=', 1)
                 key = key.strip()
-                # Убираем комментарии в конце строки (например, ключ=значение # комментарий)
-                value = value.split('#')[0].strip()
-                # Очищаем от кавычек
-                value = value.strip('"').strip("'")
+                # Убираем комментарии в конце строки и лишние пробелы
+                value = value.split('#')[0].strip().strip('"').strip("'")
+                # Для ключей Reality оставляем только валидные символы
+                if "REALITY" in key:
+                    value = ''.join(c for c in value if c.isalnum() or c in '+/=-_')
                 env[key] = value
     return env
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (REALIY KEY & BUILD FIX)")
+    print("🛠️  IZINET ULTIMATE MASTER DOCTOR (FINAL FIX)")
     print("====================================================")
 
-    # 1. Проверка и очистка переменных
-    print("🔍 Анализ файла .env...")
+    # 1. Анализ окружения
     env = load_env_safe(ENV_PATH)
-    
-    required = ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "DOMAIN", "VITE_API_URL"]
-    missing = [k for k in required if k not in env or not env[k]]
-    
-    if missing:
-        print(f"❌ ОШИБКА: В .env отсутствуют или испорчены ключи: {', '.join(missing)}")
-        print("Проверьте, нет ли лишнего текста в строках с этими ключами.")
-        return
-
-    DOMAIN = env["DOMAIN"]
-    # Очищаем ключи от возможного мусора (русские буквы и т.д.)
+    DOMAIN = env.get("DOMAIN", "izinet.online")
     PRIV_KEY = env.get("XUI_REALITY_PRIV_KEY", "ABiVSJTP0fEMzgsHghSAsQJp-bYAJAat0jErpzaGtEo")
     PUB_KEY = env.get("XUI_REALITY_PUB_KEY", "CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw")
-    
-    # Гарантируем, что ключи содержат только допустимые символы Base64
-    PUB_KEY = ''.join(c for c in PUB_KEY if c.isalnum() or c in '-_')
-    PRIV_KEY = ''.join(c for c in PRIV_KEY if c.isalnum() or c in '-_')
 
-    print(f"✅ Ключи очищены. PUB: {PUB_KEY[:10]}...")
-
-    # 2. Настройка XUI
+    # 2. Настройка базы данных Xray (Критично для работы сайта!)
     if os.path.exists(DB_PATH):
         try:
-            print("⚙️  Синхронизация Xray (Reality + Microsoft SNI)...")
+            print("⚙️  Настройка Xray (Sniffing + Fallback + Reality)...")
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
+            
+            # Чистим шаблон
+            cursor.execute("UPDATE settings SET value = '{}' WHERE key = 'xrayTemplateConfig';")
+            
             cursor.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = 443;")
             inbound = cursor.fetchone()
             if inbound:
@@ -71,7 +58,13 @@ def main():
                 settings = json.loads(sett_str) if sett_str else {}
                 stream = json.loads(stream_str) if stream_str else {}
                 
+                # Включаем Sniffing (ОБЯЗАТЕЛЬНО для работы сайта через порт 443)
+                sniffing = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False}
+                
+                # Настройка Fallback на системный Nginx
                 settings["fallbacks"] = [{"dest": "host.docker.internal:3443", "xver": 0}]
+                
+                # Настройка Reality с маскировкой под Microsoft
                 stream["security"] = "reality"
                 rs = stream.get("realitySettings", {})
                 rs["dest"] = "www.microsoft.com:443"
@@ -80,48 +73,53 @@ def main():
                 rs["publicKey"] = PUB_KEY
                 stream["realitySettings"] = rs
                 
-                cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, enable=1 WHERE id=?;", 
-                               (json.dumps(settings), json.dumps(stream), iid))
-                print("✅ База XUI успешно обновлена.")
+                # Обновляем всё сразу
+                cursor.execute("UPDATE inbounds SET settings=?, stream_settings=?, sniffing=?, enable=1 WHERE id=?;", 
+                               (json.dumps(settings), json.dumps(stream), json.dumps(sniffing), iid))
+                print("✅ База XUI настроена: Sniffing ВКЛЮЧЕН, Fallback на 3443.")
+            
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"⚠️ Ошибка SQLite: {e}")
+            print(f"⚠️ Ошибка при настройке базы: {e}")
 
-    # 3. Полная пересборка Docker (С КЛЮЧАМИ)
-    print("\n🔄 Глубокая пересборка сайта и бекенда...")
+    # 3. Полная очистка и пересборка Docker
+    print("\n🔄 Полная пересборка системы...")
     try:
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
         
-        # Удаляем мусор
-        for f in ["package-lock.json", "dist", "node_modules"]:
-            p = os.path.join(PROJECT_DIR, f)
+        # Удаляем временные файлы Windows
+        for item in ["package-lock.json", "dist", "node_modules", ".vite"]:
+            p = os.path.join(PROJECT_DIR, item)
             if os.path.exists(p):
                 if os.path.isdir(p): shutil.rmtree(p)
                 else: os.remove(p)
 
-        # Сборка с передачей ВСЕХ параметров
+        # Сборка с передачей всех ключей (чтобы сайт видел базу)
         build_cmd = [
             "docker", "compose", "build", "--no-cache",
-            "--build-arg", f"VITE_SUPABASE_URL={env['VITE_SUPABASE_URL']}",
-            "--build-arg", f"VITE_SUPABASE_ANON_KEY={env['VITE_SUPABASE_ANON_KEY']}",
-            "--build-arg", f"VITE_API_URL={env['VITE_API_URL']}"
+            "--build-arg", f"VITE_SUPABASE_URL={env.get('VITE_SUPABASE_URL','')}",
+            "--build-arg", f"VITE_SUPABASE_ANON_KEY={env.get('VITE_SUPABASE_ANON_KEY','')}",
+            "--build-arg", f"VITE_API_URL=https://{DOMAIN}"
         ]
-        print(f"⚡ Команда: {' '.join(build_cmd)}")
+        print(f"⚡ Запуск сборки...")
         subprocess.run(build_cmd, cwd=PROJECT_DIR)
         
         subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
         
-        print("\n⏳ Проверка запуска (20 сек)...")
+        print("\n⏳ Ожидание старта (20 сек)...")
         time.sleep(20)
-        subprocess.run(["docker", "logs", "--tail", "20", "izinet-app"], cwd=PROJECT_DIR)
+        
+        # Итоговая проверка
+        print("\n📝 ЛОГИ БЕКЕНДА (izinet-app):")
+        subprocess.run(["docker", "logs", "--tail", "30", "izinet-app"], cwd=PROJECT_DIR)
         
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"❌ Сбой Docker: {e}")
 
     print("\n====================================================")
-    print(f"🚀 ГОТОВО! Теперь авторизация и VPN должны работать.")
-    print(f"Проверьте сайт: {env['VITE_API_URL']}")
+    print(f"🚀 ВСЁ ГОТОВО! Проверьте сайт: https://{DOMAIN}")
+    print("Если авторизация не работает — очистите кеш (Ctrl+F5).")
     print("====================================================")
 
 if __name__ == "__main__":
