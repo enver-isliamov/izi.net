@@ -23,16 +23,14 @@ def load_env(path):
 
 def main():
     print("====================================================")
-    print("🛠️  IZINET MASTER DOCTOR (AUTH & REALITY FIX - FINAL)")
+    print("🛠️  IZINET MASTER DOCTOR (FINAL RESCUE)")
     print("====================================================")
 
-    # 1. Проверка переменных окружения
+    # 1. Проверка .env
     print("🔍 Проверка файла .env...")
     env = load_env(ENV_PATH)
-    
-    # Ключи для авторизации на сайте
-    required = ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "DOMAIN"]
-    missing = [k for k in required if k not in env or not env[k] or "<NEW_" in env[k]]
+    required = ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "DOMAIN", "VITE_API_URL"]
+    missing = [k for k in required if k not in env or not env[k]]
     
     if missing:
         print(f"❌ ОШИБКА: В .env отсутствуют ключи: {', '.join(missing)}")
@@ -71,12 +69,12 @@ def main():
             print(f"⚠️ Ошибка базы: {e}")
 
     # 3. Перезапуск и сборка (С ПЕРЕДАЧЕЙ КЛЮЧЕЙ SUPABASE)
-    print("\n🔄 Пересборка Docker (с передачей ключей Supabase)...")
+    print("\n🔄 Пересборка Docker (с передачей ключей для САЙТА)...")
     try:
         subprocess.run(["docker", "compose", "down"], cwd=PROJECT_DIR)
         
         # Глубокая очистка
-        for f in ["package-lock.json", "dist"]:
+        for f in ["package-lock.json", "dist", "node_modules"]:
             p = os.path.join(PROJECT_DIR, f)
             if os.path.exists(p):
                 if os.path.isdir(p): shutil.rmtree(p)
@@ -86,9 +84,10 @@ def main():
         build_cmd = [
             "docker", "compose", "build", "--no-cache",
             "--build-arg", f"VITE_SUPABASE_URL={env['VITE_SUPABASE_URL']}",
-            "--build-arg", f"VITE_SUPABASE_ANON_KEY={env['VITE_SUPABASE_ANON_KEY']}"
+            "--build-arg", f"VITE_SUPABASE_ANON_KEY={env['VITE_SUPABASE_ANON_KEY']}",
+            "--build-arg", f"VITE_API_URL={env.get('VITE_API_URL', 'https://'+DOMAIN)}"
         ]
-        print(f"⚡ Запуск: {' '.join(build_cmd)}")
+        print(f"⚡ Запуск сборки: {' '.join(build_cmd)}")
         subprocess.run(build_cmd, cwd=PROJECT_DIR)
         
         subprocess.run(["docker", "compose", "up", "-d"], cwd=PROJECT_DIR)
