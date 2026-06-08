@@ -32,7 +32,18 @@ router.post('/servers', adminOnly, async (req, res) => {
 
 router.put('/servers/:id', adminOnly, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vpn_servers').update(req.body).eq('id', req.params.id).select().single();
+    // Очищаем данные от полей, которых может не быть в старой схеме БД
+    const { is_default, location_code, xui_config_state, ...updateData } = req.body;
+    
+    // Если вы уже выполнили REPAIR_DATABASE.sql, эти поля можно вернуть в updateData
+    // Для безопасности пока обновляем только базовые поля
+    const { data, error } = await supabase.from('vpn_servers').update({
+      ...updateData,
+      // Включаем эти поля только если они пришли в запросе, чтобы не затереть null-ами
+      ...(is_default !== undefined && { is_default }),
+      ...(location_code !== undefined && { location_code })
+    }).eq('id', req.params.id).select().single();
+    
     if (error) throw error;
     res.json(data);
   } catch (err: any) {
@@ -299,6 +310,37 @@ router.post('/system/sync-reality-keys', adminOnly, async (req, res) => {
     }
 
     res.json({ success: true, message: 'Reality keys synced to all servers' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/system/sync-all', adminOnly, async (req, res) => {
+  try {
+    MaintenanceService.runFullMaintenance();
+    res.json({ success: true, message: 'Global synchronization started' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/system/repair-vless', adminOnly, async (req, res) => {
+  try {
+    // В идеале тут запуск скрипта repair_xui.py, но мы сделаем это через sync-reality-keys
+    const pubKey = process.env.XUI_REALITY_PUB_KEY;
+    const privKey = process.env.XUI_REALITY_PRIV_KEY;
+    if (!pubKey || !privKey) throw new Error('Reality keys missing in .env');
+
+    const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
+    if (!servers) throw new Error('No active servers');
+
+    for (const s of servers) {
+      const { instance } = await getXuiForServer(s.id);
+      await instance.syncRealityKeys(privKey, pubKey);
+      await instance.restartPanel();
+    }
+
+    res.json({ success: true, message: 'VLESS/Reality repair and restart triggered on all servers' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
