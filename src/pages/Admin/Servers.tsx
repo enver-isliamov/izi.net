@@ -21,7 +21,7 @@ export function AdminServersList() {
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagResults, setDiagResults] = useState<any[]>([]);
   const [formData, setFormData] = useState({
-    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false
+    name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE'
   });
 
   const fetchServers = async () => {
@@ -86,7 +86,7 @@ export function AdminServersList() {
       
       setIsAdding(false);
       setEditingId(null);
-      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
+      setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE' });
       fetchServers();
     } catch (e: any) {
       const errorMsg = e.response?.data?.error || e.message || 'Ошибка сохранения сервера';
@@ -191,8 +191,7 @@ export function AdminServersList() {
       api_port: server.api_port || 2053,
       username: server.username || '',
       password: server.password || '',
-      location_code: server.location_code || 'DE',
-      is_default: !!server.is_default
+      location_code: server.location_code || 'DE'
     });
     setIsAdding(true);
   };
@@ -200,7 +199,7 @@ export function AdminServersList() {
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
-    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE', is_default: false });
+    setFormData({ name: '', ip: '', domain: '', api_port: 2053, username: '', password: '', location_code: 'DE' });
   };
 
   const toggleServer = async (id: string, active: boolean) => {
@@ -392,18 +391,6 @@ export function AdminServersList() {
                 onChange={e => setFormData({...formData, password: e.target.value})}
                 required
               />
-              <div className="md:col-span-2 flex items-center gap-3 px-1">
-                <input
-                  type="checkbox"
-                  id="is_default"
-                  checked={formData.is_default}
-                  onChange={e => setFormData({...formData, is_default: e.target.checked})}
-                  className="w-4 h-4 accent-blue-600"
-                />
-                <label htmlFor="is_default" className="text-sm text-muted-foreground cursor-pointer">
-                  Сделать сервером по умолчанию для новых пользователей
-                </label>
-              </div>
               <div className="md:col-span-2 flex gap-2">
                 <button type="submit" className="px-6 py-2 bg-blue-600 rounded-xl text-sm font-medium">
                   {editingId ? 'Обновить' : 'Сохранить'}
@@ -538,9 +525,6 @@ export function AdminServersList() {
                   />
                   <h3 className="font-semibold">{server.name}</h3>
                   <span className="text-xs bg-white/5 px-2 py-0.5 rounded uppercase font-mono">{server.location_code}</span>
-                  {server.is_default && (
-                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full border border-blue-500/30 font-bold uppercase tracking-widest">Default</span>
-                  )}
                   {server.xui_config_state?.backup_at && (
                     <span className="text-[9px] bg-green-500/10 text-green-400 px-1.5 py-0.5 rounded-full border border-green-500/20 flex items-center gap-1">
                       <Cloud size={10} /> 
