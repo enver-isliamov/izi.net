@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../services/supabase';
 import { authenticateUser } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
+import { MaintenanceService } from '../services/maintenance.service';
 import { parseVpnDevices, VpnDevice } from '../utils/vpn';
 import crypto from 'crypto';
 
@@ -199,6 +200,22 @@ router.post('/promocode/apply', authenticateUser, async (req: any, res) => {
   const userId = req.user.id;
   // Implementation...
   res.json({ success: true, message: 'Promocode applied (mock)' });
+});
+
+// --- СИНХРОНИЗАЦИЯ (Fix 404) ---
+
+router.get('/subscription/universal-link-visible', (req, res) => {
+  res.json({ visible: true });
+});
+
+router.post('/subscription/sync-servers', authenticateUser, async (req, res) => {
+  MaintenanceService.runFullMaintenance(); // Trigger in background
+  res.json({ success: true, message: 'Синхронизация серверов запущена' });
+});
+
+router.post('/subscription/sync-traffic', authenticateUser, async (req, res) => {
+  MaintenanceService.syncTraffic(); // Trigger in background
+  res.json({ success: true, message: 'Синхронизация трафика запущена' });
 });
 
 export default router;

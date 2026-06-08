@@ -2,12 +2,6 @@ import axios from 'axios';
 import { getRequestConfig } from '../utils/axios';
 import { supabase } from './supabase';
 
-export interface ServerConfig {
-  host?: string;
-  username?: string;
-  password?: string;
-}
-
 export class XUIService {
   public host: string;
   public basePath: string = "";
@@ -18,7 +12,7 @@ export class XUIService {
   private lastLoginTime: number = 0;
   private readonly SESSION_TTL = 10 * 60 * 1000; 
 
-  constructor(serverConfigs?: ServerConfig) {
+  constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
     this.username = (serverConfigs?.username || process.env.XUI_USERNAME || 'admin').trim();
     this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || 'admin').trim();
@@ -33,12 +27,14 @@ export class XUIService {
         const hn = parsedUrl.hostname;
         const configDomain = (process.env.DOMAIN || '').trim();
         
+        // Оптимизация для работы внутри Docker
         if (hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn.includes(configDomain))) {
           if (process.env.IS_DOCKER === 'true' || process.env.NODE_ENV?.includes('production')) {
             host = `http://x3-ui:2053${parsedUrl.pathname}`;
           }
         }
         this.displayDomain = hn;
+        this.basePath = parsedUrl.pathname.replace(/\/$/, '');
       } catch (e) {}
     }
     this.host = host;
@@ -73,7 +69,6 @@ export class XUIService {
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
     
-    // Пытаемся найти 443 порт
     let targetInboundId = inboundId;
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
@@ -85,15 +80,7 @@ export class XUIService {
     const clientData = {
       id: targetInboundId,
       settings: JSON.stringify({
-        clients: [{
-          id: uuid,
-          flow: "xtls-rprx-vision",
-          email: email,
-          limitIp: 0,
-          totalGB: limitBytes,
-          expiryTime: expiryTime,
-          enable: true
-        }]
+        clients: [{ id: uuid, flow: "xtls-rprx-vision", email: email, limitIp: 0, totalGB: limitBytes, expiryTime: expiryTime, enable: true }]
       })
     };
 
@@ -107,7 +94,6 @@ export class XUIService {
 
     const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
     const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
-    
     if (!resp.data.success) throw new Error('Inbound not found');
     
     const inbound = resp.data.obj;
@@ -115,22 +101,35 @@ export class XUIService {
     const port = inbound.port;
     const encodedEmail = encodeURIComponent(`izinet_${email}`);
 
-    // --- ФИКС ТАЙМАУТА: Очистка адреса ---
-    const { data: server } = await supabase.from('vpn_servers').select('ip, domain').or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`).maybeSingle();
+    // --- УЛЬТРА-ОЧИСТКА ХОСТА (Fix Таймаутов) ---
+    // Ищем IP сервера в базе данных для перепроверки
+    const { data: server } = await supabase.from('vpn_servers')
+      .select('ip, domain')
+      .or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`)
+      .maybeSingle();
     
     let connectAddress = server?.ip || server?.domain || this.displayDomain;
     
-    // Если в поле IP записан URL (как у вас в логах), вырезаем только Host
-    if (connectAddress.includes('://')) {
-      try {
-        const u = new URL(connectAddress);
-        connectAddress = u.hostname;
-      } catch(e) {}
-    }
-    // Убираем порт если он остался
-    connectAddress = connectAddress.split(':')[0];
+    // Вырезаем ТОЛЬКО чистый IP/Домен из любой строки (даже из https://ip:port/path/)
+    const cleanHost = (str: string) => {
+      if (!str) return str;
+      let cleaned = str.trim();
+      if (cleaned.includes('://')) {
+        try {
+          const u = new URL(cleaned);
+          cleaned = u.hostname;
+        } catch(e) {
+          cleaned = cleaned.split('://')[1].split('/')[0].split(':')[0];
+        }
+      } else {
+        cleaned = cleaned.split('/')[0].split(':')[0];
+      }
+      return cleaned.replace(/[^a-zA-Z0-9\.\-]/g, ''); // Удаляем любые спецсимволы
+    };
 
-    console.log(`📡 [XUI] Генерация ссылки: адрес=${connectAddress}, порт=${port}`);
+    connectAddress = cleanHost(connectAddress);
+
+    console.log(`📡 [XUI] Ссылка для ${email}: соединение через ${connectAddress}:${port}`);
 
     if (streamSettings.security === 'reality') {
       const rs = streamSettings.realitySettings || {};
@@ -155,7 +154,7 @@ export async function getXuiForServer(serverId: string) {
   if (xuiInstances.has(serverId)) return { instance: xuiInstances.get(serverId)!, server: {} };
 
   const { data: server, error } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
-  if (error || !server) throw new Error('Server not found in DB');
+  if (error || !server) throw new Error('Server not found');
 
   const instance = new XUIService({ host: server.ip || server.domain, username: server.username, password: server.password });
   xuiInstances.set(serverId, instance);
