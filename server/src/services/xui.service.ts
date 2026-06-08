@@ -146,6 +146,78 @@ export class XUIService {
   async checkHealth(): Promise<boolean> {
     try { await this.login(); return true; } catch (e) { return false; }
   }
+
+  async getSettings() {
+    if (!this.sessionCookie) await this.login();
+    const url = `${this.host}${this.basePath}/panel/api/settings/get`;
+    const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+    if (!resp.data.success) throw new Error('Failed to get settings');
+    return resp.data.obj;
+  }
+
+  async updateSettings(settings: any) {
+    if (!this.sessionCookie) await this.login();
+    const url = `${this.host}${this.basePath}/panel/api/settings/update`;
+    await axios.post(url, settings, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+  }
+
+  async restartPanel() {
+    if (!this.sessionCookie) await this.login();
+    const url = `${this.host}${this.basePath}/panel/api/settings/restartPanel`;
+    await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+  }
+
+  async checkConfig(): Promise<boolean> {
+    return this.checkHealth();
+  }
+
+  async getClientTraffic(email: string) {
+    if (!this.sessionCookie) await this.login();
+    const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${encodeURIComponent(email)}`;
+    const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+    if (resp.data.success && resp.data.obj) {
+      const stats = resp.data.obj;
+      return { used: (stats.up || 0) + (stats.down || 0) };
+    }
+    return null;
+  }
+
+  async syncRealityKeys(privKey: string, pubKey: string) {
+    if (!this.sessionCookie) await this.login();
+    
+    // 1. Get inbounds
+    const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+    const listResp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
+    const inbounds = listResp.data.obj || [];
+    
+    // 2. Find reality inbound (usually port 443)
+    const realityInbound = inbounds.find((ib: any) => {
+      const ss = JSON.parse(ib.streamSettings || '{}');
+      return ss.security === 'reality';
+    });
+
+    if (!realityInbound) {
+      console.warn(`⚠️ [XUI] Reality inbound not found on ${this.host}`);
+      return;
+    }
+
+    // 3. Update keys
+    const ss = JSON.parse(realityInbound.streamSettings);
+    ss.realitySettings.privateKey = privKey;
+    ss.realitySettings.publicKey = pubKey;
+    if (ss.realitySettings.settings) {
+      ss.realitySettings.settings.publicKey = pubKey;
+    }
+
+    const updateUrl = `${this.host}${this.basePath}/panel/api/inbounds/update/${realityInbound.id}`;
+    const updateData = {
+      ...realityInbound,
+      streamSettings: JSON.stringify(ss)
+    };
+    
+    await axios.post(updateUrl, updateData, getRequestConfig(updateUrl, this.authHeaders({ 'Content-Type': 'application/json' })));
+    console.log(`✅ [XUI] Reality keys synced on ${this.host}`);
+  }
 }
 
 const xuiInstances = new Map<string, XUIService>();

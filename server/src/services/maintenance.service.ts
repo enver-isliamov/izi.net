@@ -22,7 +22,41 @@ export class MaintenanceService {
 
   static async runFullMaintenance() {
     await this.syncTraffic();
+    await this.syncAllServers();
     await RoutingService.syncAll();
+  }
+
+  static async syncAllServers() {
+    console.log('🔄 [Maintenance] Syncing all users to all active servers...');
+    try {
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const { data: activeSubs } = await supabase.from('subscriptions').select('*').eq('status', 'active');
+
+      if (!activeServers || !activeSubs) return;
+
+      for (const sub of activeSubs) {
+        try {
+          const devices = parseVpnDevices(sub.v2ray_config);
+          if (devices.length === 0) continue;
+
+          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+          const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
+          const expiryTime = new Date(sub.expires_at).getTime();
+
+          for (const server of activeServers) {
+            const { instance } = await getXuiForServer(server.id);
+            for (const dev of devices) {
+              await instance.addClient(dev.email, dev.uuid, inboundId, expiryTime, limitBytes).catch(e => {
+                console.warn(`⚠️ [Sync] Failed to sync ${dev.email} to ${server.name}: ${e.message}`);
+              });
+            }
+          }
+        } catch (e) {}
+      }
+      console.log('✅ [Maintenance] Server sync complete.');
+    } catch (err: any) {
+      console.error('❌ [Maintenance] Sync error:', err.message);
+    }
   }
 
   static async syncTraffic() {

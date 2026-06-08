@@ -283,6 +283,27 @@ router.post('/system/sync-servers', adminOnly, async (req, res) => {
   }
 });
 
+router.post('/system/sync-reality-keys', adminOnly, async (req, res) => {
+  try {
+    const pubKey = process.env.XUI_REALITY_PUB_KEY;
+    const privKey = process.env.XUI_REALITY_PRIV_KEY;
+    
+    if (!pubKey || !privKey) throw new Error('Reality keys missing in .env');
+
+    const { data: servers } = await supabase.from('vpn_servers').select('id, name').eq('is_active', true);
+    if (!servers) throw new Error('No active servers');
+
+    for (const s of servers) {
+      const { instance } = await getXuiForServer(s.id);
+      await instance.syncRealityKeys(privKey, pubKey);
+    }
+
+    res.json({ success: true, message: 'Reality keys synced to all servers' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/payments', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
