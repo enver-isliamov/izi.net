@@ -45,12 +45,13 @@ export class XUIService {
     if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
 
     const loginUrl = `${this.host}${this.basePath}/login`;
-    const params = new URLSearchParams();
-    params.append('username', this.username);
-    params.append('password', this.password);
+    const loginData = {
+      username: this.username,
+      password: this.password
+    };
 
-    const response = await axios.post(loginUrl, params, getRequestConfig(loginUrl, {
-      'Content-Type': 'application/x-www-form-urlencoded'
+    const response = await axios.post(loginUrl, loginData, getRequestConfig(loginUrl, {
+      'Content-Type': 'application/json'
     }));
 
     const cookie = response.headers['set-cookie'];

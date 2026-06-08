@@ -174,7 +174,7 @@ grep -n "0.95\|0.85\|0.75" /opt/izinet/server/src/routes/user.ts
 
 ---
 
-## ЭТАП 4 — Пересобрать и перезапустить app
+## ЭТАП 4 — Пересобрать и перезапустить app 👤
 
 ```bash
 cd /opt/izinet
@@ -457,3 +457,4 @@ echo "=== КОНЕЦ ПРОВЕРКИ ==="
 | Пустая подписка | `v2ray_config` пустой или фильтр убил всё → проверить Этап 7.3 |
 | Supabase 401 | Неправильный ANON_KEY или SERVICE_KEY → перепроверить в Supabase Dashboard |
 | DNS EAI_AGAIN | Добавить DNS в docker-compose: `dns: [8.8.8.8, 1.1.1.1]` |
+ `dns: [8.8.8.8, 1.1.1.1]` |
