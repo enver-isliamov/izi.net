@@ -1,6 +1,11 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+console.log('📦 [ENV] Загружено переменных:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
+if (!process.env.VITE_SUPABASE_URL) {
+  console.warn('⚠️ [ENV] VITE_SUPABASE_URL не найдена! Проверяю .env файл напрямую...');
+}
+
 // Глобальные обработчики ошибок (Fix: Логирование перед падением)
 process.on('uncaughtException', (err) => {
   console.error('🔥 [CRITICAL] Необработанное исключение:', err);

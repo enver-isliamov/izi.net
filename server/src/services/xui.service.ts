@@ -28,10 +28,13 @@ export class XUIService {
         const configDomain = (process.env.DOMAIN || '').trim();
         
         // Оптимизация для работы внутри Docker
-        if (hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn.includes(configDomain))) {
-          if (process.env.IS_DOCKER === 'true' || process.env.NODE_ENV?.includes('production')) {
-            host = `http://x3-ui:2053${parsedUrl.pathname}`;
-          }
+        const isInternal = hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn.includes(configDomain));
+        const isDockerEnv = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production' || !!process.env.XUI_HOST;
+
+        if (isInternal || isDockerEnv) {
+          // Если мы в Docker, всегда пробуем достучаться по внутреннему имени
+          host = `http://x3-ui:2053${parsedUrl.pathname}`;
+          console.log(`🔌 [XUI] Docker-режим: принудительный переход на ${host}`);
         }
         this.displayDomain = hn;
         this.basePath = parsedUrl.pathname.replace(/\/$/, '');
