@@ -79,24 +79,34 @@ router.get('/servers/:id/check', adminOnly, async (req, res) => {
 router.get('/users', adminOnly, async (req, res) => {
   const { search } = req.query;
   try {
-    let query = supabase.from('profiles').select('*');
+    // FIX: В вашей базе данных Supabase таблица называется 'users', а не 'profiles'
+    let query = supabase.from('users').select('*');
     if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
-    const { data: profiles, error } = await query.order('created_at', { ascending: false });
+    const { data: users, error } = await query.order('created_at', { ascending: false });
     if (error) throw error;
 
-    const profileIds = (profiles || []).map(p => p.id);
+    const userIds = (users || []).map(u => u.id);
     const [balances, subs] = await Promise.all([
-      supabase.from('balances').select('*').in('user_id', profileIds),
-      supabase.from('subscriptions').select('*').in('user_id', profileIds)
+      supabase.from('balances').select('*').in('user_id', userIds),
+      supabase.from('subscriptions').select('*').in('user_id', userIds)
     ]);
 
-    const enriched = (profiles || []).map(p => ({
-      ...p,
-      balances: (balances.data || []).filter(b => b.user_id === p.id),
-      subscriptions: (subs.data || []).filter(s => s.user_id === p.id)
-    }));
+    // FIX: Более надежное объединение данных для админ-панели
+    const enriched = (users || []).map(u => {
+      const userBalance = (balances.data || []).find(b => b.user_id === u.id);
+      const userSubs = (subs.data || []).filter(s => s.user_id === u.id);
+      const activeSub = userSubs.find(s => s.status === 'active');
+
+      return {
+        ...u,
+        balance: userBalance?.amount || 0,
+        active_subscription: activeSub || null,
+        subscriptions: userSubs
+      };
+    });
     res.json(enriched);
   } catch (err: any) {
+    console.error('❌ [Admin API] Ошибка загрузки пользователей:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -170,7 +180,8 @@ router.post('/system/repair-vless', adminOnly, async (req, res) => {
 
 router.get('/stats', adminOnly, async (req, res) => {
   try {
-    const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+    // FIX: Таблица называется 'users'
+    const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
     const { data: activeSubs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
     res.json({
       totalUsers: usersCount || 0,
