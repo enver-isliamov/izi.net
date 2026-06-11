@@ -4,8 +4,11 @@ import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
 import { parseVpnDevices } from '../utils/vpn';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import crypto from 'crypto';
 
+const execPromise = promisify(exec);
 const router = Router();
 
 // --- СЕРВЕРА (УПРАВЛЕНИЕ) ---
@@ -20,9 +23,31 @@ router.get('/servers', adminOnly, async (req, res) => {
   }
 });
 
+/**
+ * FIX: Пакетная проверка здоровья серверов для списка в админке
+ */
+router.get('/servers/health', adminOnly, async (req, res) => {
+  try {
+    const { data: servers } = await supabase.from('vpn_servers').select('id, is_active').eq('is_active', true);
+    if (!servers) return res.json([]);
+
+    const healthResults = await Promise.all(servers.map(async (srv) => {
+      try {
+        const { instance } = await getXuiForServer(srv.id);
+        const online = await instance.checkHealth();
+        return { id: srv.id, online, error: null };
+      } catch (e: any) {
+        return { id: srv.id, online: false, error: e.message };
+      }
+    }));
+    res.json(healthResults);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/servers', adminOnly, async (req, res) => {
   try {
-    // Адаптация: удаляем поля, которых нет в вашей схеме SuperBase.md
     const { is_default, ...cleanData } = req.body;
     const { data, error } = await supabase.from('vpn_servers').insert([cleanData]).select().single();
     if (error) throw error;
@@ -34,7 +59,6 @@ router.post('/servers', adminOnly, async (req, res) => {
 
 router.put('/servers/:id', adminOnly, async (req, res) => {
   try {
-    // Адаптация: удаляем поля, которых нет в вашей схеме
     const { is_default, id, created_at, ...cleanData } = req.body;
     const { data, error } = await supabase.from('vpn_servers').update(cleanData).eq('id', req.params.id).select().single();
     if (error) throw error;
@@ -54,23 +78,20 @@ router.delete('/servers/:id', adminOnly, async (req, res) => {
   }
 });
 
+/**
+ * FIX: Формат ответа подогнан под ожидания фронтенда (status: 'ok')
+ */
 router.post('/servers/:id/check', adminOnly, async (req, res) => {
   try {
     const { instance } = await getXuiForServer(req.params.id);
     const online = await instance.checkHealth();
-    res.json({ success: true, online });
+    if (online) {
+      res.json({ status: 'ok', online: true });
+    } else {
+      res.json({ status: 'error', message: 'Panel unreachable', online: false });
+    }
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/servers/:id/check', adminOnly, async (req, res) => {
-  try {
-    const { instance } = await getXuiForServer(req.params.id);
-    const online = await instance.checkHealth();
-    res.json({ success: true, online });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.json({ status: 'error', message: err.message });
   }
 });
 
@@ -79,7 +100,6 @@ router.get('/servers/:id/check', adminOnly, async (req, res) => {
 router.get('/users', adminOnly, async (req, res) => {
   const { search } = req.query;
   try {
-    // FIX: В вашей базе данных Supabase таблица называется 'users', а не 'profiles'
     let query = supabase.from('users').select('*');
     if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
     const { data: users, error } = await query.order('created_at', { ascending: false });
@@ -91,7 +111,6 @@ router.get('/users', adminOnly, async (req, res) => {
       supabase.from('subscriptions').select('*').in('user_id', userIds)
     ]);
 
-    // FIX: Более надежное объединение данных для админ-панели
     const enriched = (users || []).map(u => {
       const userBalance = (balances.data || []).find(b => b.user_id === u.id);
       const userSubs = (subs.data || []).filter(s => s.user_id === u.id);
@@ -106,7 +125,37 @@ router.get('/users', adminOnly, async (req, res) => {
     });
     res.json(enriched);
   } catch (err: any) {
-    console.error('❌ [Admin API] Ошибка загрузки пользователей:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * FIX: Маршрут для загрузки истории транзакций пользователя
+ */
+router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+
+    const summary = {
+      totalDeposits: (transactions || [])
+        .filter(t => t.type === 'deposit' && t.status === 'completed')
+        .reduce((sum, t) => sum + Number(t.amount), 0),
+      totalWithdrawals: (transactions || [])
+        .filter(t => t.type === 'subscription_buy' && t.status === 'completed')
+        .reduce((sum, t) => sum + Number(t.amount), 0),
+      netProfit: 0
+    };
+    summary.netProfit = summary.totalDeposits - summary.totalWithdrawals;
+
+    res.json({ transactions: transactions || [], summary });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -116,8 +165,6 @@ router.get('/users', adminOnly, async (req, res) => {
 router.get('/settings', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('settings').select('*');
-    
-    // Адаптация: Если таблица пуста или ошибка, возвращаем дефолты вместо краша
     if (error || !data || data.length === 0) {
       return res.json([
         { key: 'MONTHLY_PRICE', value: '100' },
@@ -127,7 +174,6 @@ router.get('/settings', adminOnly, async (req, res) => {
     }
     res.json(data);
   } catch (err: any) {
-    // Возвращаем пустой массив, чтобы фронтенд не падал
     res.json([]);
   }
 });
@@ -136,7 +182,6 @@ router.post('/settings', adminOnly, async (req, res) => {
   try {
     const { settings } = req.body;
     if (!Array.isArray(settings)) throw new Error('Settings must be an array');
-    
     for (const item of settings) {
       await supabase.from('settings').upsert({ key: item.key, value: item.value }, { onConflict: 'key' });
     }
@@ -155,6 +200,32 @@ router.post('/system/sync-all', adminOnly, async (req, res) => {
   }
 });
 
+/**
+ * FIX: Маршрут для синхронизации серверов (вызывается из Servers.tsx)
+ */
+router.post('/system/sync-servers', adminOnly, async (req, res) => {
+  try {
+    await MaintenanceService.runFullMaintenance();
+    res.json({ success: true, updatedUsers: 'все' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * FIX: Маршрут диагностики VPS (вывод терминала в админку)
+ */
+router.post('/system/diagnose-vps', adminOnly, async (req, res) => {
+  try {
+    // Безопасный набор команд для диагностики
+    const cmd = `echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER ===" && docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`;
+    const { stdout, stderr } = await execPromise(cmd);
+    res.json({ success: true, stdout, stderr });
+  } catch (err: any) {
+    res.json({ success: false, stderr: err.message });
+  }
+});
+
 router.post('/system/repair-vless', adminOnly, async (req, res) => {
   try {
     const pubKey = process.env.XUI_REALITY_PUB_KEY;
@@ -168,7 +239,6 @@ router.post('/system/repair-vless', adminOnly, async (req, res) => {
       try {
         const { instance } = await getXuiForServer(s.id);
         await instance.syncRealityKeys(privKey, pubKey);
-        await instance.restartPanel();
       } catch (e) {}
     }
 
@@ -180,7 +250,6 @@ router.post('/system/repair-vless', adminOnly, async (req, res) => {
 
 router.get('/stats', adminOnly, async (req, res) => {
   try {
-    // FIX: Таблица называется 'users'
     const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
     const { data: activeSubs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
     res.json({

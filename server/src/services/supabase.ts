@@ -16,7 +16,7 @@ export async function checkDatabase() {
     console.log('📡 [Supabase] Глубокая диагностика таблиц...');
     
     // Проверка всех ключевых таблиц из обеих схем
-    const tables = ['users', 'profiles', 'settings', 'vpn_servers', 'balances', 'subscriptions'];
+    const tables = ['users', 'settings', 'vpn_servers', 'balances', 'subscriptions', 'transactions', 'payments'];
     for (const table of tables) {
       const { error } = await supabase.from(table).select('count', { count: 'exact', head: true }).limit(1);
       if (error) console.error(`❌ [Supabase] Таблица ${table}:`, error.message);
