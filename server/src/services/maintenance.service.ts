@@ -45,6 +45,14 @@ export class MaintenanceService {
 
           for (const server of activeServers) {
             const { instance } = await getXuiForServer(server.id);
+            
+            // Синхронизация ключей Reality при каждом обслуживании
+            const privKey = process.env.XUI_REALITY_PRIV_KEY;
+            const pubKey = process.env.XUI_REALITY_PUB_KEY;
+            if (privKey && pubKey) {
+              await instance.syncRealityKeys(privKey, pubKey).catch(() => {});
+            }
+
             for (const dev of devices) {
               await instance.addClient(dev.email, dev.uuid, inboundId, expiryTime, limitBytes).catch(e => {
                 console.warn(`⚠️ [Sync] Failed to sync ${dev.email} to ${server.name}: ${e.message}`);

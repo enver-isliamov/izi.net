@@ -154,11 +154,13 @@ export class XUIService {
     // Сборка ссылки для Reality или обычного VLESS
     if (streamSettings.security === 'reality') {
       const rs = streamSettings.realitySettings || {};
-      const sni = rs.serverNames?.[0] || 'google.com';
-      const pbk = process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '';
+      // ПРИОРИТЕТ: берем публичный ключ из .env, если его нет — из настроек самого инбаунда
+      const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || rs.settings?.publicKey || '').trim();
+      const sni = rs.serverNames?.[0] || 'www.microsoft.com';
       const sid = rs.shortIds?.[0] || '79b27cf7799d5b4c';
 
-      return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&flow=xtls-rprx-vision#${encodedEmail}`;
+      // Добавлен spx=%2F — ЭТО КРИТИЧНО для стабильности Hiddify и NekoBox (Fix Таймаутов)
+      return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
     }
     
     return `vless://${uuid}@${connectAddress}:${port}?security=none#${encodedEmail}`;
@@ -181,13 +183,44 @@ export class XUIService {
     }
     return null;
   }
+
+  /**
+   * Синхронизация ключей Reality между .env и базой панели
+   */
+  async syncRealityKeys(privKey: string, pubKey: string) {
+    if (!this.sessionCookie) await this.login();
+    
+    try {
+      const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+      const listResp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
+      const inbounds = listResp.data.obj || [];
+      
+      const realityInbound = inbounds.find((ib: any) => {
+        const ss = JSON.parse(ib.streamSettings || '{}');
+        return ss.security === 'reality';
+      });
+
+      if (!realityInbound) return;
+
+      const ss = JSON.parse(realityInbound.streamSettings);
+      // Обновляем ключи, только если они отличаются
+      if (ss.realitySettings.privateKey !== privKey || ss.realitySettings.publicKey !== pubKey) {
+        ss.realitySettings.privateKey = privKey;
+        ss.realitySettings.publicKey = pubKey;
+        if (ss.realitySettings.settings) ss.realitySettings.settings.publicKey = pubKey;
+
+        const updateUrl = `${this.host}${this.basePath}/panel/api/inbounds/update/${realityInbound.id}`;
+        await axios.post(updateUrl, { ...realityInbound, streamSettings: JSON.stringify(ss) }, getRequestConfig(updateUrl, this.authHeaders({ 'Content-Type': 'application/json' })));
+        console.log(`✅ [XUI] Reality ключи синхронизированы на ${this.host}`);
+      }
+    } catch (e: any) {
+      console.error(`❌ [XUI] Ошибка синхронизации ключей на ${this.host}:`, e.message);
+    }
+  }
 }
 
 const xuiInstances = new Map<string, XUIService>();
 
-/**
- * Фабрика для получения экземпляра XUIService для конкретного сервера
- */
 export async function getXuiForServer(serverId: string) {
   if (xuiInstances.has(serverId)) return { instance: xuiInstances.get(serverId)!, server: {} };
 
