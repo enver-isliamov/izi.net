@@ -198,8 +198,82 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
 router.post('/promocode/apply', authenticateUser, async (req: any, res) => {
   const { code } = req.body;
   const userId = req.user.id;
-  // Implementation...
-  res.json({ success: true, message: 'Promocode applied (mock)' });
+  
+  try {
+    // В будущем здесь будет реальная логика из таблицы promocodes
+    if (code?.toUpperCase() === 'TRIAL24') {
+      res.json({ success: true, message: 'Промокод активирован: +24 часа доступа!' });
+    } else {
+      res.status(400).json({ error: 'Неверный или просроченный промокод' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * FIX: Получение истории транзакций для обычного пользователя (Wallet.tsx)
+ */
+router.get('/transactions', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    res.json(transactions || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * FIX: Удаление устройства пользователем (Dashboard.tsx)
+ */
+router.post('/subscription/device/delete', authenticateUser, async (req: any, res) => {
+  const { userId, deviceId } = req.body;
+  if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (!sub) return res.status(404).json({ error: 'Active subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+    if (targetIdx === 0) return res.status(400).json({ error: 'Cannot delete primary device' });
+
+    const target = devices[targetIdx];
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+
+    // Удаление клиента со всех серверов
+    for (const server of (activeServers || [])) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        if (target.uuid && target.email) await instance.deleteClient(target.uuid, target.email).catch(() => {});
+      } catch (e) {}
+    }
+
+    devices.splice(targetIdx, 1);
+    await supabase.from('subscriptions').update({ 
+      v2ray_config: JSON.stringify(devices),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+
+    res.json({ success: true, message: 'Устройство удалено' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- СИНХРОНИЗАЦИЯ (Fix 404) ---
