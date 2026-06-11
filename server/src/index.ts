@@ -3,7 +3,7 @@ dotenv.config();
 
 console.log('📦 [ENV] Загружено переменных:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
 if (!process.env.VITE_SUPABASE_URL) {
-  console.warn('⚠️ [ENV] VITE_SUPABASE_URL не найдена! Проверяю .env файл напрямую...');
+  console.warn('⚠️ [ENV] VITE_SUPABASE_URL не найдена! Проверьте файл .env');
 }
 
 // Глобальные обработчики ошибок (Fix: Логирование перед падением)
