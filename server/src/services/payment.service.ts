@@ -59,9 +59,12 @@ export class PaymentService {
       comment: 'izinet balance top-up',
       success_url: `${origin}/dashboard`,
       fail_url: `${origin}/wallet`,
-      hook_url: `${origin}/api/pay/webhook/enot`,
+      // FIX: Убеждаемся, что hook_url — это полный валидный URL без лишних символов
+      hook_url: `${origin.replace(/\/$/, '')}/api/pay/webhook/enot`,
       expire: 3600
     };
+
+    console.log(`📡 [Enot] Создание инвойса. Hook URL: ${payload.hook_url}`);
 
     if (email) payload.email = email;
 

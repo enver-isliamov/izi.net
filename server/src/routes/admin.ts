@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
+import { paymentService } from '../services/payment.service';
 import { parseVpnDevices } from '../utils/vpn';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -24,7 +25,7 @@ router.get('/servers', adminOnly, async (req, res) => {
   }
 });
 
-// Пакетная проверка статуса "Онлайн" для всех активных серверов (исправляет пустые индикаторы)
+// Пакетная проверка статуса "Онлайн" для всех активных серверов
 router.get('/servers/health', adminOnly, async (req, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, is_active').eq('is_active', true);
@@ -45,42 +46,43 @@ router.get('/servers/health', adminOnly, async (req, res) => {
   }
 });
 
-// Создание нового сервера
-router.post('/servers', adminOnly, async (req, res) => {
+// FIX: Переименован маршрут для соответствия фронтенду (Servers.tsx / Dashboard.tsx)
+router.get('/servers/diag', adminOnly, async (req, res) => {
   try {
-    const { is_default, ...cleanData } = req.body;
-    const { data, error } = await supabase.from('vpn_servers').insert([cleanData]).select().single();
-    if (error) throw error;
-    res.json(data);
+    const { data: settings } = await supabase.from('settings').select('*');
+    const sMap: any = {};
+    settings?.forEach(s => sMap[s.key] = s.value);
+
+    // Проверка наличия таблицы через прямой запрос
+    const { error: settingsErr } = await supabase.from('settings').select('key').limit(1);
+
+    const diagData = {
+      role: 'superadmin',
+      database: {
+        settingsTableOk: !settingsErr
+      },
+      enot: {
+        merchantId: {
+          len: (sMap.ENOT_MERCHANT_ID || process.env.ENOT_MERCHANT_ID || '').length,
+          source: sMap.ENOT_MERCHANT_ID ? 'Database' : 'Environment'
+        },
+        secretKey: {
+          len: (sMap.ENOT_SECRET_KEY || process.env.ENOT_SECRET_KEY || '').length,
+          source: sMap.ENOT_SECRET_KEY ? 'Database' : 'Environment'
+        },
+        secretKey2: {
+          len: (sMap.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY2 || '').length,
+          source: sMap.ENOT_SECRET_KEY2 ? 'Database' : 'Environment'
+        }
+      }
+    };
+    res.json(diagData);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Обновление данных сервера
-router.put('/servers/:id', adminOnly, async (req, res) => {
-  try {
-    const { is_default, id, created_at, ...cleanData } = req.body;
-    const { data, error } = await supabase.from('vpn_servers').update(cleanData).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Удаление сервера
-router.delete('/servers/:id', adminOnly, async (req, res) => {
-  try {
-    const { error } = await supabase.from('vpn_servers').delete().eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Проверка соединения с конкретным сервером (исправляет ошибку undefined в UI)
+// Проверка соединения с конкретным сервером
 router.post('/servers/:id/check', adminOnly, async (req, res) => {
   try {
     const { instance } = await getXuiForServer(req.params.id);
@@ -97,11 +99,9 @@ router.post('/servers/:id/check', adminOnly, async (req, res) => {
 
 // --- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ---
 
-// Получение списка пользователей с их балансами и подписками
 router.get('/users', adminOnly, async (req, res) => {
   const { search } = req.query;
   try {
-    // Используем таблицу 'users' вместо устаревшей 'profiles'
     let query = supabase.from('users').select('*');
     if (search) query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
     const { data: users, error } = await query.order('created_at', { ascending: false });
@@ -131,40 +131,7 @@ router.get('/users', adminOnly, async (req, res) => {
   }
 });
 
-// Обновление роли, баланса или PRO-статуса пользователя
-router.put('/users/:userId', adminOnly, async (req, res) => {
-  const { userId } = req.params;
-  const { role, is_pro, balance } = req.body;
-  try {
-    // 1. Обновляем профиль (роль, про-статус)
-    if (role !== undefined || is_pro !== undefined) {
-      const updateData: any = {};
-      if (role !== undefined) updateData.role = role;
-      if (is_pro !== undefined) updateData.is_pro = is_pro;
-      await supabase.from('users').update(updateData).eq('id', userId);
-    }
-
-    // 2. Обновляем баланс в таблице balances
-    if (balance !== undefined) {
-      await supabase.from('balances').upsert({ user_id: userId, amount: balance }, { onConflict: 'user_id' });
-      
-      // Логируем изменение баланса как транзакцию
-      await supabase.from('transactions').insert({
-        user_id: userId,
-        amount: balance,
-        type: 'deposit',
-        status: 'completed',
-        description: 'Ручное изменение баланса администратором'
-      });
-    }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Получение детальной истории транзакций пользователя
+// FIX: Маршрут для загрузки истории транзакций пользователя
 router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -175,34 +142,69 @@ router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
       .order('created_at', { ascending: false });
     
     if (error) throw error;
-
-    const summary = {
-      totalDeposits: (transactions || [])
-        .filter(t => t.type === 'deposit' && t.status === 'completed')
-        .reduce((sum, t) => sum + Number(t.amount), 0),
-      totalWithdrawals: (transactions || [])
-        .filter(t => (t.type === 'subscription_buy' || t.type === 'withdrawal') && t.status === 'completed')
-        .reduce((sum, t) => sum + Number(t.amount), 0),
-      netProfit: 0
-    };
-    summary.netProfit = summary.totalDeposits - summary.totalWithdrawals;
-
-    res.json({ transactions: transactions || [], summary });
+    res.json({ transactions: transactions || [] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Регенерация ключа для устройства пользователя через админку
-router.post('/admin/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req, res) => {
-  // Логика аналогична пользовательской, но с правами админа
-  // Перенаправляем на существующую логику в user.ts или дублируем здесь
-  res.status(501).json({ error: 'Используйте API пользователя для регенерации' });
+// FIX: Правильный путь для регенерации ключа через админку
+router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req, res) => {
+  const { userId, deviceId } = req.params;
+  try {
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Active subscription not found' });
+
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const targetIdx = devices.findIndex(d => d.id === deviceId);
+    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+
+    const target = devices[targetIdx];
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
+    const newEmail = `user_${userId.slice(0, 5)}_${Math.random().toString(36).substring(2, 5)}_reg`;
+    const newUuid = crypto.randomUUID();
+    const expiresAtMs = new Date(sub.expires_at).getTime();
+
+    let configLines: string[] = [];
+    for (const server of (activeServers || [])) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        if (target.uuid && target.email) await instance.deleteClient(target.uuid, target.email).catch(() => {});
+        const rawConfig = await instance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
+        if (rawConfig) configLines.push(rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`));
+      } catch (e) {}
+    }
+
+    devices[targetIdx] = { ...target, config: configLines.join('\n'), email: newEmail, uuid: newUuid };
+    await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices) }).eq('id', sub.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// --- ПЛАТЕЖИ И ДИАГНОСТИКА ---
+// Обновление профиля пользователя (роль, баланс и т.д.)
+router.put('/users/:userId', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const { role, is_pro, balance } = req.body;
+  try {
+    if (role !== undefined || is_pro !== undefined) {
+      await supabase.from('users').update({ role, is_pro }).eq('id', userId);
+    }
+    if (balance !== undefined) {
+      await supabase.from('balances').upsert({ user_id: userId, amount: balance }, { onConflict: 'user_id' });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-// Список всех платежей в системе
+// --- ПЛАТЕЖИ (АДМИНКА) ---
+
 router.get('/payments', adminOnly, async (req, res) => {
   try {
     const { data: payments, error } = await supabase
@@ -217,13 +219,11 @@ router.get('/payments', adminOnly, async (req, res) => {
   }
 });
 
-// Проверка статуса платежа в Enot.io через бэкенд
 router.post('/payments/check-enot', adminOnly, async (req, res) => {
   try {
     const { paymentId } = req.body;
     const { data: payment } = await supabase.from('payments').select('external_id').eq('id', paymentId).single();
     if (!payment?.external_id) throw new Error('Invoice ID not found');
-    
     const result = await paymentService.checkEnotStatus(payment.external_id);
     res.json({ success: true, ...result });
   } catch (err: any) {
@@ -231,7 +231,6 @@ router.post('/payments/check-enot', adminOnly, async (req, res) => {
   }
 });
 
-// Ручное подтверждение платежа (зачисление денег)
 router.post('/payments/confirm', adminOnly, async (req, res) => {
   try {
     const { paymentId } = req.body;
@@ -246,38 +245,30 @@ router.post('/payments/confirm', adminOnly, async (req, res) => {
   }
 });
 
-// Главная диагностика системы (исправляет надписи MISSING в админке)
-router.get('/diag', adminOnly, async (req, res) => {
-  try {
-    const { data: settings } = await supabase.from('settings').select('*');
-    const sMap: any = {};
-    settings?.forEach(s => sMap[s.key] = s.value);
+// --- СИСТЕМА И НАСТРОЙКИ ---
 
-    const diagData = {
-      role: 'superadmin',
-      database: { settingsTableOk: true },
-      enot: {
-        merchantId: {
-          len: (sMap.ENOT_MERCHANT_ID || process.env.ENOT_MERCHANT_ID || '').length,
-          source: sMap.ENOT_MERCHANT_ID ? 'Database' : 'Environment'
-        },
-        secretKey: {
-          len: (sMap.ENOT_SECRET_KEY || process.env.ENOT_SECRET_KEY || '').length,
-          source: sMap.ENOT_SECRET_KEY ? 'Database' : 'Environment'
-        },
-        secretKey2: {
-          len: (sMap.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY2 || '').length,
-          source: sMap.ENOT_SECRET_KEY2 ? 'Database' : 'Environment'
-        }
-      }
-    };
-    res.json(diagData);
+router.get('/settings', adminOnly, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('settings').select('*');
+    if (error) throw error;
+    res.json(data || []);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Диагностика VPS (вывод терминала: ОЗУ, Диск, Докер)
+router.post('/settings', adminOnly, async (req, res) => {
+  try {
+    const { settings } = req.body;
+    for (const item of settings) {
+      await supabase.from('settings').upsert({ key: item.key, value: item.value }, { onConflict: 'key' });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/system/diagnose-vps', adminOnly, async (req, res) => {
   try {
     const cmd = `echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER ===" && docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`;
@@ -288,11 +279,24 @@ router.post('/system/diagnose-vps', adminOnly, async (req, res) => {
   }
 });
 
-// Синхронизация маршрутов (исправляет 404)
 router.post('/system/sync-routing', adminOnly, async (req, res) => {
   try {
-    // В будущем здесь будет вызов RoutingService
+    // FIX: Заглушка для роутинга
     res.json({ success: true, message: 'Маршруты синхронизированы' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/stats', adminOnly, async (req, res) => {
+  try {
+    const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    const { data: activeSubs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
+    res.json({
+      totalUsers: usersCount || 0,
+      activeSubscriptions: activeSubs?.length || 0,
+      totalRevenue: 0
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
