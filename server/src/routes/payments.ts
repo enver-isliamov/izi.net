@@ -4,15 +4,20 @@ import { paymentService } from '../services/payment.service';
 
 const router = Router();
 
+// Создание счета на оплату через Enot.io
 router.post('/create', async (req, res) => {
-  const { amount, userId, email, origin } = req.body;
+  const { amount, userId, email, method } = req.body;
   if (!amount || !userId) return res.status(400).json({ error: 'Missing parameters' });
 
   try {
+    // FIX: Если origin не передан, берем PUBLIC_URL из настроек
+    const { data: publicUrlSetting } = await supabase.from('settings').select('value').eq('key', 'PUBLIC_URL').maybeSingle();
+    const origin = req.body.origin || publicUrlSetting?.value || process.env.PUBLIC_URL || 'https://izinet.online';
+
     const orderId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const invoice = await paymentService.createEnotInvoice(amount, userId, orderId, origin, email);
 
-    // Save payment to DB
+    // Сохраняем платеж в БД
     await supabase.from('payments').insert({
       id: orderId,
       user_id: userId,
@@ -25,19 +30,23 @@ router.post('/create', async (req, res) => {
 
     res.json(invoice);
   } catch (err: any) {
+    console.error('❌ [Payment API] Ошибка создания инвойса:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// Обработка уведомлений (вебхуков) от Enot.io
 router.post('/webhook/enot', async (req, res) => {
   const signature = req.headers['x-api-sha256-signature'];
   const headerSignature = Array.isArray(signature) ? signature[0] : signature;
   const { amount, status, invoice_id, order_id, custom_fields } = req.body;
 
+  console.log(`📡 [Enot Webhook] Получено уведомление для заказа ${order_id}, статус: ${status}`);
+
   try {
     let isValid = await paymentService.verifyEnotWebhook(req.body, headerSignature);
     
-    // Fallback validation if HMAC fails
+    // Запасной вариант проверки, если подпись не совпала
     if (!isValid && invoice_id) {
        const check = await paymentService.checkEnotStatus(invoice_id);
        if (['success', 'paid', 'finish', 'finished'].includes(check.enotStatus)) {
@@ -45,11 +54,13 @@ router.post('/webhook/enot', async (req, res) => {
        }
     }
 
-    if (!isValid) return res.status(400).send('Invalid signature');
+    if (!isValid) {
+      console.warn(`⚠️ [Enot Webhook] Невалидная подпись для заказа ${order_id}`);
+      return res.status(400).send('Invalid signature');
+    }
 
     const isSuccess = ['success', 'paid', 'finish', 'finished'].includes(status.toLowerCase());
     if (isSuccess) {
-      // Find userId if not in body
       let userId = '';
       if (custom_fields) {
         try {
@@ -70,6 +81,7 @@ router.post('/webhook/enot', async (req, res) => {
 
     res.send('YES');
   } catch (err: any) {
+    console.error(`❌ [Enot Webhook] Ошибка обработки заказа ${order_id}:`, err.message);
     res.status(500).send('Error');
   }
 });

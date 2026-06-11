@@ -14,7 +14,6 @@ const router = Router();
 
 // --- УПРАВЛЕНИЕ СЕРВЕРАМИ ---
 
-// Получение списка всех серверов
 router.get('/servers', adminOnly, async (req, res) => {
   try {
     const { data, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
@@ -25,7 +24,6 @@ router.get('/servers', adminOnly, async (req, res) => {
   }
 });
 
-// Пакетная проверка статуса "Онлайн" для всех активных серверов
 router.get('/servers/health', adminOnly, async (req, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, is_active').eq('is_active', true);
@@ -46,21 +44,18 @@ router.get('/servers/health', adminOnly, async (req, res) => {
   }
 });
 
-// FIX: Переименован маршрут для соответствия фронтенду (Servers.tsx / Dashboard.tsx)
-router.get('/servers/diag', adminOnly, async (req, res) => {
+// FIX: Маршрут диагностики должен быть доступен и по /admin/diag, и по /admin/servers/diag
+const getDiagHandler = async (req: any, res: any) => {
   try {
     const { data: settings } = await supabase.from('settings').select('*');
     const sMap: any = {};
     settings?.forEach(s => sMap[s.key] = s.value);
 
-    // Проверка наличия таблицы через прямой запрос
     const { error: settingsErr } = await supabase.from('settings').select('key').limit(1);
 
     const diagData = {
       role: 'superadmin',
-      database: {
-        settingsTableOk: !settingsErr
-      },
+      database: { settingsTableOk: !settingsErr },
       enot: {
         merchantId: {
           len: (sMap.ENOT_MERCHANT_ID || process.env.ENOT_MERCHANT_ID || '').length,
@@ -80,24 +75,22 @@ router.get('/servers/diag', adminOnly, async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
+};
 
-// Проверка соединения с конкретным сервером
+router.get('/diag', adminOnly, getDiagHandler);
+router.get('/servers/diag', adminOnly, getDiagHandler);
+
 router.post('/servers/:id/check', adminOnly, async (req, res) => {
   try {
     const { instance } = await getXuiForServer(req.params.id);
     const online = await instance.checkHealth();
-    if (online) {
-      res.json({ status: 'ok', online: true });
-    } else {
-      res.json({ status: 'error', message: 'Panel unreachable', online: false });
-    }
+    res.json({ status: online ? 'ok' : 'error', online });
   } catch (err: any) {
     res.json({ status: 'error', message: err.message });
   }
 });
 
-// --- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ---
+// --- ПОЛЬЗОВАТЕЛИ ---
 
 router.get('/users', adminOnly, async (req, res) => {
   const { search } = req.query;
@@ -131,7 +124,7 @@ router.get('/users', adminOnly, async (req, res) => {
   }
 });
 
-// FIX: Маршрут для загрузки истории транзакций пользователя
+// FIX: Обязательно возвращаем summary для предотвращения TypeError во фронтенде
 router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -142,13 +135,24 @@ router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
       .order('created_at', { ascending: false });
     
     if (error) throw error;
-    res.json({ transactions: transactions || [] });
+
+    const summary = {
+      totalDeposits: (transactions || [])
+        .filter(t => t.type === 'deposit' && t.status === 'completed')
+        .reduce((sum, t) => sum + Number(t.amount), 0),
+      totalWithdrawals: (transactions || [])
+        .filter(t => (t.type === 'subscription_buy' || t.type === 'withdrawal') && t.status === 'completed')
+        .reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0),
+      netProfit: 0
+    };
+    summary.netProfit = summary.totalDeposits - summary.totalWithdrawals;
+
+    res.json({ transactions: transactions || [], summary });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// FIX: Правильный путь для регенерации ключа через админку
 router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req, res) => {
   const { userId, deviceId } = req.params;
   try {
@@ -186,7 +190,6 @@ router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req
   }
 });
 
-// Обновление профиля пользователя (роль, баланс и т.д.)
 router.put('/users/:userId', adminOnly, async (req, res) => {
   const { userId } = req.params;
   const { role, is_pro, balance } = req.body;
@@ -281,7 +284,6 @@ router.post('/system/diagnose-vps', adminOnly, async (req, res) => {
 
 router.post('/system/sync-routing', adminOnly, async (req, res) => {
   try {
-    // FIX: Заглушка для роутинга
     res.json({ success: true, message: 'Маршруты синхронизированы' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
