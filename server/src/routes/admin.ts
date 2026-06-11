@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
+import { paymentService } from '../services/payment.service';
 import { parseVpnDevices } from '../utils/vpn';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -23,9 +24,6 @@ router.get('/servers', adminOnly, async (req, res) => {
   }
 });
 
-/**
- * FIX: Пакетная проверка здоровья серверов для списка в админке
- */
 router.get('/servers/health', adminOnly, async (req, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('id, is_active').eq('is_active', true);
@@ -78,9 +76,6 @@ router.delete('/servers/:id', adminOnly, async (req, res) => {
   }
 });
 
-/**
- * FIX: Формат ответа подогнан под ожидания фронтенда (status: 'ok')
- */
 router.post('/servers/:id/check', adminOnly, async (req, res) => {
   try {
     const { instance } = await getXuiForServer(req.params.id);
@@ -129,9 +124,6 @@ router.get('/users', adminOnly, async (req, res) => {
   }
 });
 
-/**
- * FIX: Маршрут для загрузки истории транзакций пользователя
- */
 router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -155,6 +147,60 @@ router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
     summary.netProfit = summary.totalDeposits - summary.totalWithdrawals;
 
     res.json({ transactions: transactions || [], summary });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- ПЛАТЕЖИ (АДМИНКА) ---
+
+/**
+ * FIX: Получение полного списка платежей
+ */
+router.get('/payments', adminOnly, async (req, res) => {
+  try {
+    const { data: payments, error } = await supabase
+      .from('payments')
+      .select('*, users(email)')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    res.json(payments || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * FIX: Проверка статуса в Enot.io через прокси сервера
+ */
+router.post('/payments/check-enot', adminOnly, async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    const { data: payment } = await supabase.from('payments').select('external_id').eq('id', paymentId).single();
+    
+    if (!payment?.external_id) throw new Error('Invoice ID not found');
+    
+    const result = await paymentService.checkEnotStatus(payment.external_id);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * FIX: Ручное подтверждение платежа админом
+ */
+router.post('/payments/confirm', adminOnly, async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    const { data: payment } = await supabase.from('payments').select('*').eq('id', paymentId).single();
+    
+    if (!payment) throw new Error('Payment not found');
+    if (payment.status === 'completed') return res.json({ success: true, message: 'Already completed' });
+
+    await paymentService.processSuccessfulPayment(payment.user_id, Number(payment.amount), payment.id, payment.provider || 'manual');
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -191,6 +237,45 @@ router.post('/settings', adminOnly, async (req, res) => {
   }
 });
 
+/**
+ * FIX: Главный диагностический роут для Dashboard.tsx
+ * Показывает статус Enot, наличие таблиц и текущую роль
+ */
+router.get('/diag', adminOnly, async (req, res) => {
+  try {
+    const { data: settings } = await supabase.from('settings').select('*');
+    const sMap: any = {};
+    settings?.forEach(s => sMap[s.key] = s.value);
+
+    // Проверка наличия таблиц
+    const { error: settingsErr } = await supabase.from('settings').select('count', { count: 'exact', head: true }).limit(1);
+
+    const diagData = {
+      role: 'superadmin', // middleware adminOnly guarantees this or admin
+      database: {
+        settingsTableOk: !settingsErr
+      },
+      enot: {
+        merchantId: {
+          len: (sMap.ENOT_MERCHANT_ID || process.env.ENOT_MERCHANT_ID || '').length,
+          source: sMap.ENOT_MERCHANT_ID ? 'Database' : 'Environment'
+        },
+        secretKey: {
+          len: (sMap.ENOT_SECRET_KEY || process.env.ENOT_SECRET_KEY || '').length,
+          source: sMap.ENOT_SECRET_KEY ? 'Database' : 'Environment'
+        },
+        secretKey2: {
+          len: (sMap.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY2 || '').length,
+          source: sMap.ENOT_SECRET_KEY2 ? 'Database' : 'Environment'
+        }
+      }
+    };
+    res.json(diagData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/system/sync-all', adminOnly, async (req, res) => {
   try {
     MaintenanceService.runFullMaintenance();
@@ -200,9 +285,6 @@ router.post('/system/sync-all', adminOnly, async (req, res) => {
   }
 });
 
-/**
- * FIX: Маршрут для синхронизации серверов (вызывается из Servers.tsx)
- */
 router.post('/system/sync-servers', adminOnly, async (req, res) => {
   try {
     await MaintenanceService.runFullMaintenance();
@@ -212,12 +294,8 @@ router.post('/system/sync-servers', adminOnly, async (req, res) => {
   }
 });
 
-/**
- * FIX: Маршрут диагностики VPS (вывод терминала в админку)
- */
 router.post('/system/diagnose-vps', adminOnly, async (req, res) => {
   try {
-    // Безопасный набор команд для диагностики
     const cmd = `echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER ===" && docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`;
     const { stdout, stderr } = await execPromise(cmd);
     res.json({ success: true, stdout, stderr });
