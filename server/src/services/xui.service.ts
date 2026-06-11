@@ -13,25 +13,31 @@ export class XUIService {
   private readonly SESSION_TTL = 10 * 60 * 1000; 
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
+    // Приоритет: переданный конфиг -> переменная окружения -> значение по умолчанию
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
     this.username = (serverConfigs?.username || process.env.XUI_USERNAME || 'admin').trim();
     this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || 'admin').trim();
 
-    if (host && !host.startsWith('http')) host = 'http://' + host;
+    // Добавление протокола, если он отсутствует
+    if (host && !host.startsWith('http')) {
+      host = 'http://' + host;
+    }
 
     if (host) {
       try {
         const parsedUrl = new URL(host);
         const hn = parsedUrl.hostname;
+        const configDomain = (process.env.DOMAIN || '').trim();
         
-        // FIX: Внутри Docker всегда используем внутреннее имя контейнера x3-ui
-        // Это решает проблему 403 и таймаутов при обращении к самому себе через внешний IP
-        const isDocker = process.env.IS_DOCKER === 'true' || !!process.env.XUI_HOST;
-        if (isDocker || hn === 'localhost' || hn === '127.0.0.1') {
+        // FIX: Оптимизация для работы внутри Docker (использование внутреннего имени x3-ui)
+        const isInternal = hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn.includes(configDomain));
+        const isDockerEnv = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production' || !!process.env.XUI_HOST;
+
+        if (isInternal || isDockerEnv) {
+          // Использование внутреннего хоста позволяет обходить блокировки внешнего IP внутри сервера
           host = `http://x3-ui:2053${parsedUrl.pathname}`;
-          console.log(`🔌 [XUI] Режим Docker: принудительный переход на ${host}`);
+          console.log(`🔌 [XUI] Docker-режим: принудительный переход на ${host}`);
         }
-        
         this.displayDomain = hn;
         this.basePath = parsedUrl.pathname.replace(/\/$/, '');
       } catch (e) {}
@@ -40,10 +46,11 @@ export class XUIService {
   }
 
   /**
-   * FIX: Современные панели 3x-ui требуют JSON-авторизацию.
+   * FIX: Современные панели (Sanaei) требуют передачи данных в формате JSON.
    */
   private async login() {
     const now = Date.now();
+    // Проверка актуальности сессии (TTL 10 минут)
     if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
 
     const loginUrl = `${this.host}${this.basePath}/login`;
@@ -54,6 +61,7 @@ export class XUIService {
 
     console.log(`📡 [XUI] Попытка входа: ${loginUrl} (User: ${this.username})`);
 
+    // Отправка JSON данных для входа
     const response = await axios.post(loginUrl, loginData, getRequestConfig(loginUrl, {
       'Content-Type': 'application/json'
     }));
@@ -72,6 +80,9 @@ export class XUIService {
     return { 'Cookie': this.sessionCookie || '', ...extra };
   }
 
+  /**
+   * FIX: Автоматический поиск Reality-инбаунда на порту 443
+   */
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
     
@@ -91,12 +102,13 @@ export class XUIService {
     };
 
     const url = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
+    // Создание клиента через JSON API
     await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
     return this.getInboundLink(targetInboundId, uuid, email);
   }
 
   /**
-   * FIX: Добавлен обязательный параметр spx=%2F для стабильности ссылок
+   * FIX: Добавлен обязательный параметр spx=%2F для стабильности Hiddify/NekoBox
    */
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     if (!this.sessionCookie) await this.login();
@@ -117,19 +129,10 @@ export class XUIService {
     
     let connectAddress = server?.ip || server?.domain || this.displayDomain;
     
+    // Очистка адреса для ссылки
     const cleanHost = (str: string) => {
       if (!str) return str;
-      let cleaned = str.trim();
-      if (cleaned.includes('://')) {
-        try {
-          const u = new URL(cleaned);
-          cleaned = u.hostname;
-        } catch(e) {
-          cleaned = cleaned.split('://')[1].split('/')[0].split(':')[0];
-        }
-      } else {
-        cleaned = cleaned.split('/')[0].split(':')[0];
-      }
+      let cleaned = str.trim().replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
       return cleaned.replace(/[^a-zA-Z0-9\.\-]/g, '');
     };
 
@@ -137,8 +140,8 @@ export class XUIService {
 
     if (streamSettings.security === 'reality') {
       const rs = streamSettings.realitySettings || {};
-      const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || rs.settings?.publicKey || '').trim();
       const sni = rs.serverNames?.[0] || 'www.microsoft.com';
+      const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || rs.settings?.publicKey || '').trim();
       const sid = rs.shortIds?.[0] || '79b27cf7799d5b4c';
 
       return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
@@ -163,7 +166,7 @@ export class XUIService {
   }
 
   /**
-   * FIX: Автоматическая синхронизация ключей Reality из .env в базу
+   * FIX: Авто-синхронизация Reality ключей из .env в базу панели
    */
   async syncRealityKeys(privKey: string, pubKey: string) {
     if (!this.sessionCookie) await this.login();
@@ -171,9 +174,7 @@ export class XUIService {
     try {
       const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
       const listResp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
-      const inbounds = listResp.data.obj || [];
-      
-      const realityInbound = inbounds.find((ib: any) => {
+      const realityInbound = (listResp.data.obj || []).find((ib: any) => {
         const ss = JSON.parse(ib.streamSettings || '{}');
         return ss.security === 'reality';
       });
@@ -194,17 +195,26 @@ export class XUIService {
       console.error(`❌ [XUI] Ошибка синхронизации ключей на ${this.host}:`, e.message);
     }
   }
+
+  async deleteClient(uuid: string, email: string) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      // Ищем инбаунд на 443 порту
+      const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig('', this.authHeaders()));
+      const realityInbound = (listResp.data.obj || []).find((ib: any) => ib.port === 443);
+      if (realityInbound) {
+        await axios.post(`${this.host}${this.basePath}/panel/api/inbounds/${realityInbound.id}/delClient/${uuid}`, {}, getRequestConfig('', this.authHeaders()));
+      }
+    } catch (e) {}
+  }
 }
 
 const xuiInstances = new Map<string, XUIService>();
 
 export async function getXuiForServer(serverId: string) {
-  if (xuiInstances.has(serverId)) return { instance: xuiInstances.get(serverId)!, server: {} };
-
   const { data: server, error } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
   if (error || !server) throw new Error('Server not found');
 
   const instance = new XUIService({ host: server.ip || server.domain, username: server.username, password: server.password });
-  xuiInstances.set(serverId, instance);
   return { instance, server };
 }

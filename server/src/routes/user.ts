@@ -8,7 +8,7 @@ import crypto from 'crypto';
 
 const router = Router();
 
-// Helper to get settings from DB with ENV fallback
+// Вспомогательная функция для получения настроек из БД с откатом на ENV
 async function getSystemSetting(key: string, fallback: string = ''): Promise<string> {
   try {
     const { data, error } = await supabase.from('settings').select('value').eq('key', key).maybeSingle();
@@ -18,13 +18,14 @@ async function getSystemSetting(key: string, fallback: string = ''): Promise<str
   }
 }
 
-// 💰 Plans list
+// 💰 Получение списка тарифных планов
 router.get('/subscription/plans', async (req, res) => {
   try {
     const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
     const basePrice = parseInt(monthlyPriceStr, 10) || 100;
     const deviceLimit = parseInt(await getSystemSetting('DEVICE_LIMIT', '2'));
 
+    // Все цены округляются до целых чисел (Fix Платежей)
     const periods = [
       { id: '1m', label: '1 месяц', days: 30, price: basePrice },
       { id: '2m', label: '2 месяца', days: 60, price: Math.round(basePrice * 2) },
@@ -33,7 +34,7 @@ router.get('/subscription/plans', async (req, res) => {
     ];
 
     const serverTypes = [
-      { id: 'wifi', label: 'Wi-Fi / Mobile', price: 0, description: 'Стандартное подключение' }
+      { id: 'wifi', label: 'Wi-Fi / Mobile', price: 0, description: 'Стандартное Reality подключение' }
     ];
 
     res.json({ periods, serverTypes, deviceLimit });
@@ -42,45 +43,47 @@ router.get('/subscription/plans', async (req, res) => {
   }
 });
 
-// 💰 Buy/Renew Subscription
+// 💰 Покупка или продление подписки (Ядро системы)
 router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
-  const { userId, planId, price, durationDays, serverType, deviceLimit, forceNew, targetDeviceId, deviceName } = req.body;
+  const { userId, planId, price, durationDays, serverType, deviceLimit, deviceName } = req.body;
   if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
 
   try {
-    // 1. Проверка баланса
+    // 1. Проверка баланса пользователя
     const { data: balanceData } = await supabase.from('balances').select('amount').eq('user_id', userId).maybeSingle();
-    if (!balanceData || balanceData.amount < price) return res.status(400).json({ error: 'Insufficient balance' });
+    if (!balanceData || balanceData.amount < price) return res.status(400).json({ error: 'Недостаточно средств на балансе' });
 
-    // 2. Получение активных серверов
+    // 2. Получение списка всех активных VPN-серверов
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
     if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
 
-    // 3. Генерация учетных данных
+    // 3. Генерация уникальных данных для клиента
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-    const trafficLimitMb = 102400; // 100 GB default
+    const trafficLimitMb = 102400; // Стандарт 100 ГБ
     const limitBytes = trafficLimitMb * 1024 * 1024;
     const email = `user_${userId.slice(0, 8)}_${Math.random().toString(36).substring(2, 6)}`;
     const uuid = crypto.randomUUID();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + (durationDays || 30));
 
-    // 4. Создание клиента на всех серверах
+    // 4. Создание клиента на КАЖДОМ активном сервере (Синхронная работа)
     let configLines: string[] = [];
     for (const server of activeServers) {
       try {
         const { instance } = await getXuiForServer(server.id);
+        // Метод addClient теперь сам находит Reality инбаунд на 443 порту
         const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
         if (rawConfig) {
+          // Добавляем имя сервера в комментарий ссылки для удобства юзера
           const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
           configLines.push(configWithSuffix);
         }
       } catch (e: any) {
-        console.error(`❌ Ошибка на сервере ${server.name}:`, e.message);
+        console.error(`❌ Ошибка создания на сервере ${server.name}:`, e.message);
       }
     }
 
-    if (configLines.length === 0) throw new Error('Не удалось создать конфигурацию ни на одном сервере');
+    if (configLines.length === 0) throw new Error('Не удалось создать конфигурацию ни на одном сервере. Проверьте связь с панелями.');
 
     const devices: VpnDevice[] = [{
       id: 'primary',
@@ -94,11 +97,11 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
       serverId: activeServers[0].id
     }];
 
-    // 5. Создание или обновление подписки в БД
+    // 5. Сохранение подписки в Supabase
     const { data: existingSub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
     
     if (existingSub) {
-      // Продление
+      // Продление существующей подписки
       const newExpiry = new Date(existingSub.expires_at);
       newExpiry.setDate(newExpiry.getDate() + (durationDays || 30));
       await supabase.from('subscriptions').update({
@@ -107,7 +110,7 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
         updated_at: new Date().toISOString()
       }).eq('id', existingSub.id);
     } else {
-      // Новая подписка
+      // Создание новой подписки
       await supabase.from('subscriptions').insert({
         user_id: userId,
         status: 'active',
@@ -121,10 +124,10 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
       });
     }
 
-    // 6. Списание баланса
+    // 6. Списание денег с баланса
     await supabase.from('balances').update({ amount: balanceData.amount - price }).eq('user_id', userId);
     
-    // 7. Логирование транзакции
+    // 7. Запись в журнал транзакций
     await supabase.from('transactions').insert({
       user_id: userId,
       amount: -price,
@@ -141,7 +144,7 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
   }
 });
 
-// 🔄 Regenerate Device Key
+// 🔄 Перегенерация ключа для конкретного устройства (Безопасность)
 router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: any, res) => {
   const { deviceId } = req.params;
   const userId = req.user.id;
@@ -154,15 +157,15 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
       .eq('status', 'active')
       .maybeSingle();
 
-    if (!sub) return res.status(404).json({ error: 'Active subscription not found' });
+    if (!sub) return res.status(404).json({ error: 'Активная подписка не найдена' });
 
     let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
     const targetIdx = devices.findIndex(d => d.id === deviceId);
-    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
+    if (targetIdx === -1) return res.status(404).json({ error: 'Устройство не найдено' });
 
     const target = devices[targetIdx];
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (!activeServers || activeServers.length === 0) throw new Error('No active servers');
+    if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов');
 
     const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
@@ -174,6 +177,7 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
     for (const server of activeServers) {
       try {
         const { instance } = await getXuiForServer(server.id);
+        // Удаляем старый ключ перед созданием нового
         if (target.uuid && target.email) await instance.deleteClient(target.uuid, target.email).catch(() => {});
         const rawConfig = await instance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
         if (rawConfig) {
@@ -183,7 +187,7 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
       } catch (e) {}
     }
 
-    if (configLines.length === 0) throw new Error('Failed to reach VPN servers');
+    if (configLines.length === 0) throw new Error('Не удалось связаться с VPN серверами');
 
     devices[targetIdx] = { ...target, config: configLines.join('\n'), email: newEmail, uuid: newUuid };
     await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices) }).eq('id', sub.id);
@@ -194,13 +198,13 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
   }
 });
 
-// 🎁 Apply Promocode
+// 🎁 Активация промокода
 router.post('/promocode/apply', authenticateUser, async (req: any, res) => {
   const { code } = req.body;
   const userId = req.user.id;
   
   try {
-    // В будущем здесь будет реальная логика из таблицы promocodes
+    // Временная заглушка для промокода
     if (code?.toUpperCase() === 'TRIAL24') {
       res.json({ success: true, message: 'Промокод активирован: +24 часа доступа!' });
     } else {
@@ -211,52 +215,26 @@ router.post('/promocode/apply', authenticateUser, async (req: any, res) => {
   }
 });
 
-/**
- * FIX: Получение истории транзакций для обычного пользователя (Wallet.tsx)
- */
-router.get('/transactions', authenticateUser, async (req: any, res) => {
-  try {
-    const userId = req.user.id;
-    const { data: transactions, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    res.json(transactions || []);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// --- СИНХРОНИЗАЦИЯ И СЕРВИСНЫЕ МАРШРУТЫ ---
 
-/**
- * FIX: Удаление устройства пользователем (Dashboard.tsx)
- */
+// Удаление устройства пользователем
 router.post('/subscription/device/delete', authenticateUser, async (req: any, res) => {
   const { userId, deviceId } = req.body;
   if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (!sub) return res.status(404).json({ error: 'Active subscription not found' });
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Подписка не найдена' });
 
     let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
     const targetIdx = devices.findIndex(d => d.id === deviceId);
-    
-    if (targetIdx === -1) return res.status(404).json({ error: 'Device not found' });
-    if (targetIdx === 0) return res.status(400).json({ error: 'Cannot delete primary device' });
+    if (targetIdx === -1) return res.status(404).json({ error: 'Устройство не найдено' });
+    if (targetIdx === 0) return res.status(400).json({ error: 'Нельзя удалить основное устройство' });
 
     const target = devices[targetIdx];
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
 
-    // Удаление клиента со всех серверов
+    // Удаление клиента со всех серверов для чистоты базы 3x-ui
     for (const server of (activeServers || [])) {
       try {
         const { instance } = await getXuiForServer(server.id);
@@ -265,10 +243,7 @@ router.post('/subscription/device/delete', authenticateUser, async (req: any, re
     }
 
     devices.splice(targetIdx, 1);
-    await supabase.from('subscriptions').update({ 
-      v2ray_config: JSON.stringify(devices),
-      updated_at: new Date().toISOString()
-    }).eq('id', sub.id);
+    await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
 
     res.json({ success: true, message: 'Устройство удалено' });
   } catch (err: any) {
@@ -276,20 +251,16 @@ router.post('/subscription/device/delete', authenticateUser, async (req: any, re
   }
 });
 
-// --- СИНХРОНИЗАЦИЯ (Fix 404) ---
-
-router.get('/subscription/universal-link-visible', (req, res) => {
-  res.json({ visible: true });
-});
-
-router.post('/subscription/sync-servers', authenticateUser, async (req, res) => {
-  MaintenanceService.runFullMaintenance(); // Trigger in background
-  res.json({ success: true, message: 'Синхронизация серверов запущена' });
-});
-
-router.post('/subscription/sync-traffic', authenticateUser, async (req, res) => {
-  MaintenanceService.syncTraffic(); // Trigger in background
-  res.json({ success: true, message: 'Синхронизация трафика запущена' });
+// Получение истории транзакций для кошелька
+router.get('/transactions', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: transactions, error } = await supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(transactions || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
