@@ -1,9 +1,9 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
-import { parseVpnDevices } from '../utils/vpn';
+import { parseVpnDevices, VpnDevice } from '../utils/vpn';
 import crypto from 'crypto';
 
 const router = Router();
@@ -45,9 +45,16 @@ router.post('/system/sync-servers', adminOnly, async (req, res) => {
 
 router.get('/users', adminOnly, async (req: any, res) => {
   try {
-    const { search } = req.query;
+    const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     let query = supabase.from('users').select('*, active_subscription:subscriptions(*)');
-    if (search) query = query.or('email.ilike.%' + search + '%,id.eq.' + search);
+    if (rawSearch) {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const escapedSearch = rawSearch.replace(/[\\%_]/g, '\\$&');
+      // SEC-001: Не собираем PostgREST `.or()` из произвольной строки — спецсимволы поиска экранируются, а id фильтруется только как UUID.
+      query = uuidPattern.test(rawSearch)
+        ? query.or(`email.ilike.%${escapedSearch}%,id.eq.${rawSearch}`)
+        : query.ilike('email', `%${escapedSearch}%`);
+    }
     const { data: users, error } = await query.order('created_at', { ascending: false });
     if (error) throw error;
     const { data: balances } = await supabase.from('balances').select('*');
@@ -95,7 +102,17 @@ router.post('/users/:userId/devices', adminOnly, async (req, res) => {
         if (cfg) configs.push(cfg + '#' + s.name.replace(/\\s+/g, '_'));
       } catch (e: any) { }
     }
-    const newDev = { id: 'dev_' + Date.now(), label: label || 'Device', config: configs.join('\\n'), email, uuid, expiresAt: sub.expires_at };
+    const newDev: VpnDevice = {
+      id: 'dev_' + Date.now(),
+      label: label || 'Device',
+      config: configs.join('\\n'),
+      email,
+      uuid,
+      expiresAt: sub.expires_at,
+      serverType: sub.server_type || 'WIFI',
+      trafficUsedBytes: 0,
+      serverId: servers[0].id
+    };
     devices.push(newDev);
     await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices) }).eq('id', sub.id);
     res.json({ success: true, device: newDev });
