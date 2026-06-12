@@ -1,6 +1,20 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import { getRequestConfig } from '../utils/axios';
 import { supabase } from './supabase';
+
+interface XuiInbound {
+  id: number;
+  port?: number;
+  protocol?: string;
+  settings?: string;
+  streamSettings?: string;
+  [key: string]: unknown;
+}
+
+interface XuiSettings {
+  xrayTemplateConfig?: string;
+  [key: string]: unknown;
+}
 
 export class XUIService {
   public host: string;
@@ -66,8 +80,31 @@ export class XUIService {
     }
   }
 
-  private authHeaders(extra: any = {}) {
+  private authHeaders(extra: Record<string, string> = {}) {
     return { 'Cookie': this.sessionCookie || '', ...extra };
+  }
+
+  private parseJson<T>(value: unknown, fallback: T): T {
+    if (typeof value !== 'string' || value.trim() === '') return fallback;
+    try {
+      return JSON.parse(value) as T;
+    } catch (err) {
+      return fallback;
+    }
+  }
+
+  private async getInbounds(): Promise<XuiInbound[]> {
+    await this.login();
+    const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+    const resp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
+    return Array.isArray(resp.data?.obj) ? resp.data.obj : [];
+  }
+
+  private findRealityInbound(inbounds: XuiInbound[], fallbackId: number): XuiInbound | undefined {
+    return inbounds.find((ib) => {
+      const streamSettings = this.parseJson<Record<string, any>>(ib.streamSettings, {});
+      return ib.port === 443 || streamSettings.security === 'reality';
+    }) || inbounds.find((ib) => ib.id === fallbackId);
   }
 
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
@@ -75,9 +112,7 @@ export class XUIService {
 
     let targetInboundId = inboundId;
     try {
-      const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-      const resp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
-      const realityInbound = (resp.data.obj || []).find((ib: any) => ib.port === 443);
+      const realityInbound = this.findRealityInbound(await this.getInbounds(), inboundId);
       if (realityInbound) targetInboundId = realityInbound.id;
     } catch (e) {
       console.warn(`⚠️ [XUI] Could not fetch inbound list, using default ID: ${inboundId}`);
@@ -96,48 +131,150 @@ export class XUIService {
   }
 
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
-    await this.login();
-    const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-    const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
-    if (!resp.data.success) throw new Error('Inbound not found');
+    try {
+      await this.login();
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+      if (!resp.data?.success || !resp.data?.obj) throw new Error('Inbound not found');
 
-    const inbound = resp.data.obj;
-    const streamSettings = JSON.parse(inbound.streamSettings || '{}');
-    const port = inbound.port;
-    const encodedEmail = encodeURIComponent(`izinet_${email}`);
+      const inbound = resp.data.obj;
+      const streamSettings = this.parseJson<Record<string, any>>(inbound.streamSettings, {});
+      const port = inbound.port;
+      const encodedEmail = encodeURIComponent(`izinet_${email}`);
 
-    const { data: server } = await supabase.from('vpn_servers')
-      .select('ip, domain')
-      .or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`)
-      .maybeSingle();
+      const { data: server } = await supabase.from('vpn_servers')
+        .select('ip, domain')
+        .or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`)
+        .maybeSingle();
 
-    let connectAddress = server?.ip || server?.domain || this.displayDomain;
-    const cleanHost = (str: string) => {
-      if (!str) return str;
-      return str.trim().replace(/^https?:\/\//, '').split('/')[0].split(':')[0].replace(/[^a-zA-Z0-9\.\-]/g, '');
-    };
-    connectAddress = cleanHost(connectAddress);
+      let connectAddress = server?.ip || server?.domain || this.displayDomain;
+      const cleanHost = (str: string) => {
+        if (!str) return str;
+        return str.trim().replace(/^https?:\/\//, '').split('/')[0].split(':')[0].replace(/[^a-zA-Z0-9.\-]/g, '');
+      };
+      connectAddress = cleanHost(connectAddress);
 
-    if (streamSettings.security === 'reality') {
-      const rs = streamSettings.realitySettings || {};
-      const sni = rs.serverNames?.[0] || 'www.microsoft.com';
-      const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '').trim();
-      const sid = rs.shortIds?.[0] || '79b27cf7799d5b4c';
+      if (streamSettings.security === 'reality') {
+        const rs = streamSettings.realitySettings || {};
+        const sni = rs.serverNames?.[0] || 'www.microsoft.com';
+        const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '').trim();
+        const sid = rs.shortIds?.[0] || '79b27cf7799d5b4c';
 
-      return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
+        return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=chrome&sid=${encodeURIComponent(sid)}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
+      }
+      return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=none#${encodedEmail}`;
+    } catch (err: any) {
+      // CORE-002: Ошибка генерации ссылки должна логироваться с контекстом и возвращаться вызывающему коду, а не ронять Node.js необработанным исключением.
+      console.error(`❌ [XUI] getInboundLink failed for inbound ${inboundId}, email ${email}:`, err.message);
+      throw err;
     }
-    return `vless://${uuid}@${connectAddress}:${port}?security=none#${encodedEmail}`;
   }
 
   async checkHealth(): Promise<boolean> {
     try { await this.login(); return true; } catch (e) { return false; }
   }
 
+  async checkConfig(): Promise<boolean> {
+    // CORE-003: maintenance исторически вызывает checkConfig(); оставляем совместимую обертку над реальной проверкой здоровья панели.
+    return this.checkHealth();
+  }
+
+  async getClientTraffic(email: string): Promise<{ up: number; down: number; used: number } | null> {
+    try {
+      await this.login();
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${encodeURIComponent(email)}`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+      const obj = resp.data?.obj;
+      if (!resp.data?.success || !obj) return null;
+      const up = Number(obj.up || 0);
+      const down = Number(obj.down || 0);
+      return { up, down, used: up + down };
+    } catch (err: any) {
+      console.warn(`⚠️ [XUI] Could not read traffic for ${email}: ${err.message}`);
+      return null;
+    }
+  }
+
+  async getSettings(): Promise<XuiSettings> {
+    await this.login();
+    const candidates = [
+      `${this.host}${this.basePath}/panel/api/server/getConfig`,
+      `${this.host}${this.basePath}/panel/api/server/getXrayConfig`
+    ];
+
+    let lastError: unknown;
+    for (const url of candidates) {
+      try {
+        const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+        if (resp.data?.success && resp.data?.obj) return resp.data.obj;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('XUI settings endpoint unavailable');
+  }
+
+  async updateSettings(settings: XuiSettings): Promise<void> {
+    await this.login();
+    const candidates = [
+      `${this.host}${this.basePath}/panel/api/server/updateConfig`,
+      `${this.host}${this.basePath}/panel/api/server/updateXrayConfig`
+    ];
+
+    let lastError: unknown;
+    for (const url of candidates) {
+      try {
+        const resp = await axios.post(url, settings, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+        if (resp.data?.success !== false) return;
+        lastError = new Error(resp.data?.msg || resp.data?.message || 'XUI settings update rejected');
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('XUI settings update endpoint unavailable');
+  }
+
+  async restartPanel(): Promise<void> {
+    await this.login();
+    const candidates = [
+      `${this.host}${this.basePath}/panel/api/server/restartXrayService`,
+      `${this.host}${this.basePath}/panel/api/server/restartXray`
+    ];
+
+    for (const url of candidates) {
+      try {
+        const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+        if (resp.data?.success !== false) return;
+      } catch (err) {}
+    }
+    console.warn(`⚠️ [XUI] Xray restart endpoint unavailable for ${this.host}; settings were saved but restart must be checked manually.`);
+  }
+
+  async syncRealityKeys(privateKey: string, publicKey: string): Promise<void> {
+    if (!privateKey || !publicKey) return;
+    try {
+      const inbounds = await this.getInbounds();
+      const realityInbounds = inbounds.filter((ib) => this.parseJson<Record<string, any>>(ib.streamSettings, {}).security === 'reality');
+
+      for (const inbound of realityInbounds) {
+        const streamSettings = this.parseJson<Record<string, any>>(inbound.streamSettings, {});
+        const realitySettings = streamSettings.realitySettings || {};
+        if (realitySettings.privateKey === privateKey && realitySettings.publicKey === publicKey) continue;
+
+        streamSettings.realitySettings = { ...realitySettings, privateKey, publicKey };
+        const payload = { ...inbound, streamSettings: JSON.stringify(streamSettings) };
+        const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inbound.id}`;
+        await axios.post(url, payload, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [XUI] Reality key sync skipped for ${this.host}: ${err.message}`);
+    }
+  }
+
   async deleteClient(uuid: string, email: string) {
     try {
       await this.login();
-      const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig('', this.authHeaders()));
-      const realityInbound = (listResp.data.obj || []).find((ib: any) => ib.port === 443);
+      const realityInbound = this.findRealityInbound(await this.getInbounds(), parseInt(process.env.XUI_INBOUND_ID || '1'));
       if (realityInbound) {
         await axios.post(`${this.host}${this.basePath}/panel/api/inbounds/${realityInbound.id}/delClient/${uuid}`, {}, getRequestConfig('', this.authHeaders()));
       }

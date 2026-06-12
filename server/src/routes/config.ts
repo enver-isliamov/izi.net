@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { supabase } from '../services/supabase';
 import { MaintenanceService } from '../services/maintenance.service';
 
@@ -49,6 +49,11 @@ router.get('/sub/:id', async (req, res) => {
     if (error || !sub || sub.status !== 'active') {
       return res.status(404).send('Subscription not found');
     }
+
+    // CACHE-001: VPN-клиенты (Happ/Hiddify/INCY) должны всегда получать актуальную подписку, без 304/прокси-кэша.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
 
     let configText = sub.v2ray_config || '';
     try {

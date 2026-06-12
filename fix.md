@@ -64,3 +64,8 @@ cd /opt/izinet && git pull origin main && sed -i 's/\r//' .env && docker compose
 ```
 
 *Все этапы восстановления завершены успешно. Система стабильна и готова к эксплуатации.*
+- [x] [2026-06-12 14:31] **SYS-BOOT-001**: Исправлен crash контейнера при запуске (некорректный RegExp `replace(/\\/$/, '')` в `server/src/index.ts` ломал esbuild/tsx на символе `$` -> заменена регулярка на валидный `replace(/\/$/, '')`, чтобы `update.sh` больше не поднимал контейнер с TransformError).
+- [x] [2026-06-12 14:31] **CORE-002**: Устранен риск падения генерации VPN-ссылки (ошибки в `server/src/services/xui.service.ts#getInboundLink` могли уйти без контекста и сломать выдачу ключа -> добавлена локальная обработка с логированием inbound/email и безопасный JSON parse для streamSettings).
+- [x] [2026-06-12 14:31] **CORE-003**: Восстановлены методы XUIService для maintenance/routing (в `server/src/services/maintenance.service.ts` и `server/src/services/routing.service.ts` вызывались отсутствующие `checkConfig`, `getClientTraffic`, `syncRealityKeys`, `getSettings`, `updateSettings`, `restartPanel` -> реализованы совместимые методы в `server/src/services/xui.service.ts`).
+- [x] [2026-06-12 14:31] **SEC-001**: Усилена защита поиска пользователей в admin API (в `server/src/routes/admin.ts` произвольная строка попадала в PostgREST `.or()` -> поиск id разрешен только для UUID, email-поиск экранирует `%`, `_` и `\\`).
+- [x] [2026-06-12 14:31] **CACHE-001**: Отключено кэширование subscription-конфигов (эндпоинт `server/src/routes/config.ts#/sub/:id` мог отдавать устаревшие VPN-конфиги через прокси/клиентский 304 -> добавлены `Cache-Control`, `Pragma`, `Expires` для no-store/no-cache).
