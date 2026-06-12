@@ -11,6 +11,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import axios from 'axios';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
 import { MaintenanceService } from './services/maintenance.service';
@@ -27,27 +28,56 @@ const PORT = parseInt(process.env.PORT || '3005');
 app.use(cors());
 app.use(express.json());
 
-// --- РЕГИСТРАЦИЯ МАРШРУТОВ (СИНХРОНИЗАЦИЯ С ФРОНТЕНДОМ) ---
+// --- РЕГИСТРАЦИЯ МАРШРУТОВ ---
 
-// 1. Пользовательские маршруты
 app.use('/api', userRoutes);
-
-// 2. Системные конфиги и универсальные ссылки
 app.use('/api', configRoutes);
-// FIX: Дублируем маршруты под префиксом /subscription для совместимости с фронтендом
 app.use('/api/subscription', configRoutes);
-
-// 3. Админ-панель (строго под префиксом /api/admin)
 app.use('/api/admin', adminRoutes);
-
-// 4. Платежная система (строго под префиксом /api/pay)
 app.use('/api/pay', paymentRoutes);
+
+// --- SUPABASE PROXY (КРИТИЧНО ДЛЯ АВТОРИЗАЦИИ) ---
+app.all('/api/supabase-proxy/*', async (req, res) => {
+  try {
+    const targetPath = req.params[0];
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl) throw new Error('Supabase URL missing');
+
+    const url = supabaseUrl + '/rest/v1/' + targetPath;
+    
+    // Пересылаем заголовки
+    const headers: any = {
+      'apikey': supabaseKey,
+      'Authorization': req.headers.authorization || 'Bearer ' + supabaseKey,
+      'Content-Type': 'application/json',
+      'Prefer': req.headers.prefer || ''
+    };
+
+    const response = await axios({
+      method: req.method,
+      url: url,
+      data: req.body,
+      params: req.query,
+      headers: headers,
+      validateStatus: () => true
+    });
+
+    res.status(response.status).json(response.data);
+  } catch (err: any) {
+    console.error('❌ Proxy error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const distPath = path.join(process.cwd(), 'dist');
 app.use(express.static(distPath));
 
 app.get('*', (req, res) => {
-  if (req.url.startsWith('/api')) return res.status(404).json({ error: 'Route not found' });
+  if (req.url.startsWith('/api')) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
@@ -55,11 +85,10 @@ async function start() {
   console.log('🚀 [BOOT] Проверка Supabase...');
   const dbOk = await checkDatabase();
   if (dbOk) {
-    console.log('🚀 [BOOT] Инициализация сервисов...');
     botService.init();
     MaintenanceService.init();
   }
-  app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));
+  app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер на порту ' + PORT));
 }
 
 start().catch(err => process.exit(1));
