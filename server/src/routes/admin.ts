@@ -370,7 +370,7 @@ router.post('/users/:userId/devices', adminOnly, async (req, res) => {
     const newDev: VpnDevice = {
       id: 'dev_' + Date.now(),
       label: label || 'Device',
-      config: configs.join('\n'),
+      config: configs.join('\\n'),
       email,
       uuid,
       expiresAt: sub.expires_at,
