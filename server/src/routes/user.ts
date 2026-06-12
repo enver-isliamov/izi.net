@@ -18,6 +18,208 @@ async function getSystemSetting(key: string, fallback: string = ''): Promise<str
   }
 }
 
+const PLAN_OPTIONS: Record<string, { days: number; months: number }> = {
+  '1m': { days: 30, months: 1 },
+  '2m': { days: 60, months: 2 },
+  '6m': { days: 180, months: 6 },
+  '12m': { days: 365, months: 12 }
+};
+
+async function getServerPlan(planId: string) {
+  const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
+  const basePrice = parseInt(monthlyPriceStr, 10) || 100;
+  const selected = PLAN_OPTIONS[planId];
+  if (!selected) return null;
+  return {
+    ...selected,
+    pricePerDevice: Math.round(basePrice * selected.months)
+  };
+}
+
+function clampInt(value: unknown, min: number, max: number) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return min;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+async function provisionDeviceOnServers(params: {
+  userId: string;
+  activeServers: any[];
+  inboundId: number;
+  expiresAt: Date;
+  trafficLimitMb: number;
+  serverType: string;
+  label: string;
+  id: string;
+}) {
+  const email = `user_${params.userId.slice(0, 8)}_${Math.random().toString(36).substring(2, 6)}`;
+  const uuid = crypto.randomUUID();
+  const limitBytes = params.trafficLimitMb * 1024 * 1024;
+  const configLines: string[] = [];
+
+  for (const server of params.activeServers) {
+    try {
+      const { instance } = await getXuiForServer(server.id);
+      const rawConfig = await instance.addClient(email, uuid, params.inboundId, params.expiresAt.getTime(), limitBytes);
+      if (rawConfig) {
+        const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
+        configLines.push(configWithSuffix);
+      }
+    } catch (e: any) {
+      console.error(`XUI provisioning failed on ${server.name}:`, e.message);
+    }
+  }
+
+  if (configLines.length === 0) {
+    throw new Error('Не удалось создать конфигурацию ни на одном VPN сервере. Проверьте связь с панелями.');
+  }
+
+  return {
+    id: params.id,
+    label: params.label,
+    config: configLines.join('\n'),
+    email,
+    uuid,
+    expiresAt: params.expiresAt.toISOString(),
+    serverType: params.serverType,
+    trafficUsedBytes: 0,
+    serverId: params.activeServers[0].id
+  } satisfies VpnDevice;
+}
+
+async function handleSubscriptionBuy(req: any, res: any) {
+  const { userId, planId, serverType, deviceLimit, deviceName, forceNew, targetDeviceId } = req.body;
+  if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
+
+  try {
+    const plan = await getServerPlan(planId);
+    if (!plan) return res.status(400).json({ error: 'Invalid subscription plan' });
+
+    const globalDeviceLimit = clampInt(await getSystemSetting('DEVICE_LIMIT', '2'), 1, 20);
+    const normalizedServerType = String(serverType || 'WIFI').toUpperCase();
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const trafficLimitMb = 102400;
+    const now = new Date();
+
+    const { data: existingSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    const existingDevices = existingSub ? parseVpnDevices(existingSub.v2ray_config, existingSub.expires_at, existingSub.server_type) : [];
+    const requestedDeviceCount = existingSub
+      ? (forceNew || targetDeviceId ? 1 : Math.max(existingDevices.length, 1))
+      : clampInt(deviceLimit, 1, globalDeviceLimit);
+    const price = plan.pricePerDevice * requestedDeviceCount;
+
+    // PRICE-001: Client price/duration are display-only; billing uses server settings and planId.
+    const { data: balanceData } = await supabase.from('balances').select('amount').eq('user_id', userId).maybeSingle();
+    if (!balanceData || Number(balanceData.amount) < price) return res.status(400).json({ error: 'Недостаточно средств на балансе' });
+
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + plan.days);
+
+    let devices: VpnDevice[] = [];
+    let subscriptionExpiresAt = expiresAt;
+
+    if (existingSub) {
+      devices = existingDevices;
+
+      if (forceNew) {
+        if (devices.length >= globalDeviceLimit) return res.status(400).json({ error: `Достигнут лимит устройств (${globalDeviceLimit})` });
+        devices.push(await provisionDeviceOnServers({
+          userId,
+          activeServers,
+          inboundId,
+          expiresAt,
+          trafficLimitMb,
+          serverType: normalizedServerType,
+          label: deviceName || `Устройство ${devices.length + 1}`,
+          id: `device_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+        }));
+        subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
+      } else if (targetDeviceId) {
+        const targetIdx = devices.findIndex((device) => device.id === targetDeviceId);
+        if (targetIdx === -1) return res.status(404).json({ error: 'Устройство не найдено' });
+        devices[targetIdx] = await provisionDeviceOnServers({
+          userId,
+          activeServers,
+          inboundId,
+          expiresAt,
+          trafficLimitMb,
+          serverType: devices[targetIdx].serverType || normalizedServerType,
+          label: deviceName || devices[targetIdx].label || 'Устройство',
+          id: devices[targetIdx].id
+        });
+        subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
+      } else {
+        const currentExpiry = new Date(existingSub.expires_at);
+        const renewalBase = currentExpiry.getTime() > now.getTime() ? currentExpiry : now;
+        subscriptionExpiresAt = new Date(renewalBase);
+        subscriptionExpiresAt.setDate(subscriptionExpiresAt.getDate() + plan.days);
+        devices = devices.map((device) => ({ ...device, expiresAt: subscriptionExpiresAt.toISOString() }));
+      }
+
+      const { error: updateError } = await supabase.from('subscriptions').update({
+        expires_at: subscriptionExpiresAt.toISOString(),
+        v2ray_config: JSON.stringify(devices),
+        device_limit: Math.max(Number(existingSub.device_limit || 0), globalDeviceLimit),
+        updated_at: new Date().toISOString()
+      }).eq('id', existingSub.id);
+      if (updateError) throw updateError;
+    } else {
+      for (let i = 0; i < requestedDeviceCount; i += 1) {
+        devices.push(await provisionDeviceOnServers({
+          userId,
+          activeServers,
+          inboundId,
+          expiresAt,
+          trafficLimitMb,
+          serverType: normalizedServerType,
+          label: i === 0 ? (deviceName || 'Основное устройство') : `Устройство ${i + 1}`,
+          id: i === 0 ? 'primary' : `device_${Date.now()}_${i}`
+        }));
+      }
+
+      const { error: insertError } = await supabase.from('subscriptions').insert({
+        user_id: userId,
+        status: 'active',
+        plan_type: planId,
+        expires_at: expiresAt.toISOString(),
+        v2ray_config: JSON.stringify(devices),
+        traffic_limit_mb: trafficLimitMb,
+        traffic_used_mb: 0,
+        device_limit: globalDeviceLimit,
+        server_id: activeServers[0].id
+      });
+      if (insertError) throw insertError;
+    }
+
+    const { error: balanceError } = await supabase.from('balances').update({ amount: Number(balanceData.amount) - price }).eq('user_id', userId);
+    if (balanceError) throw balanceError;
+
+    const { error: txError } = await supabase.from('transactions').insert({
+      user_id: userId,
+      amount: -price,
+      currency: 'RUB',
+      type: 'withdrawal',
+      status: 'completed',
+      description: `Покупка подписки: ${planId}`
+    });
+    if (txError) console.error('Subscription transaction journal failed:', txError.message);
+
+    return res.json({ success: true, message: 'Подписка успешно оформлена', charged: price, devices });
+  } catch (err: any) {
+    console.error('Subscription purchase failed:', err);
+    return res.status(500).json({ error: err.message });
+  }
+}
+
 // 💰 Получение списка тарифных планов
 router.get('/subscription/plans', async (req, res) => {
   try {
@@ -45,6 +247,8 @@ router.get('/subscription/plans', async (req, res) => {
 
 // 💰 Покупка или продление подписки (Ядро системы)
 router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
+  return handleSubscriptionBuy(req, res);
+
   const { userId, planId, price, durationDays, serverType, deviceLimit, deviceName } = req.body;
   if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
 
