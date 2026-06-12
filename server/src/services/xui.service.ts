@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { getRequestConfig } from '../utils/axios';
 import { supabase } from './supabase';
 
@@ -10,7 +10,7 @@ export class XUIService {
   private password: string;
   private sessionCookie: string | null = null;
   private lastLoginTime: number = 0;
-  private readonly SESSION_TTL = 10 * 60 * 1000; 
+  private readonly SESSION_TTL = 10 * 60 * 1000;
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     // Приоритет: переданный конфиг -> переменная окружения -> значение по умолчанию
@@ -28,15 +28,15 @@ export class XUIService {
         const parsedUrl = new URL(host);
         const hn = parsedUrl.hostname;
         const configDomain = (process.env.DOMAIN || '').trim();
-        
-        // FIX: Оптимизация для работы внутри Docker (использование внутреннего имени x3-ui)
-        const isInternal = hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn.includes(configDomain));
-        const isDockerEnv = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production' || !!process.env.XUI_HOST;
 
-        if (isInternal || isDockerEnv) {
+        // FIX: Оптимизация для работы внутри Docker (только если хост локальный)
+        const isLocalHost = hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn === configDomain);
+        const isDockerEnv = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production';
+
+        if (isLocalHost && isDockerEnv) {
           // Использование внутреннего хоста позволяет обходить блокировки внешнего IP внутри сервера
           host = `http://x3-ui:2053${parsedUrl.pathname}`;
-          console.log(`🔌 [XUI] Docker-режим: принудительный переход на ${host}`);
+          console.log(`🔌 [XUI] Docker-режим (Local): принудительный переход на ${host}`);
         }
         this.displayDomain = hn;
         this.basePath = parsedUrl.pathname.replace(/\/$/, '');
@@ -85,7 +85,7 @@ export class XUIService {
    */
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     if (!this.sessionCookie) await this.login();
-    
+
     let targetInboundId = inboundId;
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
@@ -116,7 +116,7 @@ export class XUIService {
     const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
     const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
     if (!resp.data.success) throw new Error('Inbound not found');
-    
+
     const inbound = resp.data.obj;
     const streamSettings = JSON.parse(inbound.streamSettings || '{}');
     const port = inbound.port;
@@ -126,9 +126,9 @@ export class XUIService {
       .select('ip, domain')
       .or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`)
       .maybeSingle();
-    
+
     let connectAddress = server?.ip || server?.domain || this.displayDomain;
-    
+
     // Очистка адреса для ссылки
     const cleanHost = (str: string) => {
       if (!str) return str;
@@ -146,7 +146,7 @@ export class XUIService {
 
       return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
     }
-    
+
     return `vless://${uuid}@${connectAddress}:${port}?security=none#${encodedEmail}`;
   }
 
@@ -170,7 +170,7 @@ export class XUIService {
    */
   async syncRealityKeys(privKey: string, pubKey: string) {
     if (!this.sessionCookie) await this.login();
-    
+
     try {
       const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
       const listResp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
