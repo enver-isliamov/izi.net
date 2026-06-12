@@ -1,4 +1,4 @@
-﻿import * as dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 dotenv.config();
 
 process.on('uncaughtException', (err) => console.error('🔥 [CRITICAL] Exception:', err));
@@ -37,7 +37,7 @@ app.use('/api/pay', paymentRoutes);
 app.all('/api/supabase-proxy/*', async (req, res) => {
   try {
     const targetPath = req.params[0]; // Например: auth/v1/token или rest/v1/users
-    const supabaseUrl = (process.env.VITE_SUPABASE_URL || '').replace(/\\/$/, '');
+    const supabaseUrl = (process.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl) throw new Error('Supabase URL missing');

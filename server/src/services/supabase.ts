@@ -8,7 +8,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   global: { headers: { 'x-client-info': 'izinet-app' } },
-  realtime: { transport: WebSocket }
+  realtime: { transport: WebSocket as any }
 });
 
 export async function checkDatabase() {

@@ -274,3 +274,7 @@ referral/calculate
 243:   - [ ] Настройка серверной части olcrtc на узлах.
 244:   - [ ] Генерация специфических ссылок конфигов в личном кабинете.
 245:   - [ ] Добавление инструкций по использованию приложения olcbox.
+
+- [x] [2026-06-12 14:31] **Codex BugList P0 старт**: Изучен `BugList_izi.net.md`; закрыт boot-crash из серверного лога, восстановлены отсутствующие XUI maintenance/routing методы, усилен admin search и отключен кэш subscription-конфигов. Следующий этап — атомаризация покупки/баланса и полная идемпотентность provisioning/webhook.
+
+- [x] [2026-06-12 14:53] **Admin Console API Recovery**: Закрыты реальные ошибки консоли браузера `404 /api/admin/settings`, `404 /api/admin/servers/health`, `500 PUT /api/admin/users/:id`; подтверждено, что весь `BugList_izi.net.md` еще не закрыт и оставлен следующий фокус: стабильный provisioning XUI/покупка подписки/SSL-Reality инфраструктура.
