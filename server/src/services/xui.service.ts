@@ -31,10 +31,10 @@ export class XUIService {
         const isDockerEnv = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production';
 
         if (isLocalHost && isDockerEnv) {
-          host = 'http://x3-ui:2053' + parsedUrl.pathname;
+          host = `http://x3-ui:2053${parsedUrl.pathname}`;
         }
         this.displayDomain = hn;
-        this.basePath = parsedUrl.pathname.replace(/\\/$/, '');
+        this.basePath = parsedUrl.pathname.replace(/\/$/, '');
       } catch (e) {}
     }
     this.host = host;
@@ -44,7 +44,7 @@ export class XUIService {
     const now = Date.now();
     if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
 
-    const loginUrl = this.host + this.basePath + '/login';
+    const loginUrl = `${this.host}${this.basePath}/login`;
     const loginData = { username: this.username, password: this.password };
 
     try {
@@ -56,12 +56,12 @@ export class XUIService {
       if (cookie) {
         this.sessionCookie = Array.isArray(cookie) ? cookie[0] : cookie;
         this.lastLoginTime = now;
-        console.log('✅ [XUI] Login success: ' + this.host);
+        console.log(`✅ [XUI] Login success: ${this.host}`);
       } else {
         throw new Error('No cookie received');
       }
     } catch (err: any) {
-      console.error('❌ [XUI] Login failed at ' + this.host + ': ' + (err.response?.data?.message || err.message));
+      console.error(`❌ [XUI] Login failed at ${this.host}: ${err.response?.data?.message || err.message}`);
       throw err;
     }
   }
@@ -75,12 +75,12 @@ export class XUIService {
 
     let targetInboundId = inboundId;
     try {
-      const listUrl = this.host + this.basePath + '/panel/api/inbounds/list';
+      const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
       const resp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
       const realityInbound = (resp.data.obj || []).find((ib: any) => ib.port === 443);
       if (realityInbound) targetInboundId = realityInbound.id;
     } catch (e) {
-      console.warn('⚠️ [XUI] Could not fetch inbound list, using default ID: ' + inboundId);
+      console.warn(`⚠️ [XUI] Could not fetch inbound list, using default ID: ${inboundId}`);
     }
 
     const clientData = {
@@ -90,31 +90,31 @@ export class XUIService {
       })
     };
 
-    const url = this.host + this.basePath + '/panel/api/inbounds/addClient';
+    const url = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
     await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
     return this.getInboundLink(targetInboundId, uuid, email);
   }
 
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
     await this.login();
-    const url = this.host + this.basePath + '/panel/api/inbounds/get/' + inboundId;
+    const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
     const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
     if (!resp.data.success) throw new Error('Inbound not found');
 
     const inbound = resp.data.obj;
     const streamSettings = JSON.parse(inbound.streamSettings || '{}');
     const port = inbound.port;
-    const encodedEmail = encodeURIComponent('izinet_' + email);
+    const encodedEmail = encodeURIComponent(`izinet_${email}`);
 
     const { data: server } = await supabase.from('vpn_servers')
       .select('ip, domain')
-      .or('ip.ilike.%' + this.displayDomain + '%,domain.eq.' + this.displayDomain)
+      .or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`)
       .maybeSingle();
 
     let connectAddress = server?.ip || server?.domain || this.displayDomain;
     const cleanHost = (str: string) => {
       if (!str) return str;
-      return str.trim().replace(/^https?:\\/\\//, '').split('/')[0].split(':')[0].replace(/[^a-zA-Z0-9\\.\\-]/g, '');
+      return str.trim().replace(/^https?:\/\//, '').split('/')[0].split(':')[0].replace(/[^a-zA-Z0-9\.\-]/g, '');
     };
     connectAddress = cleanHost(connectAddress);
 
@@ -124,9 +124,9 @@ export class XUIService {
       const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '').trim();
       const sid = rs.shortIds?.[0] || '79b27cf7799d5b4c';
 
-      return 'vless://' + uuid + '@' + connectAddress + ':' + port + '?type=tcp&encryption=none&security=reality&sni=' + sni + '&pbk=' + pbk + '&fp=chrome&sid=' + sid + '&spx=%2F&flow=xtls-rprx-vision#' + encodedEmail;
+      return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${sni}&pbk=${pbk}&fp=chrome&sid=${sid}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
     }
-    return 'vless://' + uuid + '@' + connectAddress + ':' + port + '?security=none#' + encodedEmail;
+    return `vless://${uuid}@${connectAddress}:${port}?security=none#${encodedEmail}`;
   }
 
   async checkHealth(): Promise<boolean> {
@@ -136,10 +136,10 @@ export class XUIService {
   async deleteClient(uuid: string, email: string) {
     try {
       await this.login();
-      const listResp = await axios.get(this.host + this.basePath + '/panel/api/inbounds/list', getRequestConfig('', this.authHeaders()));
+      const listResp = await axios.get(`${this.host}${this.basePath}/panel/api/inbounds/list`, getRequestConfig('', this.authHeaders()));
       const realityInbound = (listResp.data.obj || []).find((ib: any) => ib.port === 443);
       if (realityInbound) {
-        await axios.post(this.host + this.basePath + '/panel/api/inbounds/' + realityInbound.id + '/delClient/' + uuid, {}, getRequestConfig('', this.authHeaders()));
+        await axios.post(`${this.host}${this.basePath}/panel/api/inbounds/${realityInbound.id}/delClient/${uuid}`, {}, getRequestConfig('', this.authHeaders()));
       }
     } catch (e) {}
   }
@@ -151,4 +151,3 @@ export async function getXuiForServer(serverId: string) {
   const instance = new XUIService({ host: server.ip || server.domain, username: server.username, password: server.password });
   return { instance, server };
 }
-
