@@ -1,15 +1,11 @@
-import * as dotenv from 'dotenv';
-// Принудительная инициализация переменных окружения
+﻿import * as dotenv from 'dotenv';
 dotenv.config();
 
-// ЛОГ: Проверка загрузки переменных (важно для отладки на сервере)
 console.log('📦 [ENV] Загружено переменных:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
 
-// Глобальные обработчики для предотвращения "тихого" падения сервера
 process.on('uncaughtException', (err) => console.error('🔥 [CRITICAL] Необработанное исключение:', err));
 process.on('unhandledRejection', (reason) => console.error('🔥 [CRITICAL] Необработанный промис:', reason));
 
-// Отключение строгой проверки TLS (для работы во внутренних сетях Docker)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 import express from 'express';
@@ -19,7 +15,6 @@ import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
 import { MaintenanceService } from './services/maintenance.service';
 
-// Импорт маршрутов (оставляем файлы в папке routes, как и было)
 import adminRoutes from './routes/admin';
 import paymentRoutes from './routes/payments';
 import userRoutes from './routes/user';
@@ -34,11 +29,13 @@ app.use(express.json());
 
 // --- РЕГИСТРАЦИЯ МАРШРУТОВ (СИНХРОНИЗАЦИЯ С ФРОНТЕНДОМ) ---
 
-// 1. Пользовательские маршруты (включая /subscription)
+// 1. Пользовательские маршруты
 app.use('/api', userRoutes);
 
 // 2. Системные конфиги и универсальные ссылки
 app.use('/api', configRoutes);
+// FIX: Дублируем маршруты под префиксом /subscription для совместимости с фронтендом
+app.use('/api/subscription', configRoutes);
 
 // 3. Админ-панель (строго под префиксом /api/admin)
 app.use('/api/admin', adminRoutes);
@@ -46,12 +43,6 @@ app.use('/api/admin', adminRoutes);
 // 4. Платежная система (строго под префиксом /api/pay)
 app.use('/api/pay', paymentRoutes);
 
-// Прокси для Supabase (решает проблемы CORS в браузере)
-app.all('/api/supabase-proxy/*', async (req, res) => {
-  // ... логика проксирования (уже реализована ранее)
-});
-
-// Раздача статики сайта (React/Vite)
 const distPath = path.join(process.cwd(), 'dist');
 app.use(express.static(distPath));
 
@@ -66,9 +57,10 @@ async function start() {
   if (dbOk) {
     console.log('🚀 [BOOT] Инициализация сервисов...');
     botService.init();
-    MaintenanceService.init(); 
+    MaintenanceService.init();
   }
-  app.listen(PORT, '0.0.0.0', () => console.log(`✅ [BOOT] Сервер запущен на порту ${PORT}`));
+  app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));
 }
 
 start().catch(err => process.exit(1));
+
