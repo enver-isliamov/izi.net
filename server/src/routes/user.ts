@@ -46,12 +46,13 @@ router.get('/subscription/plans', async (req, res) => {
 // 💰 Покупка или продление подписки (Ядро системы)
 router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
   const { userId, planId, price, durationDays, serverType, deviceLimit, deviceName } = req.body;
+  const roundedPrice = Math.round(Number(price || 0)); // DATA-001: Ensure integer price
   if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
 
   try {
     // 1. Проверка баланса пользователя
     const { data: balanceData } = await supabase.from('balances').select('amount').eq('user_id', userId).maybeSingle();
-    if (!balanceData || balanceData.amount < price) return res.status(400).json({ error: 'Недостаточно средств на балансе' });
+    if (!balanceData || balanceData.amount < roundedPrice) return res.status(400).json({ error: 'Недостаточно средств на балансе' });
 
     // 2. Получение списка всех активных VPN-серверов
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
@@ -104,9 +105,27 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
       // Продление существующей подписки
       const newExpiry = new Date(existingSub.expires_at);
       newExpiry.setDate(newExpiry.getDate() + (durationDays || 30));
+      
+      // DATA-002: РЎР±СЂРѕСЃ С‚СЂР°С„РёРєР° РїСЂРё РїСЂРѕРґР»РµРЅРёРё
+      try {
+        const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+        const { data: servers } = await supabase.from('vpn_servers').select('id').eq('is_active', true);
+        if (servers) {
+          for (const s of servers) {
+            const { instance } = await getXuiForServer(s.id);
+            for (const dev of devices) {
+              await instance.resetClientTraffic(inboundId, dev.email).catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('вљ пёЏ [Renewal] Failed to reset traffic on X-UI:', err);
+      }
+    
       await supabase.from('subscriptions').update({
         expires_at: newExpiry.toISOString(),
         v2ray_config: JSON.stringify(devices),
+        traffic_used_mb: 0, // DATA-002: РЎР±СЂРѕСЃ РІ Р‘Р”
         updated_at: new Date().toISOString()
       }).eq('id', existingSub.id);
     } else {
@@ -125,12 +144,12 @@ router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
     }
 
     // 6. Списание денег с баланса
-    await supabase.from('balances').update({ amount: balanceData.amount - price }).eq('user_id', userId);
+    await supabase.from('balances').update({ amount: balanceData.amount - roundedPrice }).eq('user_id', userId);
     
     // 7. Запись в журнал транзакций
     await supabase.from('transactions').insert({
       user_id: userId,
-      amount: -price,
+      amount: -roundedPrice,
       currency: 'RUB',
       type: 'withdrawal',
       status: 'completed',

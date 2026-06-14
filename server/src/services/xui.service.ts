@@ -121,7 +121,7 @@ export class XUIService {
     const clientData = {
       id: targetInboundId,
       settings: JSON.stringify({
-        clients: [{ id: uuid, flow: 'xtls-rprx-vision', email: email, limitIp: 0, totalGB: limitBytes, expiryTime: expiryTime, enable: true }]
+        clients: [{ id: uuid, flow: 'xtls-rprx-vision', email: email, limitIp: 1 // CORE-007: Limit simultaneous sessions, totalGB: limitBytes, expiryTime: expiryTime, enable: true }]
       })
     };
 
@@ -268,6 +268,18 @@ export class XUIService {
       }
     } catch (err: any) {
       console.warn(`⚠️ [XUI] Reality key sync skipped for ${this.host}: ${err.message}`);
+    }
+  }
+
+  
+  async resetClientTraffic(inboundId: number, email: string): Promise<void> {
+    try {
+      await this.login();
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${encodeURIComponent(email)}`;
+      await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      console.log(`✅ [XUI] Traffic reset for ${email} on inbound ${inboundId}`);
+    } catch (err: any) {
+      console.warn(`⚠️ [XUI] Could not reset traffic for ${email} on inbound ${inboundId}: ${err.message}`);
     }
   }
 

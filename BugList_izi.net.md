@@ -10,21 +10,21 @@
 
 | ID | Название | Приоритет | Компонент | Срочность |
 |----|----------|-----------|-----------|-----------|
-| [SEC-001](#sec-001) | SQL-инъекция в поиске admin-панели | 🔴 P0 CRITICAL | `admin.py` | 0–24 ч |
-| [SEC-002](#sec-002) | Webhook платежей без проверки подписи | 🔴 P0 CRITICAL | `server.py` | 0–24 ч |
+| [x] [SEC-001](#sec-001) | SQL-инъекция в поиске admin-панели | 🔴 P0 CRITICAL | `admin.py` | 0–24 ч |
+| [x] [SEC-002](#sec-002) | Webhook платежей без проверки подписи | 🔴 P0 CRITICAL | `server.py` | 0–24 ч |
 | [SEC-003](#sec-003) | Hardcoded секреты в репозитории | 🔴 P0 CRITICAL | `config.py`, `.env` | 0–24 ч |
-| [SEC-004](#sec-004) | adminOnly middleware не проверяет роль | 🔴 P0 CRITICAL | `middleware/auth` | 0–24 ч |
+| [x] [SEC-004](#sec-004) | adminOnly middleware не проверяет роль | 🔴 P0 CRITICAL | `middleware/auth` | 0–24 ч |
 | [SEC-005](#sec-005) | JWT остаётся валидным после смены пароля | 🟠 P1 HIGH | `controllers/auth.js` | 24–48 ч |
 | [SEC-006](#sec-006) | XSS в списке пользователей admin-панели | 🟡 P2 MEDIUM | `admin-panel/UsersList.js` | 48–72 ч |
-| [CORE-001](#core-001) | Покупка подписки не создаёт VPN-ключ | 🔴 P0 CRITICAL | `subscription/buy` | 0–24 ч |
-| [CORE-002](#core-002) | ReferenceError в getInboundLink | 🔴 P0 CRITICAL | `XUIService` | 0–24 ч |
-| [CORE-003](#core-003) | checkConfig() не существует в XUIService | 🔴 P0 CRITICAL | `XUIService` | 0–24 ч |
+| [x] [CORE-001](#core-001) | Покупка подписки не создаёт VPN-ключ | 🔴 P0 CRITICAL | `subscription/buy` | 0–24 ч |
+| [x] [CORE-002](#core-002) | ReferenceError в getInboundLink | 🔴 P0 CRITICAL | `XUIService` | 0–24 ч |
+| [x] [CORE-003](#core-003) | checkConfig() не существует в XUIService | 🔴 P0 CRITICAL | `XUIService` | 0–24 ч |
 | [CORE-004](#core-004) | Race condition при выдаче конфигов (IP) | 🔴 P0 CRITICAL | `config_manager.py` | 24–48 ч |
 | [CORE-005](#core-005) | Race condition при покупке подписки | 🟠 P1 HIGH | `subscription/activate` | 24–48 ч |
 | [CORE-006](#core-006) | Race condition при учёте трафика | 🟡 P2 MEDIUM | `middleware/traffic.js` | 48–72 ч |
-| [CORE-007](#core-007) | Лимит одновременных сессий не применяется | 🟡 P2 MEDIUM | `configController` | 48–72 ч |
-| [DATA-001](#data-001) | Цены тарифов хранятся как float | 🔴 P0 CRITICAL | БД / `tariffs` | 0–24 ч |
-| [DATA-002](#data-002) | Трафик не сбрасывается при продлении | 🔴 P0 CRITICAL | `services/subscription.js` | 0–24 ч |
+| [x] [CORE-007](#core-007) | Лимит одновременных сессий не применяется | 🟡 P2 MEDIUM | `configController` | 48–72 ч |
+| [x] [DATA-001](#data-001) | Цены тарифов хранятся как float | 🔴 P0 CRITICAL | БД / `tariffs` | 0–24 ч |
+| [x] [DATA-002](#data-002) | Трафик не сбрасывается при продлении | 🔴 P0 CRITICAL | `services/subscription.js` | 0–24 ч |
 | [DATA-003](#data-003) | Сброс лимитов по локальному времени, не UTC | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
 | [DATA-004](#data-004) | Naive datetime вместо aware (таймзоны) | 🟠 P1 HIGH | `models.py` / `server.py` | 24–48 ч |
 | [DATA-005](#data-005) | Cron сброса трафика падает без обработки ошибок | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
@@ -658,17 +658,17 @@ function validateConfigTemplate(template) {
 
 ### Фаза 0 — Немедленно (0–24 часа) · Не деплоить в production до выполнения
 1. Ротировать все секреты (BOT_TOKEN, JWT_SECRET, ключи ЮКасса)
-2. Закрыть SQL-инъекцию (`SEC-001`)
-3. Добавить проверку подписи webhook (`SEC-002`)
-4. Исправить adminOnly middleware (`SEC-004`)
-5. Привести цены к integer (`DATA-001`)
-6. Реализовать provisioning в `/subscription/buy` (`CORE-001`)
-7. Исправить ReferenceError в getInboundLink (`CORE-002`)
+2. [x] Закрыть SQL-инъекцию (`SEC-001`)
+3. [x] Добавить проверку подписи webhook (`SEC-002`)
+4. [x] Исправить adminOnly middleware (`SEC-004`)
+5. [x] Привести цены к integer (`DATA-001`)
+6. [x] Реализовать provisioning в `/subscription/buy` (`CORE-001`)
+7. [x] Исправить ReferenceError в getInboundLink (`CORE-002`)
 
 ### Фаза 1 — Неделя 1 · Стабилизация
 - Race condition в IP-выдаче (`CORE-004`) → перейти на PostgreSQL
 - Race condition при покупке (`CORE-005`) → транзакции SERIALIZABLE
-- Сброс трафика при продлении (`DATA-002`)
+- [x] РЎР±СЂРѕСЃ С‚СЂР°С„РёРєР° РїСЂРё РїСЂРѕРґР»РµРЅРёРё (`DATA-002`)
 - Инвалидация JWT (`SEC-005`)
 - Rate limiting (`PERF-001`)
 - Retry в cron (`DATA-005`)
