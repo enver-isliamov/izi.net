@@ -121,7 +121,8 @@ export class XUIService {
     const clientData = {
       id: targetInboundId,
       settings: JSON.stringify({
-        clients: [{ id: uuid, flow: 'xtls-rprx-vision', email: email, limitIp: 1 // CORE-007: Limit simultaneous sessions, totalGB: limitBytes, expiryTime: expiryTime, enable: true }]
+        clients: [{ id: uuid, flow: 'xtls-rprx-vision', email: email, limitIp: 1, // CORE-007: Limit simultaneous sessions
+        totalGB: limitBytes, expiryTime: expiryTime, enable: true }]
       })
     };
 
