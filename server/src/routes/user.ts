@@ -114,113 +114,153 @@ async function handleSubscriptionBuy(req: any, res: any) {
       : clampInt(deviceLimit, 1, globalDeviceLimit);
     const price = plan.pricePerDevice * requestedDeviceCount;
 
-    // PRICE-001: Client price/duration are display-only; billing uses server settings and planId.
-    const { data: balanceData } = await supabase.from('balances').select('amount').eq('user_id', userId).maybeSingle();
-    if (!balanceData || Number(balanceData.amount) < price) return res.status(400).json({ error: 'Недостаточно средств на балансе' });
+    // CORE-005: Atomic balance deduction using RPC
+    const { data: deductSuccess, error: deductError } = await supabase.rpc('deduct_user_balance', { 
+      p_user_id: userId, 
+      p_amount: price 
+    });
 
-    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
-
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + plan.days);
-
-    let devices: VpnDevice[] = [];
-    let subscriptionExpiresAt = expiresAt;
-
-    if (existingSub) {
-      devices = existingDevices;
-
-      if (forceNew) {
-        if (devices.length >= globalDeviceLimit) return res.status(400).json({ error: `Достигнут лимит устройств (${globalDeviceLimit})` });
-        devices.push(await provisionDeviceOnServers({
-          userId,
-          activeServers,
-          inboundId,
-          expiresAt,
-          trafficLimitMb,
-          serverType: normalizedServerType,
-          label: deviceName || `Устройство ${devices.length + 1}`,
-          id: `device_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-        }));
-        subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
-      } else if (targetDeviceId) {
-        const targetIdx = devices.findIndex((device) => device.id === targetDeviceId);
-        if (targetIdx === -1) return res.status(404).json({ error: 'Устройство не найдено' });
-        devices[targetIdx] = await provisionDeviceOnServers({
-          userId,
-          activeServers,
-          inboundId,
-          expiresAt,
-          trafficLimitMb,
-          serverType: devices[targetIdx].serverType || normalizedServerType,
-          label: deviceName || devices[targetIdx].label || 'Устройство',
-          id: devices[targetIdx].id
-        });
-        subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
-      } else {
-        const currentExpiry = new Date(existingSub.expires_at);
-        const renewalBase = currentExpiry.getTime() > now.getTime() ? currentExpiry : now;
-        subscriptionExpiresAt = new Date(renewalBase);
-        subscriptionExpiresAt.setDate(subscriptionExpiresAt.getDate() + plan.days);
-        devices = devices.map((device) => ({ ...device, expiresAt: subscriptionExpiresAt.toISOString() }));
-      }
-
-      const { error: updateError } = await supabase.from('subscriptions').update({
-        expires_at: subscriptionExpiresAt.toISOString(),
-        v2ray_config: JSON.stringify(devices),
-        device_limit: Math.max(Number(existingSub.device_limit || 0), globalDeviceLimit),
-        updated_at: new Date().toISOString()
-      }).eq('id', existingSub.id);
-      if (updateError) throw updateError;
-    } else {
-      for (let i = 0; i < requestedDeviceCount; i += 1) {
-        devices.push(await provisionDeviceOnServers({
-          userId,
-          activeServers,
-          inboundId,
-          expiresAt,
-          trafficLimitMb,
-          serverType: normalizedServerType,
-          label: i === 0 ? (deviceName || 'Основное устройство') : `Устройство ${i + 1}`,
-          id: i === 0 ? 'primary' : `device_${Date.now()}_${i}`
-        }));
-      }
-
-      const { error: insertError } = await supabase.from('subscriptions').insert({
-        user_id: userId,
-        status: 'active',
-        plan_type: planId,
-        expires_at: expiresAt.toISOString(),
-        v2ray_config: JSON.stringify(devices),
-        traffic_limit_mb: trafficLimitMb,
-        traffic_used_mb: 0,
-        device_limit: globalDeviceLimit,
-        server_id: activeServers[0].id
-      });
-      if (insertError) throw insertError;
+    if (deductError || !deductSuccess) {
+      return res.status(400).json({ error: 'Недостаточно средств на балансе или ошибка списания' });
     }
 
-    const { error: balanceError } = await supabase.from('balances').update({ amount: Number(balanceData.amount) - price }).eq('user_id', userId);
-    if (balanceError) throw balanceError;
+    try {
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
 
-    const { error: txError } = await supabase.from('transactions').insert({
-      user_id: userId,
-      amount: -price,
-      currency: 'RUB',
-      type: 'withdrawal',
-      status: 'completed',
-      description: `Покупка подписки: ${planId}`
-    });
-    if (txError) console.error('Subscription transaction journal failed:', txError.message);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + plan.days);
 
-    return res.json({ success: true, message: 'Подписка успешно оформлена', charged: price, devices });
+      let devices: VpnDevice[] = [];
+      let subscriptionExpiresAt = expiresAt;
+
+      if (existingSub) {
+        devices = existingDevices;
+
+        if (forceNew) {
+          if (devices.length >= globalDeviceLimit) throw new Error(`Достигнут лимит устройств (${globalDeviceLimit})`);
+          const newDevice = await provisionDeviceOnServers({
+            userId,
+            activeServers,
+            inboundId,
+            expiresAt,
+            trafficLimitMb,
+            serverType: normalizedServerType,
+            label: deviceName || `Устройство ${devices.length + 1}`,
+            id: `device_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+          });
+          
+          // CORE-004: Atomic device append
+          await supabase.rpc('append_vpn_device', { 
+            p_sub_id: existingSub.id, 
+            p_device_data: newDevice 
+          });
+          
+          subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
+          devices.push(newDevice);
+        } else if (targetDeviceId) {
+          const targetIdx = devices.findIndex((device) => device.id === targetDeviceId);
+          if (targetIdx === -1) throw new Error('Устройство не найдено');
+          
+          const updatedDevice = await provisionDeviceOnServers({
+            userId,
+            activeServers,
+            inboundId,
+            expiresAt,
+            trafficLimitMb,
+            serverType: devices[targetIdx].serverType || normalizedServerType,
+            label: deviceName || devices[targetIdx].label || 'Устройство',
+            id: devices[targetIdx].id
+          });
+          
+          devices[targetIdx] = updatedDevice;
+          subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
+        } else {
+          // Renewal
+          const currentExpiry = new Date(existingSub.expires_at);
+          const renewalBase = currentExpiry.getTime() > now.getTime() ? currentExpiry : now;
+          subscriptionExpiresAt = new Date(renewalBase);
+          subscriptionExpiresAt.setDate(subscriptionExpiresAt.getDate() + plan.days);
+          devices = devices.map((device) => ({ ...device, expiresAt: subscriptionExpiresAt.toISOString() }));
+          
+          // DATA-002: Reset traffic on renewal
+          for (const server of activeServers) {
+            const { instance } = await getXuiForServer(server.id);
+            for (const dev of devices) {
+              await instance.resetClientTraffic(inboundId, dev.email).catch(() => {});
+            }
+          }
+        }
+
+        // Final update for expiry and config (if not forceNew which was handled atomically)
+        if (!forceNew) {
+           const { error: updateError } = await supabase.from('subscriptions').update({
+            expires_at: subscriptionExpiresAt.toISOString(),
+            v2ray_config: JSON.stringify(devices),
+            traffic_used_mb: targetDeviceId ? undefined : 0, // Reset traffic on renewal
+            device_limit: Math.max(Number(existingSub.device_limit || 0), globalDeviceLimit),
+            updated_at: new Date().toISOString()
+          }).eq('id', existingSub.id);
+          if (updateError) throw updateError;
+        } else {
+           // If forceNew, we still need to update the subscription expiry if it changed
+           await supabase.from('subscriptions').update({
+             expires_at: subscriptionExpiresAt.toISOString(),
+             updated_at: new Date().toISOString()
+           }).eq('id', existingSub.id);
+        }
+      } else {
+        // New Subscription
+        for (let i = 0; i < requestedDeviceCount; i += 1) {
+          devices.push(await provisionDeviceOnServers({
+            userId,
+            activeServers,
+            inboundId,
+            expiresAt,
+            trafficLimitMb,
+            serverType: normalizedServerType,
+            label: i === 0 ? (deviceName || 'Основное устройство') : `Устройство ${i + 1}`,
+            id: i === 0 ? 'primary' : `device_${Date.now()}_${i}`
+          }));
+        }
+
+        const { error: insertError } = await supabase.from('subscriptions').insert({
+          user_id: userId,
+          status: 'active',
+          plan_type: planId,
+          expires_at: expiresAt.toISOString(),
+          v2ray_config: JSON.stringify(devices),
+          traffic_limit_mb: trafficLimitMb,
+          traffic_used_mb: 0,
+          device_limit: globalDeviceLimit,
+          server_id: activeServers[0].id
+        });
+        if (insertError) throw insertError;
+      }
+
+      // Record transaction
+      await supabase.from('transactions').insert({
+        user_id: userId,
+        amount: -price,
+        currency: 'RUB',
+        type: 'withdrawal',
+        status: 'completed',
+        description: `Покупка подписки: ${planId}`
+      });
+
+      return res.json({ success: true, message: 'Подписка успешно оформлена', charged: price, devices });
+    } catch (err) {
+      // ROLLBACK: Refund balance if anything failed after deduction
+      console.error('Provisioning failed, refunding balance:', err);
+      await supabase.rpc('refund_user_balance', { p_user_id: userId, p_amount: price });
+      throw err;
+    }
   } catch (err: any) {
     console.error('Subscription purchase failed:', err);
     return res.status(500).json({ error: err.message });
   }
 }
 
-// 💰 Получение списка тарифных планов
 router.get('/subscription/plans', async (req, res) => {
   try {
     const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
@@ -248,126 +288,8 @@ router.get('/subscription/plans', async (req, res) => {
 // 💰 Покупка или продление подписки (Ядро системы)
 router.post('/subscription/buy', authenticateUser, async (req: any, res) => {
   return handleSubscriptionBuy(req, res);
-
-  const { userId, planId, price, durationDays, serverType, deviceLimit, deviceName } = req.body;
-  const roundedPrice = Math.round(Number(price || 0)); // DATA-001: Ensure integer price
-  if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
-
-  try {
-    // 1. Проверка баланса пользователя
-    const { data: balanceData } = await supabase.from('balances').select('amount').eq('user_id', userId).maybeSingle();
-    if (!balanceData || balanceData.amount < roundedPrice) return res.status(400).json({ error: 'Недостаточно средств на балансе' });
-
-    // 2. Получение списка всех активных VPN-серверов
-    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
-
-    // 3. Генерация уникальных данных для клиента
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-    const trafficLimitMb = 102400; // Стандарт 100 ГБ
-    const limitBytes = trafficLimitMb * 1024 * 1024;
-    const email = `user_${userId.slice(0, 8)}_${Math.random().toString(36).substring(2, 6)}`;
-    const uuid = crypto.randomUUID();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + (durationDays || 30));
-
-    // 4. Создание клиента на КАЖДОМ активном сервере (Синхронная работа)
-    let configLines: string[] = [];
-    for (const server of activeServers) {
-      try {
-        const { instance } = await getXuiForServer(server.id);
-        // Метод addClient теперь сам находит Reality инбаунд на 443 порту
-        const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAt.getTime(), limitBytes);
-        if (rawConfig) {
-          // Добавляем имя сервера в комментарий ссылки для удобства юзера
-          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
-          configLines.push(configWithSuffix);
-        }
-      } catch (e: any) {
-        console.error(`❌ Ошибка создания на сервере ${server.name}:`, e.message);
-      }
-    }
-
-    if (configLines.length === 0) throw new Error('Не удалось создать конфигурацию ни на одном сервере. Проверьте связь с панелями.');
-
-    const devices: VpnDevice[] = [{
-      id: 'primary',
-      label: deviceName || 'Основное устройство',
-      config: configLines.join('\n'),
-      email,
-      uuid,
-      expiresAt: expiresAt.toISOString(),
-      serverType: serverType || 'WIFI',
-      trafficUsedBytes: 0,
-      serverId: activeServers[0].id
-    }];
-
-    // 5. Сохранение подписки в Supabase
-    const { data: existingSub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
-    
-    if (existingSub) {
-      // Продление существующей подписки
-      const newExpiry = new Date(existingSub.expires_at);
-      newExpiry.setDate(newExpiry.getDate() + (durationDays || 30));
-      
-      // DATA-002: РЎР±СЂРѕСЃ С‚СЂР°С„РёРєР° РїСЂРё РїСЂРѕРґР»РµРЅРёРё
-      try {
-        const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-        const { data: servers } = await supabase.from('vpn_servers').select('id').eq('is_active', true);
-        if (servers) {
-          for (const s of servers) {
-            const { instance } = await getXuiForServer(s.id);
-            for (const dev of devices) {
-              await instance.resetClientTraffic(inboundId, dev.email).catch(() => {});
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('вљ пёЏ [Renewal] Failed to reset traffic on X-UI:', err);
-      }
-    
-      await supabase.from('subscriptions').update({
-        expires_at: newExpiry.toISOString(),
-        v2ray_config: JSON.stringify(devices),
-        traffic_used_mb: 0, // DATA-002: РЎР±СЂРѕСЃ РІ Р‘Р”
-        updated_at: new Date().toISOString()
-      }).eq('id', existingSub.id);
-    } else {
-      // Создание новой подписки
-      await supabase.from('subscriptions').insert({
-        user_id: userId,
-        status: 'active',
-        plan_type: planId,
-        expires_at: expiresAt.toISOString(),
-        v2ray_config: JSON.stringify(devices),
-        traffic_limit_mb: trafficLimitMb,
-        traffic_used_mb: 0,
-        device_limit: deviceLimit || 2,
-        server_id: activeServers[0].id
-      });
-    }
-
-    // 6. Списание денег с баланса
-    await supabase.from('balances').update({ amount: balanceData.amount - roundedPrice }).eq('user_id', userId);
-    
-    // 7. Запись в журнал транзакций
-    await supabase.from('transactions').insert({
-      user_id: userId,
-      amount: -roundedPrice,
-      currency: 'RUB',
-      type: 'withdrawal',
-      status: 'completed',
-      description: `Покупка подписки: ${planId}`
-    });
-
-    res.json({ success: true, message: 'Подписка успешно оформлена' });
-  } catch (err: any) {
-    console.error('❌ Ошибка покупки подписки:', err);
-    res.status(500).json({ error: err.message });
-  }
 });
 
-// 🔄 Перегенерация ключа для конкретного устройства (Безопасность)
 router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: any, res) => {
   const { deviceId } = req.params;
   const userId = req.user.id;
