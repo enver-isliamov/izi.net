@@ -17,6 +17,7 @@ create table if not exists public.users (
   referral_code text unique,
   referred_by uuid references public.users(id),
   role text default 'user',
+  is_pro boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
@@ -394,3 +395,17 @@ begin
   return true;
 end;
 $$ language plpgsql security definer;
+
+
+-- 7. МИГРАЦИИ (для существующих баз)
+
+-- Добавить колонку is_pro если её нет (ADMIN-001)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_pro') THEN
+    ALTER TABLE public.users ADD COLUMN is_pro boolean DEFAULT false;
+    RAISE NOTICE 'Added is_pro column to users table';
+  ELSE
+    RAISE NOTICE 'is_pro column already exists';
+  END IF;
+END $$;

@@ -35,6 +35,9 @@
 | [x] [INFRA-002](#infra-002) | Конфиги X-UI не удаляются при деактивации | 🟢 P3 LOW | `subscriptionService.deactivate` | 72+ ч |
 | [x] [INFRA-003](#infra-003) | Повреждение конфига при сохранении спецсимволов | 🟡 P2 MEDIUM | Admin → config templates | 48–72 ч |
 | [x] [PERF-001](#perf-001) | Нет rate limiting на API | 🟠 P1 HIGH | `server.py` / `app.py` | 24–48 ч |
+| [x] [ADMIN-001](#admin-001) | Нет колонки is_pro в users | 🔴 P0 CRITICAL | `users` table | 0–24 ч |
+| [x] [ADMIN-002](#admin-002) | Auth middleware проверяет несуществующую profiles | 🟠 P1 HIGH | `auth.ts` | 24–48 ч |
+| [x] [ADMIN-003](#admin-003) | XUI_SESSION_TTL слишком короткий | 🟠 P1 HIGH | `xui.service.ts` | 24–48 ч |
 
 ---
 
@@ -664,6 +667,9 @@ function validateConfigTemplate(template) {
 5. [x] Привести цены к integer (`DATA-001`)
 6. [x] Реализовать provisioning в `/subscription/buy` (`CORE-001`)
 7. [x] Исправить ReferenceError в getInboundLink (`CORE-002`)
+8. [x] Добавить колонку is_pro в users (`ADMIN-001`)
+9. [x] Исправить auth middleware (`ADMIN-002`)
+10. [x] Увеличить XUI_SESSION_TTL (`ADMIN-003`)
 
 ### Фаза 1 — Неделя 1 · Стабилизация
 - [x] ${match.substring(2)} → перейти на PostgreSQL

@@ -14,13 +14,10 @@ export async function adminOnly(req: any, res: any, next: any) {
     return next();
   }
 
-  // Проверяем и role (из users), и is_admin (из profiles) для надежности
-  const [userRes, profileRes] = await Promise.all([
-    supabase.from('users').select('role').eq('id', user.id).maybeSingle(),
-    supabase.from('profiles').select('is_admin').eq('id', user.id).maybeSingle()
-  ]);
+  // Проверяем role из users (таблица profiles может не существовать)
+  const { data: userRes } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle();
 
-  const isAdmin = userRes.data?.role === 'admin' || userRes.data?.role === 'superadmin' || profileRes.data?.is_admin === true;
+  const isAdmin = userRes?.role === 'admin' || userRes?.role === 'superadmin';
 
   if (!isAdmin) {
     console.warn(`👮 [Auth] Доступ запрещен для ${user.email}`);
