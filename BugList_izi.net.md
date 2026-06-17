@@ -29,12 +29,12 @@
 | [x] [DATA-004](#data-004) | Naive datetime вместо aware (таймзоны) | 🟠 P1 HIGH | `models.py` / `server.py` | 24–48 ч |
 | [x] [DATA-005](#data-005) | Cron сброса трафика падает без обработки ошибок | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
 | [DATA-006](#data-006) | Некорректная валидация даты подписки в admin | 🟠 P1 HIGH | `admin.updateSubscription` | 24–48 ч |
-| [CACHE-001](#cache-001) | Устаревший конфиг подписки из-за кэша | 🟠 P1 HIGH | Nginx / backend | 24–48 ч |
+| [x] [CACHE-001](#cache-001) | Устаревший конфиг подписки из-за кэша | 🟠 P1 HIGH | Nginx / backend | 24–48 ч |
 | [x] [CACHE-002](#cache-002) | Устаревший трафик в дашборде пользователя | 🟢 P3 LOW | `panel/Dashboard.js` | 72+ ч |
-| [INFRA-001](#infra-001) | Утечка файловых дескрипторов при генерации ключей | 🟠 P1 HIGH | `wireguard.py` | 48–72 ч |
+| [x] [INFRA-001](#infra-001) | Утечка файловых дескрипторов при генерации ключей | 🟠 P1 HIGH | `wireguard.py` | 48–72 ч |
 | [x] [INFRA-002](#infra-002) | Конфиги X-UI не удаляются при деактивации | 🟢 P3 LOW | `subscriptionService.deactivate` | 72+ ч |
 | [x] [INFRA-003](#infra-003) | Повреждение конфига при сохранении спецсимволов | 🟡 P2 MEDIUM | Admin → config templates | 48–72 ч |
-| [PERF-001](#perf-001) | Нет rate limiting на API | 🟠 P1 HIGH | `server.py` / `app.py` | 24–48 ч |
+| [x] [PERF-001](#perf-001) | Нет rate limiting на API | 🟠 P1 HIGH | `server.py` / `app.py` | 24–48 ч |
 
 ---
 
@@ -676,7 +676,7 @@ function validateConfigTemplate(template) {
 ### Фаза 2 — Неделя 2–3 · Качество
 - [x] Все таймзоны → UTC (`DATA-003`, `DATA-004`)
 - [x] Кэширование конфигов (`CACHE-001`)
-- Утечка дескрипторов (`INFRA-001`)
+- [x] Утечка дескрипторов (`INFRA-001`)
 - [x] XSS (`SEC-006`)
 - [x] Валидация конфигов в admin (`INFRA-003`)
 
