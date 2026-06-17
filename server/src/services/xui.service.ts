@@ -62,6 +62,9 @@ export class XUIService {
     const loginData = { username: this.username, password: this.password };
 
     try {
+      // ADMIN-009: Сначала GET для получения session cookie (CSRF protection)
+      await axios.get(loginUrl, getRequestConfig(loginUrl)).catch(() => {});
+
       const response = await axios.post(loginUrl, loginData, getRequestConfig(loginUrl, {
         'Content-Type': 'application/json'
       }));
