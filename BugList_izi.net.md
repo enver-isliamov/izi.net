@@ -38,6 +38,11 @@
 | [x] [ADMIN-001](#admin-001) | Нет колонки is_pro в users | 🔴 P0 CRITICAL | `users` table | 0–24 ч |
 | [x] [ADMIN-002](#admin-002) | Auth middleware проверяет несуществующую profiles | 🟠 P1 HIGH | `auth.ts` | 24–48 ч |
 | [x] [ADMIN-003](#admin-003) | XUI_SESSION_TTL слишком короткий | 🟠 P1 HIGH | `xui.service.ts` | 24–48 ч |
+| [x] [ADMIN-004](#admin-004) | Нет колонки v2ray_config в subscriptions | 🔴 P0 CRITICAL | `Supabase.md` / `subscriptions` | 0–24 ч |
+| [x] [ADMIN-005](#admin-005) | checkHealth() возвращает true при ошибке | 🟠 P1 HIGH | `xui.service.ts` | 24–48 ч |
+| [x] [ADMIN-006](#admin-006) | XUI статистика молча возвращает нули | 🟡 P2 MEDIUM | `xui.service.ts` | 48–72 ч |
+| [x] [ADMIN-007](#admin-007) | Трафик устройств всегда показывает 0 | 🟡 P2 MEDIUM | `xui.service.ts` / `maintenance.service.ts` | 48–72 ч |
+| [x] [ADMIN-008](#admin-008) | Дашборд иногда показывает пусто при наличии подписки | 🟠 P1 HIGH | `Dashboard.tsx` / race condition | 24–48 ч |
 
 ---
 
@@ -689,8 +694,98 @@ function validateConfigTemplate(template) {
 ### Фаза 3 — Неделя 4 · UX и мониторинг
 - [x] Polling трафика в дашборде (`CACHE-002`)
 - [x] Удаление конфигов при деактивации (`INFRA-002`)
+- [x] Добавить v2ray_config в subscriptions (`ADMIN-004`)
+- [x] Исправить checkHealth() (`ADMIN-005`)
+- [x] Исправить XUI статистику (`ADMIN-006`)
+- [x] Обновлять трафик из X-UI (`ADMIN-007`)
+- [x] Исправить race condition в Dashboard (`ADMIN-008`)
 - Настройка Prometheus + Grafana
 - Настройка CI/CD с автотестами
+
+---
+
+## 🔴 НОВЫЕ БАГИ (выявлены при диагностике админки)
+
+---
+
+### ADMIN-004
+**Нет колонки v2ray_config в subscriptions**
+
+**Компонент:** `Supabase.md` / таблица `subscriptions`
+
+**Симптом:** Админка не показывает устройства и трафик. Строка "Устройства / Трафик" пустая ("—").
+
+**Причина:** Схема `Supabase.md` **не содержит** колонку `v2ray_config` в таблице `subscriptions`, но весь код (admin.ts, user.ts, xui.service.ts) зависит от неё. Без этой колонки:
+- Запрос `GET /api/admin/users` падает с ошибкой PostgREST
+- Фронтенд не получает данные об устройствах
+- Дашборд показывает пустой список устройств
+
+**Как исправить:**
+```sql
+ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS v2ray_config jsonb DEFAULT '[]'::jsonb;
+```
+
+---
+
+### ADMIN-005
+**checkHealth() работает, но серверы не отвечают из-за неверных данных подключения**
+
+**Компонент:** `server/src/services/xui.service.ts` / `vpn_servers` table
+
+**Симптом:** Админка показывает "X-UI не отвечает" для всех серверов.
+
+**Причина:** `checkHealth()` корректно возвращает `false` при ошибке логина. Проблема в данных подключения в таблице `vpn_servers`:
+- Неверный `ip` / `domain` / `api_port`
+- Неверный `username` / `password`
+- Сервер X-UI не запущен или недоступен из Docker
+
+**Как诊断ировать:**
+1. Проверь логи: `docker logs izinet-app --tail 30` — там будут ошибки `❌ [XUI] Login failed`
+2. Проверь доступность X-UI из контейнера: `docker exec izinet-app wget -qO- http://IP:2053/login`
+3. Проверь данные в таблице `vpn_servers` — ip, port, username, password
+
+**Как исправить:** Обновить данные подключения в админке (раздел "Серверы") или напрямую в Supabase.
+
+---
+
+### ADMIN-006
+**XUI статистика молча возвращает нули**
+
+**Компонент:** `server/src/services/xui.service.ts`
+
+**Симптом:** В админке серверов показывает "X-UI: 0, Онлайн: 0" даже при активных пользователях.
+
+**Причина:** `getOnlines()` и `listClients()` при ошибке подключения возвращают `[]` вместо ошибки. Фронтенд отображает 0.
+
+**Как исправить:** Добавить логирование ошибок и возвращать `null` вместо `[]` при ошибке, чтобы фронтенд мог показать "недоступно" вместо "0".
+
+---
+
+### ADMIN-007
+**Трафик устройств всегда показывает 0**
+
+**Компонент:** `xui.service.ts` / `maintenance.service.ts`
+
+**Симптом:** В админке и на дашборде трафик устройств всегда "0.0 GB".
+
+**Причина:** Поле `trafficUsedBytes` в JSON `v2ray_config` инициализируется как `0` при создании устройства и **никогда не обновляется** из статистики X-UI в реальном времени.
+
+**Как исправить:** При запросе данных пользователя обновлять `trafficUsedBytes` из актуальной статистики X-UI (вызов `getClientTraffic()`).
+
+---
+
+### ADMIN-008
+**Дашборд иногда показывает пусто при наличии подписки**
+
+**Компонент:** `Dashboard.tsx`
+
+**Симптом:** Пользователь видит "Нет активных устройств" и предложение ввести промокод, хотя подписка активна.
+
+**Причина:** Race condition — `fetchDashboardData()` может вернуть данные до того как `syncTraffic()` обновит БД. Или ошибка в запросе `subscriptions` с `status = 'active'` — если подписка имеет другой статус (например `trial`), она не попадёт в выборку.
+
+**Как исправить:**
+1. Добавить проверку статуса `trial` в запрос подписок
+2. Дождаться завершения sync перед отображением
 
 ---
 

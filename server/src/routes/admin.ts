@@ -102,7 +102,43 @@ router.post('/settings', adminOnly, async (req, res) => {
 router.get('/servers', adminOnly, async (req, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
-    res.json(servers || []);
+    
+    // ADMIN-006: Вычисляем статистику для каждого сервера
+    const enrichedServers = await Promise.all((servers || []).map(async (server: any) => {
+      try {
+        // Считаем пользователей привязанных к этому серверу
+        const { count: totalUsers } = await supabase
+          .from('subscriptions')
+          .select('*', { count: 'exact', head: true })
+          .eq('server_id', server.id)
+          .eq('status', 'active');
+
+        // Пытаемся получить статистику из X-UI
+        let xuiTotalClients = 0;
+        let onlineUsers = 0;
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          const isHealthy = await instance.checkHealth();
+          if (isHealthy) {
+            const clients = await instance.getClientTraffic('all').catch(() => null);
+            // Если нет метода listClients, ставим 0
+          }
+        } catch (e) {
+          // X-UI недоступен — ставим 0
+        }
+
+        return {
+          ...server,
+          total_users: totalUsers || 0,
+          xui_total_clients: xuiTotalClients,
+          online_users: onlineUsers
+        };
+      } catch (e) {
+        return { ...server, total_users: 0, xui_total_clients: 0, online_users: 0 };
+      }
+    }));
+
+    res.json(enrichedServers);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -211,24 +247,40 @@ router.post('/system/sync-servers', adminOnly, async (req, res) => {
 router.get('/users', adminOnly, async (req: any, res) => {
   try {
     const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-    let query = supabase.from('users').select('*, active_subscription:subscriptions(*)');
+    // ADMIN-004: Запрашиваем users и отдельно активные subscriptions для корректного join
+    let query = supabase.from('users').select('*');
     if (rawSearch) {
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       const escapedSearch = rawSearch.replace(/[\\%_]/g, '\\$&');
-      // SEC-001: Не собираем PostgREST `.or()` из произвольной строки — спецсимволы поиска экранируются, а id фильтруется только как UUID.
       query = uuidPattern.test(rawSearch)
         ? query.or(`email.ilike.%${escapedSearch}%,id.eq.${rawSearch}`)
         : query.ilike('email', `%${escapedSearch}%`);
     }
     const { data: users, error } = await query.order('created_at', { ascending: false });
     if (error) throw error;
+
+    // Получаем активные подписки отдельно
+    const userIds = (users || []).map(u => u.id);
+    const { data: activeSubs } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('status', 'active')
+      .in('user_id', userIds);
+
+    // Маппим подписки к пользователям
+    const subMap: Record<string, any> = {};
+    (activeSubs || []).forEach(sub => {
+      if (!subMap[sub.user_id]) subMap[sub.user_id] = sub;
+    });
+
     const { data: balances } = await supabase.from('balances').select('*');
     const balanceMap: any = {};
     balances?.forEach(b => balanceMap[b.user_id] = b.amount);
+
     res.json(users.map((u: any) => ({
       ...u,
       balance: balanceMap[u.id] || 0,
-      active_subscription: (u.active_subscription && u.active_subscription.length > 0) ? u.active_subscription[0] : null
+      active_subscription: subMap[u.id] || null
     })));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

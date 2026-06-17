@@ -58,6 +58,7 @@ create table if not exists public.subscriptions (
   devices_connected integer default 0,
   server_type text check (server_type in ('lte', 'wifi')) default 'wifi',
   period_months integer default 1,
+  v2ray_config jsonb default '[]'::jsonb,
   expires_at timestamp with time zone not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -407,5 +408,16 @@ BEGIN
     RAISE NOTICE 'Added is_pro column to users table';
   ELSE
     RAISE NOTICE 'is_pro column already exists';
+  END IF;
+END $$;
+
+-- Добавить колонку v2ray_config если её нет (ADMIN-004)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscriptions' AND column_name = 'v2ray_config') THEN
+    ALTER TABLE public.subscriptions ADD COLUMN v2ray_config jsonb DEFAULT '[]'::jsonb;
+    RAISE NOTICE 'Added v2ray_config column to subscriptions table';
+  ELSE
+    RAISE NOTICE 'v2ray_config column already exists';
   END IF;
 END $$;
