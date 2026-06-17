@@ -89,7 +89,17 @@ export class XUIService {
     try {
       return JSON.parse(value) as T;
     } catch (err) {
+      console.warn(`⚠️ [XUI] Invalid JSON detected, using fallback:`, (err as Error).message);
       return fallback;
+    }
+  }
+
+  private validateJsonOrThrow(value: string, fieldName: string): void {
+    if (!value || value.trim() === '') return;
+    try {
+      JSON.parse(value);
+    } catch (err) {
+      throw new Error(`INFRA-003: Invalid JSON in ${fieldName}: ${(err as Error).message}`);
     }
   }
 
@@ -217,6 +227,12 @@ export class XUIService {
 
   async updateSettings(settings: XuiSettings): Promise<void> {
     await this.login();
+
+    // INFRA-003: Validate xrayTemplateConfig before saving
+    if (settings.xrayTemplateConfig) {
+      this.validateJsonOrThrow(settings.xrayTemplateConfig, 'xrayTemplateConfig');
+    }
+
     const candidates = [
       `${this.host}${this.basePath}/panel/api/server/updateConfig`,
       `${this.host}${this.basePath}/panel/api/server/updateXrayConfig`

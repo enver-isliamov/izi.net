@@ -183,6 +183,19 @@ export default function Dashboard() {
     }
   }, [user?.id]);
 
+  // CACHE-002: Poll traffic data every 30 seconds
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const pollInterval = setInterval(() => {
+      if (!isFetching.current) {
+        fetchDashboardData(false);
+      }
+    }, 30000);
+
+    return () => clearInterval(pollInterval);
+  }, [user?.id]);
+
   useEffect(() => {
     // Check URL params for auto-open wizard
     const action = searchParams.get('action');

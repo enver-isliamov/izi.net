@@ -7,6 +7,7 @@ import { RoutingService } from './routing.service';
 export class MaintenanceService {
   private static interval: NodeJS.Timeout | null = null;
   private static isSyncing = false;
+  private static isSyncingServers = false;
 
   static init() {
     if (this.interval) return;
@@ -25,6 +26,7 @@ export class MaintenanceService {
       console.log('🔄 [Maintenance] Starting full maintenance cycle...');
       
       // DATA-005: Use catch on each step to prevent full crash
+      await this.cleanupExpiredSubscriptions().catch(e => console.error('❌ [Maintenance] cleanupExpired failed:', e.message));
       await this.syncTraffic().catch(e => console.error('❌ [Maintenance] syncTraffic failed:', e.message));
       await this.syncAllServers().catch(e => console.error('❌ [Maintenance] syncAllServers failed:', e.message));
       await RoutingService.syncAll().catch(e => console.error('❌ [Maintenance] Routing syncAll failed:', e.message));
@@ -35,7 +37,67 @@ export class MaintenanceService {
     }
   }
 
+  // INFRA-002: Delete X-UI clients for expired subscriptions
+  static async cleanupExpiredSubscriptions() {
+    console.log('🧹 [Maintenance] Cleaning up expired subscriptions...');
+    try {
+      const now = new Date().toISOString();
+      
+      // Find active subscriptions that have expired
+      const { data: expiredSubs, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('status', 'active')
+        .lt('expires_at', now);
+
+      if (error || !expiredSubs || expiredSubs.length === 0) {
+        console.log('✅ [Maintenance] No expired subscriptions found.');
+        return;
+      }
+
+      console.log(`🧹 [Maintenance] Found ${expiredSubs.length} expired subscriptions, cleaning up...`);
+
+      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      if (!servers) return;
+
+      for (const sub of expiredSubs) {
+        try {
+          const devices = parseVpnDevices(sub.v2ray_config);
+          
+          // Delete X-UI clients for each device
+          for (const server of servers) {
+            const { instance } = await getXuiForServer(server.id);
+            for (const dev of devices) {
+              if (dev.uuid && dev.email) {
+                await instance.deleteClient(dev.uuid, dev.email).catch(() => {});
+              }
+            }
+          }
+
+          // Mark subscription as expired
+          await supabase
+            .from('subscriptions')
+            .update({ status: 'expired', updated_at: now })
+            .eq('id', sub.id);
+
+          console.log(`✅ [Maintenance] Expired subscription ${sub.id} cleaned up.`);
+        } catch (e: any) {
+          console.error(`❌ [Maintenance] Failed to cleanup subscription ${sub.id}:`, e.message);
+        }
+      }
+    } catch (err: any) {
+      console.error('❌ [Maintenance] cleanupExpiredSubscriptions error:', err.message);
+    }
+  }
+
   static async syncAllServers() {
+    // CORE-006: Prevent concurrent server sync
+    if (this.isSyncingServers) {
+      console.log('⚠️ [Maintenance] syncAllServers already running, skipping...');
+      return;
+    }
+    this.isSyncingServers = true;
+
     console.log('🔄 [Maintenance] Syncing all users to all active servers...');
     try {
       const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
@@ -73,6 +135,8 @@ export class MaintenanceService {
       console.log('✅ [Maintenance] Server sync complete.');
     } catch (err: any) {
       console.error('❌ [Maintenance] Sync error:', err.message);
+    } finally {
+      this.isSyncingServers = false;
     }
   }
 

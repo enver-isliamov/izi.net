@@ -46,6 +46,14 @@ export class RoutingService {
           // Prepend new rules
           xrayConfig.routing.rules = [...xrayRules, ...xrayConfig.routing.rules];
           
+          // INFRA-003: Validate JSON before saving
+          try {
+            JSON.parse(settings.xrayTemplateConfig || '{}');
+          } catch (err) {
+            console.error(`❌ [Routing] Invalid JSON in xrayTemplateConfig for ${server.name}:`, (err as Error).message);
+            continue;
+          }
+
           settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
           await instance.updateSettings(settings);
           // Restart core to apply

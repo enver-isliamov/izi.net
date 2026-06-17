@@ -322,3 +322,75 @@ on conflict (key) do nothing;
 
 -- 💡 Сделайте пользователя суперадминистратором, указав его email (например, enverphoto@gmail.com)
 update public.users set role = 'superadmin' where email = 'enverphoto@gmail.com';
+
+
+-- 6. RPC ФУНКЦИИ (АТОМАРНЫЕ ОПЕРАЦИИ)
+
+-- CORE-004: Атомарное списание баланса с проверкой достаточности
+create or replace function public.deduct_user_balance(p_user_id uuid, p_amount numeric)
+returns boolean as $$
+declare
+  current_amount numeric;
+begin
+  -- Блокируем строку для предотвращения race condition
+  select amount into current_amount
+  from public.balances
+  where user_id = p_user_id
+  for update;
+
+  if not found or current_amount < p_amount then
+    return false;
+  end if;
+
+  update public.balances
+  set amount = amount - p_amount,
+      updated_at = timezone('utc'::text, now())
+  where user_id = p_user_id;
+
+  return true;
+end;
+$$ language plpgsql security definer;
+
+-- Атомарный возврат средств на баланс
+create or replace function public.refund_user_balance(p_user_id uuid, p_amount numeric)
+returns boolean as $$
+begin
+  update public.balances
+  set amount = amount + p_amount,
+      updated_at = timezone('utc'::text, now())
+  where user_id = p_user_id;
+
+  return found;
+end;
+$$ language plpgsql security definer;
+
+-- CORE-004: Атомарное добавление устройства в подписку (предотвращает race condition)
+create or replace function public.append_vpn_device(p_sub_id uuid, p_device_data jsonb)
+returns boolean as $$
+declare
+  current_config jsonb;
+begin
+  -- Блокируем строку подписки
+  select v2ray_config into current_config
+  from public.subscriptions
+  where id = p_sub_id
+  for update;
+
+  if not found then
+    return false;
+  end if;
+
+  -- Инициализируем массив если null
+  if current_config is null then
+    current_config := '[]'::jsonb;
+  end if;
+
+  -- Добавляем устройство в массив (jsonb_array_append)
+  update public.subscriptions
+  set v2ray_config = jsonb_array_append(current_config, p_device_data),
+      updated_at = timezone('utc'::text, now())
+  where id = p_sub_id;
+
+  return true;
+end;
+$$ language plpgsql security definer;

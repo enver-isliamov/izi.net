@@ -14,26 +14,26 @@
 | [x] [SEC-002](#sec-002) | Webhook платежей без проверки подписи | 🔴 P0 CRITICAL | `server.py` | 0–24 ч |
 | [SEC-003](#sec-003) | Hardcoded секреты в репозитории | 🔴 P0 CRITICAL | `config.py`, `.env` | 0–24 ч |
 | [x] [SEC-004](#sec-004) | adminOnly middleware не проверяет роль | 🔴 P0 CRITICAL | `middleware/auth` | 0–24 ч |
-| [SEC-005](#sec-005) | JWT остаётся валидным после смены пароля | 🟠 P1 HIGH | `controllers/auth.js` | 24–48 ч |
-| [SEC-006](#sec-006) | XSS в списке пользователей admin-панели | 🟡 P2 MEDIUM | `admin-panel/UsersList.js` | 48–72 ч |
+| [x] [SEC-005](#sec-005) | JWT остаётся валидным после смены пароля | 🟠 P1 HIGH | `controllers/auth.js` | 24–48 ч |
+| [x] [SEC-006](#sec-006) | XSS в списке пользователей admin-панели | 🟡 P2 MEDIUM | `admin-panel/UsersList.js` | 48–72 ч |
 | [x] [CORE-001](#core-001) | Покупка подписки не создаёт VPN-ключ | 🔴 P0 CRITICAL | `subscription/buy` | 0–24 ч |
 | [x] [CORE-002](#core-002) | ReferenceError в getInboundLink | 🔴 P0 CRITICAL | `XUIService` | 0–24 ч |
 | [x] [CORE-003](#core-003) | checkConfig() не существует в XUIService | 🔴 P0 CRITICAL | `XUIService` | 0–24 ч |
 | [x] [CORE-004](#core-004) | Race condition при выдаче конфигов (IP) | 🔴 P0 CRITICAL | `config_manager.py` | 24–48 ч |
 | [x] [CORE-005](#core-005) | Race condition при покупке подписки | 🟠 P1 HIGH | `subscription/activate` | 24–48 ч |
-| [CORE-006](#core-006) | Race condition при учёте трафика | 🟡 P2 MEDIUM | `middleware/traffic.js` | 48–72 ч |
+| [x] [CORE-006](#core-006) | Race condition при учёте трафика | 🟡 P2 MEDIUM | `middleware/traffic.js` | 48–72 ч |
 | [x] [CORE-007](#core-007) | Лимит одновременных сессий не применяется | 🟡 P2 MEDIUM | `configController` | 48–72 ч |
 | [x] [DATA-001](#data-001) | Цены тарифов хранятся как float | 🔴 P0 CRITICAL | БД / `tariffs` | 0–24 ч |
 | [x] [DATA-002](#data-002) | Трафик не сбрасывается при продлении | 🔴 P0 CRITICAL | `services/subscription.js` | 0–24 ч |
-| [DATA-003](#data-003) | Сброс лимитов по локальному времени, не UTC | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
-| [DATA-004](#data-004) | Naive datetime вместо aware (таймзоны) | 🟠 P1 HIGH | `models.py` / `server.py` | 24–48 ч |
-| [DATA-005](#data-005) | Cron сброса трафика падает без обработки ошибок | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
+| [x] [DATA-003](#data-003) | Сброс лимитов по локальному времени, не UTC | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
+| [x] [DATA-004](#data-004) | Naive datetime вместо aware (таймзоны) | 🟠 P1 HIGH | `models.py` / `server.py` | 24–48 ч |
+| [x] [DATA-005](#data-005) | Cron сброса трафика падает без обработки ошибок | 🟠 P1 HIGH | `cron/resetTraffic.js` | 24–48 ч |
 | [DATA-006](#data-006) | Некорректная валидация даты подписки в admin | 🟠 P1 HIGH | `admin.updateSubscription` | 24–48 ч |
 | [CACHE-001](#cache-001) | Устаревший конфиг подписки из-за кэша | 🟠 P1 HIGH | Nginx / backend | 24–48 ч |
-| [CACHE-002](#cache-002) | Устаревший трафик в дашборде пользователя | 🟢 P3 LOW | `panel/Dashboard.js` | 72+ ч |
+| [x] [CACHE-002](#cache-002) | Устаревший трафик в дашборде пользователя | 🟢 P3 LOW | `panel/Dashboard.js` | 72+ ч |
 | [INFRA-001](#infra-001) | Утечка файловых дескрипторов при генерации ключей | 🟠 P1 HIGH | `wireguard.py` | 48–72 ч |
-| [INFRA-002](#infra-002) | Конфиги X-UI не удаляются при деактивации | 🟢 P3 LOW | `subscriptionService.deactivate` | 72+ ч |
-| [INFRA-003](#infra-003) | Повреждение конфига при сохранении спецсимволов | 🟡 P2 MEDIUM | Admin → config templates | 48–72 ч |
+| [x] [INFRA-002](#infra-002) | Конфиги X-UI не удаляются при деактивации | 🟢 P3 LOW | `subscriptionService.deactivate` | 72+ ч |
+| [x] [INFRA-003](#infra-003) | Повреждение конфига при сохранении спецсимволов | 🟡 P2 MEDIUM | Admin → config templates | 48–72 ч |
 | [PERF-001](#perf-001) | Нет rate limiting на API | 🟠 P1 HIGH | `server.py` / `app.py` | 24–48 ч |
 
 ---
@@ -669,20 +669,20 @@ function validateConfigTemplate(template) {
 - [x] ${match.substring(2)} → перейти на PostgreSQL
 - [x] ${match.substring(2)} → транзакции SERIALIZABLE
 - [x] РЎР±СЂРѕСЃ С‚СЂР°С„РёРєР° РїСЂРё РїСЂРѕРґР»РµРЅРёРё (`DATA-002`)
-- Инвалидация JWT (`SEC-005`)
-- Rate limiting (`PERF-001`)
-- Retry в cron (`DATA-005`)
+- [x] Инвалидация JWT (`SEC-005`)
+- [x] Rate limiting (`PERF-001`)
+- [x] Retry в cron (`DATA-005`)
 
 ### Фаза 2 — Неделя 2–3 · Качество
-- Все таймзоны → UTC (`DATA-003`, `DATA-004`)
-- Кэширование конфигов (`CACHE-001`)
+- [x] Все таймзоны → UTC (`DATA-003`, `DATA-004`)
+- [x] Кэширование конфигов (`CACHE-001`)
 - Утечка дескрипторов (`INFRA-001`)
-- XSS (`SEC-006`)
-- Валидация конфигов в admin (`INFRA-003`)
+- [x] XSS (`SEC-006`)
+- [x] Валидация конфигов в admin (`INFRA-003`)
 
 ### Фаза 3 — Неделя 4 · UX и мониторинг
-- Polling трафика в дашборде (`CACHE-002`)
-- Удаление конфигов при деактивации (`INFRA-002`)
+- [x] Polling трафика в дашборде (`CACHE-002`)
+- [x] Удаление конфигов при деактивации (`INFRA-002`)
 - Настройка Prometheus + Grafana
 - Настройка CI/CD с автотестами
 
