@@ -63,10 +63,18 @@ export class XUIService {
 
     try {
       // ADMIN-009: Сначала GET для получения session cookie (CSRF protection)
-      await axios.get(loginUrl, getRequestConfig(loginUrl)).catch(() => {});
+      // Получаем cookie из ответа и используем её в POST
+      const getResp = await axios.get(loginUrl, getRequestConfig(loginUrl)).catch(() => null);
+      const getCookie = getResp?.headers?.['set-cookie'];
+      const cookieStr = Array.isArray(getCookie) ? getCookie[0] : (getCookie || '');
+      // Извлекаем значение cookie 3x-ui
+      const match = cookieStr.match(/3x-ui=([^;]+)/);
+      const initialCookie = match ? `3x-ui=${match[1]}` : '';
 
       const response = await axios.post(loginUrl, loginData, getRequestConfig(loginUrl, {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-requested-with': 'XMLHttpRequest',
+        ...(initialCookie ? { 'Cookie': initialCookie } : {})
       }));
 
       const cookie = response.headers['set-cookie'];
