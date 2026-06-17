@@ -1,3 +1,4 @@
+import { rateLimit } from 'express-rate-limit';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -27,6 +28,27 @@ app.use(cors());
 app.use(express.json());
 
 // --- МАРШРУТЫ ---
+
+// --- RATE LIMITING (PERF-001) ---
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Limit each IP to 10 login/buy attempts per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts, please try again after an hour.' }
+});
+
+app.use('/api/subscription/buy', authLimiter);
+app.use('/api/pay/create', authLimiter);
+app.use('/api', generalLimiter);
 app.use('/api', userRoutes);
 app.use('/api', configRoutes);
 app.use('/api/subscription', configRoutes);

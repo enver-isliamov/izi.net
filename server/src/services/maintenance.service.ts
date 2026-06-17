@@ -21,9 +21,18 @@ export class MaintenanceService {
   }
 
   static async runFullMaintenance() {
-    await this.syncTraffic();
-    await this.syncAllServers();
-    await RoutingService.syncAll();
+    try {
+      console.log('🔄 [Maintenance] Starting full maintenance cycle...');
+      
+      // DATA-005: Use catch on each step to prevent full crash
+      await this.syncTraffic().catch(e => console.error('❌ [Maintenance] syncTraffic failed:', e.message));
+      await this.syncAllServers().catch(e => console.error('❌ [Maintenance] syncAllServers failed:', e.message));
+      await RoutingService.syncAll().catch(e => console.error('❌ [Maintenance] Routing syncAll failed:', e.message));
+      
+      console.log('✅ [Maintenance] Full maintenance cycle complete.');
+    } catch (err: any) {
+      console.error('🔥 [Maintenance] Critical error in runFullMaintenance:', err.message);
+    }
   }
 
   static async syncAllServers() {

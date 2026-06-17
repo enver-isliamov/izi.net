@@ -54,7 +54,7 @@ export class BotService {
       
       let text = `👤 Аккаунт: ${userData.email}\n💰 Баланс: ${balance} ₽\n\n`;
       if (sub) {
-        text += `📅 Истекает: ${new Date(sub.expires_at).toLocaleDateString()}\n`;
+        text += `📅 Истекает: ${new Date(sub.expires_at).toISOString().split('T')[0]} (UTC)\n`;
         text += `📊 Трафик: ${(sub.traffic_used_mb / 1024).toFixed(2)} ГБ`;
       } else {
         text += `❌ Нет активной подписки.`;
