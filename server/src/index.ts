@@ -32,7 +32,7 @@ app.use(express.json());
 // --- RATE LIMITING (PERF-001) ---
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  max: 1000, // Увеличен до 1000 для стабильности
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' }
@@ -40,16 +40,16 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // Limit each IP to 10 login/buy attempts per hour
+  max: 30, // Увеличен до 30
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many attempts, please try again after an hour.' }
 });
 
-// ADMIN-010: Мягкий лимитер для админки (больше запросов)
+// ADMIN-010: Мягкий лимитер для админки
 const adminLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 200, // 200 запросов за 5 минут для админки
+  max: 500, // 500 запросов за 5 минут для админки
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many admin requests, please try again later.' }
