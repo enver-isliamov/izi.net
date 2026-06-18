@@ -275,6 +275,55 @@ router.get('/users', adminOnly, async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ADMIN-011: Выдача подписки пользователю из админки
+router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const { serverId, periodMonths, trafficLimitMb } = req.body;
+  try {
+    const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+    if (userErr || !user) return res.status(404).json({ error: 'User not found' });
+
+    const days = (parseInt(periodMonths) || 1) * 30;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
+
+    const { data: existingSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (existingSub) {
+      // Обновляем существующую подписку
+      const { error } = await supabase.from('subscriptions').update({
+        expires_at: expiresAt.toISOString(),
+        traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
+        server_id: serverId || existingSub.server_id,
+        updated_at: new Date().toISOString()
+      }).eq('id', existingSub.id);
+      if (error) throw error;
+    } else {
+      // Создаём новую подписку
+      const { error } = await supabase.from('subscriptions').insert({
+        user_id: userId,
+        server_id: serverId,
+        plan_type: 'basic',
+        status: 'active',
+        traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
+        traffic_used_mb: 0,
+        device_limit: 2,
+        period_months: parseInt(periodMonths) || 1,
+        expires_at: expiresAt.toISOString(),
+        v2ray_config: '[]'
+      });
+      if (error) throw error;
+    }
+
+    res.json({ success: true, message: 'Подписка выдана' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 router.put('/users/:userId', adminOnly, async (req, res) => {
   const { userId } = req.params;
   const { role, is_pro, balance } = req.body;
