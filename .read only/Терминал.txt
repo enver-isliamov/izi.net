@@ -1,47 +1,125 @@
-root@VM-846997:/opt/izinet# docker exec izinet-app wget --no-check-certificate --save-cookies /tmp/xui_cookies.txt --keep-session-cookies 'http://194.50.94.28:2053/' -O /dev/null 2>&1
-wget: unrecognized option: save-cookies
-BusyBox v1.37.0 (2025-12-16 14:19:28 UTC) multi-call binary.
+root@VM-846997:/opt/izinet# cd /opt/izinet && bash update.sh
+🔄 Начинаю процесс принудительного обновления...
+📡 Скачиваю свежий код из ветки main...
+From https://github.com/enver-isliamov/izi.net
+ * branch            main       -> FETCH_HEAD
+HEAD is now at 72a85fa Update xui.service.ts
+🧹 Очищаю .env от невидимых символов...
+✅ .env очищен.
+🐳 Пересобираю и запускаю контейнеры...
+[+] down 3/3
+ ✔ Container izinet-app      Removed                                                                                                                                                                                                                                                                                     0.9s
+ ✔ Container x3-ui           Removed                                                                                                                                                                                                                                                                                     0.3s
+ ✔ Network izinet_izinet-net Removed                                                                                                                                                                                                                                                                                     0.1s
+[+] Building 2.1s (14/14) FINISHED                                                                                                                                                                                                                                                                                           
+ => [internal] load local bake definitions                                                                                                                                                                                                                                                                              0.0s
+ => => reading from stdin 842B                                                                                                                                                                                                                                                                                          0.0s
+ => [internal] load build definition from Dockerfile                                                                                                                                                                                                                                                                    0.0s
+ => => transferring dockerfile: 1.01kB                                                                                                                                                                                                                                                                                  0.0s
+ => [internal] load metadata for docker.io/library/node:20-alpine                                                                                                                                                                                                                                                       0.6s
+ => [internal] load .dockerignore                                                                                                                                                                                                                                                                                       0.0s
+ => => transferring context: 98B                                                                                                                                                                                                                                                                                        0.0s
+ => [builder 1/6] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                                                                                                                                                                         0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                                                                                                                                                                                 0.0s
+ => [internal] load build context                                                                                                                                                                                                                                                                                       0.0s
+ => => transferring context: 39.84kB                                                                                                                                                                                                                                                                                    0.0s
+ => CACHED [builder 2/6] WORKDIR /app                                                                                                                                                                                                                                                                                   0.0s
+ => CACHED [builder 3/6] COPY package.json package-lock.json* ./                                                                                                                                                                                                                                                        0.0s
+ => CACHED [builder 4/6] RUN npm install                                                                                                                                                                                                                                                                                0.0s
+ => CACHED [builder 5/6] COPY . .                                                                                                                                                                                                                                                                                       0.0s
+ => CACHED [builder 6/6] RUN npm run build                                                                                                                                                                                                                                                                              0.0s
+ => CACHED [stage-1 3/3] COPY --from=builder /app ./                                                                                                                                                                                                                                                                    0.0s
+ => exporting to image                                                                                                                                                                                                                                                                                                  0.2s
+ => => exporting layers                                                                                                                                                                                                                                                                                                 0.0s
+ => => exporting manifest sha256:9fc224f7a5f7379914a53138a8044d9d214957ec56cbe914af3c1f5ad3981102                                                                                                                                                                                                                       0.0s
+ => => exporting config sha256:9b873254c31888a0e5a1ff2fbe94a10cf5d6a67233d65057d41d8d9c3b22f1ac                                                                                                                                                                                                                         0.0s
+ => => exporting attestation manifest sha256:98d490855e91caff69b8b98356c1353f09271a1f7ee42722262e1f6e65beab37                                                                                                                                                                                                           0.1s
+ => => exporting manifest list sha256:b63b8b61d1de5a48bb78ff5c4199881ceb204904b1f3b2ecd6303454a030ce1c                                                                                                                                                                                                                  0.0s
+ => => naming to docker.io/library/izinet-izinet-app:latest                                                                                                                                                                                                                                                             0.0s
+ => => unpacking to docker.io/library/izinet-izinet-app:latest                                                                                                                                                                                                                                                          0.0s
+ => resolving provenance for metadata file                                                                                                                                                                                                                                                                              0.0s
+[+] up 4/4
+ ✔ Image izinet-izinet-app   Built                                                                                                                                                                                                                                                                                       2.2s
+ ✔ Network izinet_izinet-net Created                                                                                                                                                                                                                                                                                     0.1s
+ ✔ Container x3-ui           Started                                                                                                                                                                                                                                                                                     0.6s
+ ✔ Container izinet-app      Started                                                                                                                                                                                                                                                                                     0.7s
+⏳ Жду 10 секунд для запуска...
+📊 Статус контейнеров:
+NAMES        STATUS                    PORTS
+izinet-app   Up 10 seconds             0.0.0.0:3005->3005/tcp, [::]:3005->3005/tcp
+x3-ui        Up 10 seconds (healthy)   0.0.0.0:443->443/tcp, [::]:443->443/tcp, 0.0.0.0:2053->2053/tcp, [::]:2053->2053/tcp, 0.0.0.0:8443->8443/tcp, [::]:8443->8443/tcp
 
-Usage: wget [-cqS] [--spider] [-O FILE] [-o LOGFILE] [--header STR]
-        [--post-data STR | --post-file FILE] [-Y on/off]
-        [-P DIR] [-U AGENT] [-T SEC] URL...
+✅ ОБНОВЛЕНИЕ ЗАВЕРШЕНО!
+Логи приложения (последние 20 строк):
+> tsx --insecure-http-parser server/src/index.ts
 
-Retrieve files via HTTP or FTP
-
-        --spider        Only check URL existence: $? is 0 if exists
-        --header STR    Add STR (of form 'header: value') to headers
-        --post-data STR Send STR using POST method
-        --post-file FILE        Send FILE using POST method
-        -c              Continue retrieval of aborted transfer
-        -q              Quiet
-        -P DIR          Save to DIR (default .)
-        -S              Show server response
-        -T SEC          Network read timeout is SEC seconds
-        -O FILE         Save to FILE ('-' for stdout)
-        -o LOGFILE      Log messages to FILE
-        -U STR          Use STR for User-Agent header
-        -Y on/off       Use proxy
-root@VM-846997:/opt/izinet# docker exec izinet-app wget --no-check-certificate --load-cookies /tmp/xui_cookies.txt --post-data='{"username":"oja","password":"sireyra"}' --header='Content-Type: application/json' --header='x-requested-with: XMLHttpRequest' 'http://194.50.94.28:2053/login' -O - 2>&1
-wget: unrecognized option: load-cookies
-BusyBox v1.37.0 (2025-12-16 14:19:28 UTC) multi-call binary.
-
-Usage: wget [-cqS] [--spider] [-O FILE] [-o LOGFILE] [--header STR]
-        [--post-data STR | --post-file FILE] [-Y on/off]
-        [-P DIR] [-U AGENT] [-T SEC] URL...
-
-Retrieve files via HTTP or FTP
-
-        --spider        Only check URL existence: $? is 0 if exists
-        --header STR    Add STR (of form 'header: value') to headers
-        --post-data STR Send STR using POST method
-        --post-file FILE        Send FILE using POST method
-        -c              Continue retrieval of aborted transfer
-        -q              Quiet
-        -P DIR          Save to DIR (default .)
-        -S              Show server response
-        -T SEC          Network read timeout is SEC seconds
-        -O FILE         Save to FILE ('-' for stdout)
-        -o LOGFILE      Log messages to FILE
-        -U STR          Use STR for User-Agent header
-        -Y on/off       Use proxy
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 [BOOT] Проверка Supabase...
+📡 [Supabase] Глубокая диагностика таблиц...
+(node:29) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✅ [Supabase] Таблица users активна.
+✅ [Supabase] Таблица settings активна.
+✅ [Supabase] Таблица vpn_servers активна.
+✅ [Supabase] Таблица balances активна.
+✅ [Supabase] Таблица subscriptions активна.
+✅ [Supabase] Таблица transactions активна.
+✅ [Supabase] Таблица payments активна.
+✅ [Supabase] Найдено серверов: 2
+   📍 [DB] Amster: https://185.72.11.57:33718/65YobL3oIf6IRQ9nLO/ (Active: false)
+   📍 [DB] OneD: http://194.50.94.28:2053 (Active: true)
+📦 Maintenance Service initialized (Lightweight Sync)
+✅ [BOOT] Сервер запущен на порту 3005
+(node:29) Warning: Using insecure HTTP parsing
+root@VM-846997:/opt/izinet# docker logs izinet-app --tail 50
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [Maintenance] Traffic sync complete.
+🔄 [Maintenance] Syncing all users to all active servers...
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [Maintenance] Server sync complete.
+🔄 [Routing] Synchronizing rules to all panels...
+✅ [XUI] Login success: http://194.50.94.28:2053
+❌ [Routing] Failed on OneD: Request failed with status code 404
+✅ [Maintenance] Full maintenance cycle complete.
+🔄 [Maintenance] Syncing all users to all active servers...
+🔄 [Maintenance] Starting background traffic sync...
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [Maintenance] Server sync complete.
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [Maintenance] Traffic sync complete.
+✅ [XUI] Login success: http://194.50.94.28:2053
+✅ [XUI] Login success: http://194.50.94.28:2053
 root@VM-846997:/opt/izinet# 
