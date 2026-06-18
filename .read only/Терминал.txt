@@ -1,87 +1,55 @@
-root@VM-846997:/opt/izinet# curl -v -X POST http://194.50.94.28:2053/login -H 'Content-Type: application/json' -H 'x-requested-with: XMLHttpRequest' -d '{"username":"oja","password":"sireyra"}' 2>&1 | head -20
-Note: Unnecessary use of -X or --request, POST is already inferred.
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 194.50.94.28:2053...
-* Connected to 194.50.94.28 (194.50.94.28) port 2053
-> POST /login HTTP/1.1
-> Host: 194.50.94.28:2053
-> User-Agent: curl/8.5.0
-> Accept: */*
-> Content-Type: application/json
-> x-requested-with: XMLHttpRequest
-> Content-Length: 39
-> 
-} [39 bytes data]
-< HTTP/1.1 403 Forbidden
-< Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-XcjAonfrlp+sAkTO0l8G3Q'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-< Referrer-Policy: no-referrer
-< X-Content-Type-Options: nosniff
-< X-Frame-Options: DENY
-< Date: Wed, 17 Jun 2026 22:19:30 GMT
-root@VM-846997:/opt/izinet# curl -v -X POST http://194.50.94.28:2053/panel/login -H 'Content-Type: application/json' -H 'x-requested-with: XMLHttpRequest' -d '{"username":"oja","password":"sireyra"}' 2>&1 | head -20
-Note: Unnecessary use of -X or --request, POST is already inferred.
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 194.50.94.28:2053...
-* Connected to 194.50.94.28 (194.50.94.28) port 2053
-> POST /panel/login HTTP/1.1
-> Host: 194.50.94.28:2053
-> User-Agent: curl/8.5.0
-> Accept: */*
-> Content-Type: application/json
-> x-requested-with: XMLHttpRequest
-> Content-Length: 39
-> 
-} [39 bytes data]
-< HTTP/1.1 404 Not Found
-< Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-5LcPP8zjr0GJM7/qPPta1A'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-< Referrer-Policy: no-referrer
-< X-Content-Type-Options: nosniff
-< X-Frame-Options: DENY
-< Date: Wed, 17 Jun 2026 22:19:40 GMT
-root@VM-846997:/opt/izinet# curl -v -X POST http://194.50.94.28:2053/ -H 'Content-Type: application/json' -H 'x-requested-with: XMLHttpRequest' -d '{"usernam
-e":"oja","password":"sireyra"}' 2>&1 | head -20
-Note: Unnecessary use of -X or --request, POST is already inferred.
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 194.50.94.28:2053...
-* Connected to 194.50.94.28 (194.50.94.28) port 2053
-> POST / HTTP/1.1
-> Host: 194.50.94.28:2053
-> User-Agent: curl/8.5.0
-> Accept: */*
-> Content-Type: application/json
-> x-requested-with: XMLHttpRequest
-> Content-Length: 39
-> 
-} [39 bytes data]
-< HTTP/1.1 404 Not Found
-< Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-Uzq5tR4JKfUzBtVF0K/zTQ'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-< Referrer-Policy: no-referrer
-< X-Content-Type-Options: nosniff
-< X-Frame-Options: DENY
-< Date: Wed, 17 Jun 2026 22:20:41 GMT
-root@VM-846997:/opt/izinet# curl -v -X POST http://194.50.94.28:2053 -H 'Content-Type: application/json' -H 'x-requested-with: XMLHttpRequest' -d '{"username
-":"oja","password":"sireyra"}' 2>&1 | head -20
-Note: Unnecessary use of -X or --request, POST is already inferred.
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 194.50.94.28:2053...
-* Connected to 194.50.94.28 (194.50.94.28) port 2053
-> POST / HTTP/1.1
-> Host: 194.50.94.28:2053
-> User-Agent: curl/8.5.0
-> Accept: */*
-> Content-Type: application/json
-> x-requested-with: XMLHttpRequest
-> Content-Length: 39
-> 
-} [39 bytes data]
-< HTTP/1.1 404 Not Found
-< Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-n9l9FWxCtPJR7vP5Ylu/6w'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-< Referrer-Policy: no-referrer
-< X-Content-Type-Options: nosniff
-< X-Frame-Options: DENY
-< Date: Wed, 17 Jun 2026 22:20:57 GMT
+[+] up 4/4
+ ✔ Image izinet-izinet-app   Built                                                                                                                       2.5s
+ ✔ Network izinet_izinet-net Created                                                                                                                     0.1s
+ ✔ Container x3-ui           Started                                                                                                                     0.6s
+ ✔ Container izinet-app      Started                                                                                                                     0.8s
+⏳ Жду 10 секунд для запуска...
+📊 Статус контейнеров:
+NAMES        STATUS                    PORTS
+izinet-app   Up 10 seconds             0.0.0.0:3005->3005/tcp, [::]:3005->3005/tcp
+x3-ui        Up 10 seconds (healthy)   0.0.0.0:443->443/tcp, [::]:443->443/tcp, 0.0.0.0:2053->2053/tcp, [::]:2053->2053/tcp, 0.0.0.0:8443->8443/tcp, [::]:8443->8443/tcp
+
+✅ ОБНОВЛЕНИЕ ЗАВЕРШЕНО!
+Логи приложения (последние 20 строк):
+> tsx --insecure-http-parser server/src/index.ts
+
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+🚀 [BOOT] Проверка Supabase...
+📡 [Supabase] Глубокая диагностика таблиц...
+(node:29) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✅ [Supabase] Таблица users активна.
+✅ [Supabase] Таблица settings активна.
+✅ [Supabase] Таблица vpn_servers активна.
+✅ [Supabase] Таблица balances активна.
+✅ [Supabase] Таблица subscriptions активна.
+✅ [Supabase] Таблица transactions активна.
+✅ [Supabase] Таблица payments активна.
+✅ [Supabase] Найдено серверов: 2
+   📍 [DB] Amster: https://185.72.11.57:33718/65YobL3oIf6IRQ9nLO/ (Active: false)
+   📍 [DB] OneD: http://194.50.94.28:2053/ (Active: true)
+📦 Maintenance Service initialized (Lightweight Sync)
+✅ [BOOT] Сервер запущен на порту 3005
+(node:29) Warning: Using insecure HTTP parsing
+root@VM-846997:/opt/izinet# docker logs izinet-app --tail 20
+⚠️ [XUI] Reality key sync skipped for http://194.50.94.28:2053/: Request failed with status code 404
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [Sync] Failed to sync user_93650_ch_reg to OneD: Request failed with status code 404
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [XUI] Reality key sync skipped for http://194.50.94.28:2053/: Request failed with status code 404
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [Sync] Failed to sync user_0b6fa007_g7jn_0 to OneD: Request failed with status code 404
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [Sync] Failed to sync user_0b6fa007_lm8b_1 to OneD: Request failed with status code 404
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [XUI] Reality key sync skipped for http://194.50.94.28:2053/: Request failed with status code 404
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [Sync] Failed to sync user_ec359048_8grv_0 to OneD: Request failed with status code 404
+✅ [Maintenance] Server sync complete.
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+⚠️ [Sync] Failed to sync user_ec359048_xtq1_1 to OneD: Request failed with status code 404
+🔄 [Routing] Synchronizing rules to all panels...
+❌ [XUI] Login failed at http://194.50.94.28:2053/: Request failed with status code 404
+❌ [Routing] Failed on OneD: Request failed with status code 404
+✅ [Maintenance] Full maintenance cycle complete.
 root@VM-846997:/opt/izinet#
