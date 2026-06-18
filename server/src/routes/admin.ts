@@ -103,35 +103,20 @@ router.get('/servers', adminOnly, async (req, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
     
-    // ADMIN-006: Вычисляем статистику для каждого сервера
+    // ADMIN-006: Быстро считаем статистику из БД без подключения к X-UI
     const enrichedServers = await Promise.all((servers || []).map(async (server: any) => {
       try {
-        // Считаем пользователей привязанных к этому серверу
         const { count: totalUsers } = await supabase
           .from('subscriptions')
           .select('*', { count: 'exact', head: true })
           .eq('server_id', server.id)
           .eq('status', 'active');
 
-        // Пытаемся получить статистику из X-UI
-        let xuiTotalClients = 0;
-        let onlineUsers = 0;
-        try {
-          const { instance } = await getXuiForServer(server.id);
-          const isHealthy = await instance.checkHealth();
-          if (isHealthy) {
-            const clients = await instance.getClientTraffic('all').catch(() => null);
-            // Если нет метода listClients, ставим 0
-          }
-        } catch (e) {
-          // X-UI недоступен — ставим 0
-        }
-
         return {
           ...server,
           total_users: totalUsers || 0,
-          xui_total_clients: xuiTotalClients,
-          online_users: onlineUsers
+          xui_total_clients: 0,
+          online_users: 0
         };
       } catch (e) {
         return { ...server, total_users: 0, xui_total_clients: 0, online_users: 0 };
@@ -147,10 +132,15 @@ router.get('/servers/health', adminOnly, async (req, res) => {
   try {
     const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
     if (error) throw error;
+    
+    // Быстрая проверка health с таймаутом 3 секунды на сервер
     const health = await Promise.all((servers || []).map(async (server: any) => {
       try {
         const { instance } = await getXuiForServer(server.id);
-        const online = await instance.checkHealth();
+        const online = await Promise.race([
+          instance.checkHealth(),
+          new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ]);
         return { id: server.id, online, status: online ? 'ok' : 'error' };
       } catch (err: any) {
         return { id: server.id, online: false, status: 'error', error: err.message };
