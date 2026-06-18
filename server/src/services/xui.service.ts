@@ -55,27 +55,40 @@ export class XUIService {
   }
 
   private async login() {
+    // Проверяем, не истёк ли текущий session cookie (TTL = 10 минут)
     const now = Date.now();
     if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
 
+    // Формируем URLs: baseUrl — корень панели, loginUrl — endpoint для авторизации
     const baseUrl = `${this.host}${this.basePath}`.replace(/\/$/, '');
     const loginUrl = `${baseUrl}/login`;
     const loginData = { username: this.username, password: this.password };
 
     try {
-      // ADMIN-009: Сначала GET корневую страницу для получения session cookie
+      // Шаг 1: GET запрос на корневую страницу панели
+      // X-UI устанавливает session cookie при первом обращении.
+      // Без этого cookie POST-запрос будет отклонён с 403 (CSRF protection).
       const getResp = await axios.get(baseUrl, getRequestConfig(baseUrl)).catch(() => null);
+
+      // Извлекаем cookie "3x-ui" из заголовка set-cookie ответа
       const getCookie = getResp?.headers?.['set-cookie'];
       const cookieStr = Array.isArray(getCookie) ? getCookie[0] : (getCookie || '');
       const match = cookieStr.match(/3x-ui=([^;]+)/);
       const initialCookie = match ? `3x-ui=${match[1]}` : '';
 
+      // Шаг 2: POST запрос на /login с учётными данными
+      // Обязательные заголовки:
+      //   - Content-Type: application/json — тело запроса в JSON
+      //   - x-requested-with: XMLHttpRequest — X-UI требует этот заголовок
+      //   - Cookie: 3x-ui=... — session cookie из шага 1
       const response = await axios.post(loginUrl, loginData, getRequestConfig(loginUrl, {
         'Content-Type': 'application/json',
         'x-requested-with': 'XMLHttpRequest',
         ...(initialCookie ? { 'Cookie': initialCookie } : {})
       }));
 
+      // Шаг 3: Сохраняем новый session cookie из ответа
+      // После успешного логина X-UI выдаёт новый cookie для всех последующих API-запросов
       const cookie = response.headers['set-cookie'];
       if (cookie) {
         this.sessionCookie = Array.isArray(cookie) ? cookie[0] : cookie;
