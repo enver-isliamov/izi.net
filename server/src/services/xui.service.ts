@@ -23,6 +23,7 @@ export class XUIService {
   private username: string;
   private password: string;
   private sessionCookie: string | null = null;
+  private csrfToken: string | null = null;
   private lastLoginTime: number = 0;
   private readonly SESSION_TTL = 10 * 60 * 1000;
 
@@ -59,44 +60,82 @@ export class XUIService {
     const now = Date.now();
     if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
 
-    // Формируем URLs: baseUrl — корень панели, loginUrl — endpoint для авторизации
     const baseUrl = `${this.host}${this.basePath}`.replace(/\/$/, '');
-    const loginUrl = `${baseUrl}/login`;
-    const loginData = { username: this.username, password: this.password };
+    let lastError: any = null;
 
     try {
-      // Шаг 1: GET запрос на корневую страницу панели
-      // X-UI устанавливает session cookie при первом обращении.
-      // Без этого cookie POST-запрос будет отклонён с 403 (CSRF protection).
-      const getResp = await axios.get(baseUrl, getRequestConfig(baseUrl)).catch(() => null);
+      // Шаг 1: GET корневую страницу — получаем cookies
+      let cookies: string[] = [];
+      try {
+        const rootRes = await axios.get(baseUrl, getRequestConfig(baseUrl, {}, 5000));
+        if (rootRes.headers['set-cookie']) {
+          cookies = cookies.concat(rootRes.headers['set-cookie']);
+        }
+      } catch (e) { /* ignore */ }
 
-      // Извлекаем cookie "3x-ui" из заголовка set-cookie ответа
-      const getCookie = getResp?.headers?.['set-cookie'];
-      const cookieStr = Array.isArray(getCookie) ? getCookie[0] : (getCookie || '');
-      const match = cookieStr.match(/3x-ui=([^;]+)/);
-      const initialCookie = match ? `3x-ui=${match[1]}` : '';
+      // Шаг 2: GET /csrf-token — получаем CSRF token (если панель поддерживает)
+      let csrfToken = '';
+      try {
+        const csrfUrl = `${baseUrl}/csrf-token`;
+        const csrfRes = await axios.get(csrfUrl, getRequestConfig(csrfUrl, { Cookie: cookies.join(';') }, 5000));
+        if (csrfRes.data?.success && csrfRes.data?.obj) {
+          csrfToken = csrfRes.data.obj;
+        }
+        if (csrfRes.headers['set-cookie']) {
+          cookies = cookies.concat(csrfRes.headers['set-cookie']);
+        }
+      } catch (e) { /* CSRF endpoint might not exist */ }
 
-      // Шаг 2: POST запрос на /login с учётными данными
-      // Обязательные заголовки:
-      //   - Content-Type: application/json — тело запроса в JSON
-      //   - x-requested-with: XMLHttpRequest — X-UI требует этот заголовок
-      //   - Cookie: 3x-ui=... — session cookie из шага 1
-      const response = await axios.post(loginUrl, loginData, getRequestConfig(loginUrl, {
-        'Content-Type': 'application/json',
-        'x-requested-with': 'XMLHttpRequest',
-        ...(initialCookie ? { 'Cookie': initialCookie } : {})
-      }));
+      const csrfData = csrfToken ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
 
-      // Шаг 3: Сохраняем новый session cookie из ответа
-      // После успешного логина X-UI выдаёт новый cookie для всех последующих API-запросов
-      const cookie = response.headers['set-cookie'];
-      if (cookie) {
-        this.sessionCookie = Array.isArray(cookie) ? cookie[0] : cookie;
-        this.lastLoginTime = now;
-        console.log(`✅ [XUI] Login success: ${this.host}`);
-      } else {
-        throw new Error('No cookie received');
+      // Шаг 3: Пробуем POST /login с разными форматами и путями
+      const tryLogin = async (path: string, useForm = false): Promise<any> => {
+        const url = `${baseUrl}${path}`;
+        const customHeaders: any = {};
+        if (csrfData) {
+          customHeaders['X-CSRF-Token'] = csrfData.token;
+          if (csrfData.cookieStr) customHeaders['Cookie'] = csrfData.cookieStr;
+        }
+
+        // Пробуем form-urlencoded (стандарт для большинства 3x-ui)
+        if (useForm) {
+          const payload = `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
+          return await axios.post(url, payload, getRequestConfig(url, {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ...customHeaders
+          }));
+        }
+
+        // Пробуем JSON
+        return await axios.post(url, { username: this.username, password: this.password }, getRequestConfig(url, customHeaders));
+      };
+
+      // Пробуем разные пути и форматы
+      let response = null;
+      const paths = ['/login', '', '/panel/login'];
+      for (const path of paths) {
+        if (response) break;
+        // Сначала form-urlencoded, потом JSON
+        try { response = await tryLogin(path, true); } catch (e) { lastError = e; }
+        if (!response) try { response = await tryLogin(path, false); } catch (e) { lastError = e; }
       }
+
+      if (!response) {
+        throw lastError || new Error('Could not find login endpoint');
+      }
+
+      if (response.data?.success === false) {
+        throw new Error(response.data.msg || 'Login failed');
+      }
+
+      // Шаг 4: Сохраняем session cookie
+      const cookie = response.headers['set-cookie']?.[0] || response.headers['x-passed-cookie'];
+      if (!cookie) throw new Error('No cookie received');
+
+      this.sessionCookie = cookie;
+      if (csrfData?.token) this.csrfToken = csrfData.token;
+      this.lastLoginTime = now;
+      console.log(`✅ [XUI] Login success: ${this.host}`);
     } catch (err: any) {
       console.error(`❌ [XUI] Login failed at ${this.host}: ${err.response?.data?.message || err.message}`);
       throw err;
@@ -104,7 +143,10 @@ export class XUIService {
   }
 
   private authHeaders(extra: Record<string, string> = {}) {
-    return { 'Cookie': this.sessionCookie || '', ...extra };
+    const headers: any = { ...extra };
+    if (this.sessionCookie) headers['Cookie'] = this.sessionCookie;
+    if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
+    return headers;
   }
 
   private parseJson<T>(value: unknown, fallback: T): T {
