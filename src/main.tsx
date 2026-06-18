@@ -23,6 +23,31 @@ console.log('🚀 API Config:', {
   detectedBaseURL: axios.defaults.baseURL || '(relative)'
 });
 
+// Глобальный перехват ошибок — сохраняем в localStorage чтобы не терять при перезагрузке
+window.addEventListener('error', (event) => {
+  const msg = `[${new Date().toISOString()}] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`;
+  const errors = JSON.parse(localStorage.getItem('izinet_errors') || '[]');
+  errors.push(msg);
+  if (errors.length > 50) errors.shift();
+  localStorage.setItem('izinet_errors', JSON.stringify(errors));
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const msg = `[${new Date().toISOString()}] Unhandled: ${event.reason}`;
+  const errors = JSON.parse(localStorage.getItem('izinet_errors') || '[]');
+  errors.push(msg);
+  if (errors.length > 50) errors.shift();
+  localStorage.setItem('izinet_errors', JSON.stringify(errors));
+});
+
+// Показать сохранённые ошибки в консоли
+const savedErrors = JSON.parse(localStorage.getItem('izinet_errors') || '[]');
+if (savedErrors.length > 0) {
+  console.group('📋 Сохранённые ошибки (из прошлых загрузок):');
+  savedErrors.forEach((e: string) => console.error(e));
+  console.groupEnd();
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

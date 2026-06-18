@@ -46,8 +46,18 @@ const authLimiter = rateLimit({
   message: { error: 'Too many attempts, please try again after an hour.' }
 });
 
+// ADMIN-010: Мягкий лимитер для админки (больше запросов)
+const adminLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 200, // 200 запросов за 5 минут для админки
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many admin requests, please try again later.' }
+});
+
 app.use('/api/subscription/buy', authLimiter);
 app.use('/api/pay/create', authLimiter);
+app.use('/api/admin', adminLimiter);
 app.use('/api', generalLimiter);
 app.use('/api', userRoutes);
 app.use('/api', configRoutes);
