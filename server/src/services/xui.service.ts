@@ -58,16 +58,15 @@ export class XUIService {
     const now = Date.now();
     if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
 
-    const loginUrl = `${this.host}${this.basePath}/login`;
+    const baseUrl = `${this.host}${this.basePath}`.replace(/\/$/, '');
+    const loginUrl = `${baseUrl}/login`;
     const loginData = { username: this.username, password: this.password };
 
     try {
-      // ADMIN-009: Сначала GET для получения session cookie (CSRF protection)
-      // Получаем cookie из ответа и используем её в POST
-      const getResp = await axios.get(loginUrl, getRequestConfig(loginUrl)).catch(() => null);
+      // ADMIN-009: Сначала GET корневую страницу для получения session cookie
+      const getResp = await axios.get(baseUrl, getRequestConfig(baseUrl)).catch(() => null);
       const getCookie = getResp?.headers?.['set-cookie'];
       const cookieStr = Array.isArray(getCookie) ? getCookie[0] : (getCookie || '');
-      // Извлекаем значение cookie 3x-ui
       const match = cookieStr.match(/3x-ui=([^;]+)/);
       const initialCookie = match ? `3x-ui=${match[1]}` : '';
 
