@@ -287,40 +287,67 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
 
-    const { data: existingSub } = await supabase
-      .from('subscriptions')
-      .select('*')
+    // Шаг 1: Деактивировать все активные подписки пользователя
+    await supabase.from('subscriptions')
+      .update({ status: 'expired' })
       .eq('user_id', userId)
-      .eq('status', 'active')
-      .maybeSingle();
+      .eq('status', 'active');
 
-    if (existingSub) {
-      // Обновляем существующую подписку
-      const { error } = await supabase.from('subscriptions').update({
-        expires_at: expiresAt.toISOString(),
-        traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
-        server_id: serverId || existingSub.server_id,
-        updated_at: new Date().toISOString()
-      }).eq('id', existingSub.id);
-      if (error) throw error;
-    } else {
-      // Создаём новую подписку
-      const { error } = await supabase.from('subscriptions').insert({
-        user_id: userId,
-        server_id: serverId,
-        plan_type: 'basic',
-        status: 'active',
-        traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
-        traffic_used_mb: 0,
-        device_limit: 2,
-        period_months: parseInt(periodMonths) || 1,
-        expires_at: expiresAt.toISOString(),
-        v2ray_config: '[]'
-      });
-      if (error) throw error;
+    // Шаг 2: Вставить новую подписку
+    const { data: newSub, error: insertErr } = await supabase.from('subscriptions').insert({
+      user_id: userId,
+      server_id: serverId,
+      plan_type: 'basic',
+      status: 'active',
+      traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
+      traffic_used_mb: 0,
+      device_limit: 2,
+      period_months: parseInt(periodMonths) || 1,
+      expires_at: expiresAt.toISOString(),
+      v2ray_config: '[]'
+    }).select('*').single();
+    if (insertErr) throw insertErr;
+
+    // Шаг 3: Создать VPN ключи на всех активных серверах
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const limitBytes = (parseInt(trafficLimitMb) || 102400) * 1024 * 1024;
+    const expiresAtMs = expiresAt.getTime();
+
+    const email = `user_${userId.slice(0, 8)}_${Math.random().toString(36).substring(2, 6)}_0`;
+    const uuid = crypto.randomUUID();
+    const devices: any[] = [];
+
+    for (const server of (activeServers || [])) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
+        if (rawConfig) {
+          devices.push({
+            id: `dev_${Date.now()}`,
+            label: 'Устройство 1',
+            config: rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`),
+            email,
+            uuid,
+            expiresAt: expiresAt.toISOString(),
+            serverType: 'WIFI',
+            trafficUsedBytes: 0,
+            serverId: server.id
+          });
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ [Admin] Failed to provision on ${server.name}: ${e.message}`);
+      }
     }
 
-    res.json({ success: true, message: 'Подписка выдана' });
+    // Шаг 4: Обновить подписку с конфигами
+    if (devices.length > 0) {
+      await supabase.from('subscriptions').update({
+        v2ray_config: JSON.stringify(devices)
+      }).eq('id', newSub.id);
+    }
+
+    res.json({ success: true, subscriptionId: newSub.id, devices: devices.length });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -531,6 +558,30 @@ router.get('/stats', adminOnly, async (req, res) => {
     const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
     const { data: subs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
     res.json({ totalUsers: count || 0, activeSubscriptions: subs?.length || 0, totalRevenue: 0 });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ADMIN-012: История транзакций пользователя
+router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const summary = {
+      totalDeposits: (transactions || [])
+        .filter((t: any) => t.type === 'deposit' && t.status === 'completed')
+        .reduce((s: number, t: any) => s + Number(t.amount), 0),
+      totalWithdrawals: (transactions || [])
+        .filter((t: any) => t.type === 'withdrawal' && t.status === 'completed')
+        .reduce((s: number, t: any) => s + Number(t.amount), 0)
+    };
+
+    res.json({ transactions: transactions || [], summary });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
