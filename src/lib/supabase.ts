@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = typeof window !== 'undefined'
-  ? `${window.location.origin}/api/supabase-proxy`
-  : (import.meta.env.VITE_SUPABASE_URL || '');
+// Фронтенд обращается к Supabase НАПРЯМУЮ, а не через proxy.
+// Это обеспечивает стабильность Auth токенов при перегрузке сервера.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

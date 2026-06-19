@@ -175,25 +175,67 @@ export class XUIService {
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     await this.login();
 
-    let targetInboundId = inboundId;
+    // Сначала получаем inbound чтобы определить Reality
+    let flow = '';
     try {
-      const realityInbound = this.findRealityInbound(await this.getInbounds(), inboundId);
-      if (realityInbound) targetInboundId = realityInbound.id;
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      if (resp.data?.success) {
+        const streamSettings = this.parseJson<Record<string, any>>(resp.data.obj?.streamSettings, {});
+        if (streamSettings.security === 'reality') {
+          flow = 'xtls-rprx-vision';
+        }
+      }
     } catch (e) {
-      console.warn(`⚠️ [XUI] Could not fetch inbound list, using default ID: ${inboundId}`);
+      console.warn(`⚠️ [XUI] Could not fetch inbound settings for Reality detection`);
     }
 
     const clientData = {
-      id: targetInboundId,
+      id: inboundId,
       settings: JSON.stringify({
-        clients: [{ id: uuid, flow: 'xtls-rprx-vision', email: email, limitIp: 1, // CORE-007: Limit simultaneous sessions
-        totalGB: limitBytes, expiryTime: expiryTime, enable: true }]
+        clients: [{
+          id: uuid,
+          flow: flow,
+          email: email,
+          limitIp: 0, // Разрешаем несколько IP (смена WiFi/4G)
+          totalGB: limitBytes,
+          expiryTime: expiryTime,
+          enable: true,
+          tgId: '',
+          subId: ''
+        }]
       })
     };
 
-    const url = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
-    await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
-    return this.getInboundLink(targetInboundId, uuid, email);
+    try {
+      const addClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
+      const response = await axios.post(addClientUrl, clientData, getRequestConfig(addClientUrl, this.authHeaders({
+        'Content-Type': 'application/json'
+      })));
+
+      if (response.data?.success) {
+        console.log(`✅ [XUI] Client ${email} added to ${this.host}`);
+        return this.getInboundLink(inboundId, uuid, email);
+      } else {
+        const msg = response.data?.msg || '';
+        if (msg.includes('Duplicate email')) {
+          console.log(`ℹ️ [XUI] Client ${email} already exists, updating...`);
+          const serverClient = await this.getClientByEmail(inboundId, email);
+          const effectiveUuid = serverClient?.id || uuid;
+          const effectiveInboundId = serverClient?.inboundId || inboundId;
+          await this.updateClient(email, effectiveUuid, effectiveInboundId, expiryTime, limitBytes);
+          return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
+        }
+        throw new Error(msg || 'Failed to add client');
+      }
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
+      console.error(`❌ [XUI] addClient error: ${error.message}`);
+      throw error;
+    }
   }
 
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
@@ -243,6 +285,97 @@ export class XUIService {
   async checkConfig(): Promise<boolean> {
     // CORE-003: maintenance исторически вызывает checkConfig(); оставляем совместимую обертку над реальной проверкой здоровья панели.
     return this.checkHealth();
+  }
+
+  async getClientByEmail(inboundId: number, email: string): Promise<any> {
+    await this.login();
+    try {
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      if (resp.data?.success && resp.data?.obj) {
+        const settings = this.parseJson<any>(resp.data.obj.settings, {});
+        const clients = settings.clients || [];
+        const found = clients.find((c: any) => c.email === email);
+        if (found) {
+          return { ...found, id: found.id || found.uuid, inboundId };
+        }
+      }
+
+      // Fallback: ищем во всех inbound'ах
+      const inbounds = await this.getInbounds();
+      for (const inbound of inbounds) {
+        if (inbound.id === inboundId) continue;
+        const settings = this.parseJson<any>(inbound.settings, {});
+        const clients = settings.clients || [];
+        const found = clients.find((c: any) => c.email === email);
+        if (found) {
+          return { ...found, id: found.id || found.uuid, inboundId: inbound.id };
+        }
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ [XUI] Error getting client by email ${email}: ${e.message}`);
+    }
+    return null;
+  }
+
+  async updateClient(email: string, uuid: string, inboundId: number, expiryTime: number, limitBytes: number = 0): Promise<boolean> {
+    await this.login();
+
+    let effectiveUuid = uuid;
+    let effectiveInboundId = inboundId;
+
+    const serverClient = await this.getClientByEmail(inboundId, email);
+    if (serverClient) {
+      if (serverClient.id) effectiveUuid = serverClient.id;
+      if (serverClient.inboundId) effectiveInboundId = serverClient.inboundId;
+    }
+
+    if (!effectiveUuid) return false;
+
+    let flow = '';
+    try {
+      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      if (resp.data?.success) {
+        const streamSettings = this.parseJson<Record<string, any>>(resp.data.obj?.streamSettings, {});
+        if (streamSettings.security === 'reality') flow = 'xtls-rprx-vision';
+      }
+    } catch (e) {
+      flow = 'xtls-rprx-vision';
+    }
+
+    const clientData = {
+      id: effectiveInboundId,
+      settings: JSON.stringify({
+        clients: [{
+          id: effectiveUuid,
+          flow,
+          email,
+          limitIp: 0,
+          totalGB: limitBytes,
+          expiryTime,
+          enable: true,
+          tgId: '',
+          subId: ''
+        }]
+      })
+    };
+
+    try {
+      const updateClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${effectiveUuid}`;
+      const response = await axios.post(updateClientUrl, clientData, getRequestConfig(updateClientUrl, this.authHeaders({
+        'Content-Type': 'application/json'
+      })));
+      return response.data?.success === true;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login();
+        return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
+      }
+      console.error(`❌ [XUI] updateClient error: ${error.message}`);
+      return false;
+    }
   }
 
   async getClientTraffic(email: string): Promise<{ up: number; down: number; used: number } | null> {
