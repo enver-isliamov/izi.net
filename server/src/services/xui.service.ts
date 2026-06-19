@@ -501,6 +501,52 @@ export class XUIService {
       console.warn(`⚠️ [XUI] Could not reset traffic for ${email}: ${err.message}`);
     }
   }
+
+  async getOnlines(): Promise<string[]> {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
+      const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      if (response.data?.success && Array.isArray(response.data.obj)) {
+        const uniqueOnlines = [...new Set(response.data.obj.map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
+        return uniqueOnlines;
+      }
+      return [];
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getOnlines();
+      }
+      console.warn(`⚠️ [XUI] getOnlines error: ${error.message}`);
+      return [];
+    }
+  }
+
+  async listClients(): Promise<any[]> {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const inbounds = await this.getInbounds();
+      let allClients: any[] = [];
+      for (const inbound of inbounds) {
+        const settings = this.parseJson<any>(inbound.settings, {});
+        allClients = allClients.concat(settings.clients || []);
+      }
+      return allClients;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.listClients();
+      }
+      console.warn(`⚠️ [XUI] listClients error: ${e.message}`);
+      return [];
+    }
+  }
+
+  generateVlessLink(uuid: string, email: string, customDomain?: string, port: number = 443) {
+    throw new Error(`[XUI] Используйте getInboundLink() вместо generateVlessLink()`);
+  }
 }
 
 // Кэш экземпляров XUIService

@@ -152,7 +152,7 @@ router.get('/servers/health', adminOnly, async (req, res) => {
 
 router.get('/servers/diag', adminOnly, async (req, res) => {
   try {
-    const { data: servers, error } = await supabase.from('vpn_servers').select('*').order('created_at', { ascending: false });
+    const { data: servers, error } = await supabase.from('vpn_servers').select('*').eq('is_active', true).order('created_at', { ascending: false });
     if (error) throw error;
     const results = await Promise.all((servers || []).map(async (server: any) => {
       try {
