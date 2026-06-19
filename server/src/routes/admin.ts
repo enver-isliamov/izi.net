@@ -158,9 +158,9 @@ router.get('/servers/diag', adminOnly, async (req, res) => {
       try {
         const { instance } = await getXuiForServer(server.id);
         const online = await instance.checkHealth();
-        return { id: server.id, name: server.name, ok: online, online, message: online ? 'X-UI доступен' : 'X-UI не отвечает' };
+        return { id: server.id, name: server.name, status: online ? 'ok' : 'error', ok: online, online, message: online ? 'X-UI доступен' : 'X-UI не отвечает' };
       } catch (err: any) {
-        return { id: server.id, name: server.name, ok: false, online: false, error: err.message };
+        return { id: server.id, name: server.name, status: 'error', ok: false, online: false, error: err.message };
       }
     }));
     res.json(results);
