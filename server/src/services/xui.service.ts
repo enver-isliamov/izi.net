@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { getRequestConfig } from '../utils/axios';
 import { supabase } from './supabase';
+import fs from 'fs';
 
 interface XuiInbound {
   id: number;
@@ -29,110 +30,140 @@ export class XUIService {
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
     let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
-    this.username = (serverConfigs?.username || process.env.XUI_USERNAME || 'admin').trim();
-    this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || 'admin').trim();
+    this.username = (serverConfigs?.username || process.env.XUI_USERNAME || '').trim();
+    this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || '').trim();
 
-    if (host && !host.startsWith('http')) {
+    if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;
     }
 
+    // Устанавливаем displayDomain ДО перезаписи
+    try {
+      if (host) {
+        const url = new URL(host);
+        this.displayDomain = url.hostname;
+      }
+    } catch (_) {}
+
+    // Local routing: rewrite local IPs to Docker internal
     if (host) {
       try {
         const parsedUrl = new URL(host);
         const hn = parsedUrl.hostname;
-        const configDomain = (process.env.DOMAIN || '').trim();
-
-        const isLocalHost = hn === 'localhost' || hn === '127.0.0.1' || (configDomain && hn === configDomain);
-        const isDockerEnv = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production';
-
-        if (isLocalHost && isDockerEnv) {
-          host = `http://x3-ui:2053${parsedUrl.pathname}`;
+        const isDocker = fs.existsSync('/.dockerenv');
+        if (hn === '194.50.94.28' || hn === 'izinet.online' || hn === 'vpn.izinet.online' || hn === 'localhost' || hn === '127.0.0.1') {
+          if (isDocker) {
+            host = `http://x3-ui:2053${parsedUrl.pathname}`;
+          } else {
+            const port = parsedUrl.port || '2053';
+            host = `http://127.0.0.1:${port}${parsedUrl.pathname}`;
+          }
         }
-        this.displayDomain = hn;
-        this.basePath = parsedUrl.pathname.replace(/\/$/, '');
       } catch (e) {}
     }
-    this.host = host;
-  }
 
-  private async login() {
-    const now = Date.now();
-    if (this.sessionCookie && (now - this.lastLoginTime < this.SESSION_TTL)) return;
-
-    const baseUrl = `${this.host}${this.basePath}`.replace(/\/$/, '');
-    let lastError: any = null;
-
+    // Парсим host в this.host + this.basePath
     try {
-      // Шаг 1: GET корневую страницу — получаем cookies (включая lang)
-      let cookies: string[] = ['lang=ru-RU'];
-      try {
-        const rootRes = await axios.get(baseUrl, getRequestConfig(baseUrl, {}, 5000));
-        if (rootRes.headers['set-cookie']) {
-          cookies = cookies.concat(rootRes.headers['set-cookie']);
-        }
-      } catch (e) { /* ignore */ }
-
-      // Шаг 2: GET /csrf-token — получаем CSRF token
-      let csrfToken = '';
-      try {
-        const csrfUrl = `${baseUrl}/csrf-token`;
-        const csrfRes = await axios.get(csrfUrl, getRequestConfig(csrfUrl, { Cookie: cookies.join(';') }, 5000));
-        if (csrfRes.data?.success && csrfRes.data?.obj) {
-          csrfToken = csrfRes.data.obj;
-        }
-        if (csrfRes.headers['set-cookie']) {
-          cookies = cookies.concat(csrfRes.headers['set-cookie']);
-        }
-      } catch (e) { /* CSRF endpoint might not exist */ }
-
-      const allCookies = cookies.join('; ');
-
-      // Шаг 3: Пробуем POST /login с form-urlencoded (стандарт 3x-ui)
-      const tryLogin = async (path: string, useForm = false): Promise<any> => {
-        const url = `${baseUrl}${path}`;
-        const headers: any = {
-          'Cookie': allCookies,
-          'x-requested-with': 'XMLHttpRequest'
-        };
-        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-
-        if (useForm) {
-          const payload = `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
-          return await axios.post(url, payload, getRequestConfig(url, {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            ...headers
-          }));
-        }
-
-        return await axios.post(url, { username: this.username, password: this.password }, getRequestConfig(url, headers));
-      };
-
-      // Пробуем разные пути
-      let response = null;
-      for (const path of ['/login', '', '/panel/login']) {
-        if (response) break;
-        try { response = await tryLogin(path, true); } catch (e) { lastError = e; }
-        if (!response) try { response = await tryLogin(path, false); } catch (e) { lastError = e; }
+      if (host) {
+        const url = new URL(host);
+        this.host = `${url.protocol}//${url.host}`;
+        let path = url.pathname.replace(/\/+$/, '');
+        this.basePath = path && !path.startsWith('/') ? '/' + path : path;
+      } else {
+        this.host = '';
+        this.basePath = '';
       }
-
-      if (!response) throw lastError || new Error('Could not find login endpoint');
-      if (response.data?.success === false) throw new Error(response.data.msg || 'Login failed');
-
-      // Шаг 4: Сохраняем session cookie
-      const cookie = response.headers['set-cookie']?.[0] || response.headers['x-passed-cookie'];
-      if (!cookie) throw new Error('No cookie received');
-
-      this.sessionCookie = cookie;
-      if (csrfToken) this.csrfToken = csrfToken;
-      this.lastLoginTime = now;
-      console.log(`✅ [XUI] Login success: ${this.host}`);
-    } catch (err: any) {
-      console.error(`❌ [XUI] Login failed at ${this.host}: ${err.response?.data?.message || err.message}`);
-      throw err;
+    } catch (e) {
+      this.host = host.replace(/\/+$/, '').replace(/\/panel$/, '');
+      this.basePath = '';
     }
   }
 
-  private authHeaders(extra: Record<string, string> = {}) {
+  async login(force: boolean = false): Promise<string> {
+    if (!this.host) throw new Error('XUI_HOST is empty');
+    if (!force && this.sessionCookie && (Date.now() - this.lastLoginTime < this.SESSION_TTL)) {
+      return this.sessionCookie;
+    }
+
+    let lastError: any = null;
+
+    const tryLogin = async (path: string, csrfData?: { token: string, cookieStr: string }) => {
+      const url = `${this.host}${this.basePath}${path}`;
+      const payload = `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
+      const jsonPayload = { username: this.username, password: this.password };
+
+      let customHeaders: any = {};
+      if (csrfData) {
+        customHeaders['X-CSRF-Token'] = csrfData.token;
+        if (csrfData.cookieStr) customHeaders['Cookie'] = csrfData.cookieStr;
+      }
+
+      try {
+        const response = await axios.post(url, payload, getRequestConfig(url, { 'Content-Type': 'application/x-www-form-urlencoded', ...customHeaders }));
+        if (csrfData && csrfData.cookieStr) response.headers['x-passed-cookie'] = csrfData.cookieStr;
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        try {
+          const response = await axios.post(url, jsonPayload, getRequestConfig(url, customHeaders));
+          if (csrfData && csrfData.cookieStr) response.headers['x-passed-cookie'] = csrfData.cookieStr;
+          return response;
+        } catch (innerErr: any) {
+          lastError = innerErr;
+          return null;
+        }
+      }
+    };
+
+    try {
+      // Step 1: Pre-flight — cookies + CSRF token
+      let csrfToken = '';
+      let cookies: string[] = [];
+      try {
+        const rootUrl = `${this.host}${this.basePath}/`;
+        const rootRes = await axios.get(rootUrl, getRequestConfig(rootUrl, {}, 5000));
+        if (rootRes.headers['set-cookie']) cookies = cookies.concat(rootRes.headers['set-cookie']);
+      } catch (e) {}
+
+      try {
+        const csrfUrl = `${this.host}${this.basePath}/csrf-token`;
+        const csrfRes = await axios.get(csrfUrl, getRequestConfig(csrfUrl, { Cookie: cookies.join(';') }, 5000));
+        if (csrfRes.data?.success && csrfRes.data?.obj) csrfToken = csrfRes.data.obj;
+        if (csrfRes.headers['set-cookie']) cookies = cookies.concat(csrfRes.headers['set-cookie']);
+      } catch (e) {}
+
+      const csrfData = csrfToken ? { token: csrfToken, cookieStr: cookies.join(';') } : undefined;
+
+      // Step 2: Try login endpoints
+      let response = await tryLogin('/login', csrfData);
+      if (!response) response = await tryLogin('', csrfData);
+      if (!response) response = await tryLogin('/panel/login', csrfData);
+
+      if (!response) {
+        let msg = `Could not find login endpoint at ${this.host}${this.basePath}.`;
+        if (lastError?.response?.status === 403) {
+          msg = `Login blocked (403 Forbidden). Rate limit/Fail2Ban active, or WAF blocking.`;
+        }
+        throw new Error(msg);
+      }
+
+      if (response.data?.success === false) throw new Error(response.data.msg || 'Login failed');
+
+      const cookie = response.headers['set-cookie']?.[0] || response.headers['x-passed-cookie'];
+      if (!cookie) throw new Error('No cookie received from 3x-ui');
+
+      this.sessionCookie = cookie;
+      if (csrfData?.token) this.csrfToken = csrfData.token;
+      this.lastLoginTime = Date.now();
+      console.log(`✅ [XUI] Login success: ${this.host}${this.basePath}`);
+      return cookie;
+    } catch (error: any) {
+      console.error(`❌ [XUI] Login failed at ${this.host}${this.basePath}:`, error.message);
+      throw error;
+    }
+  }
+
+  authHeaders(extra: any = {}) {
     const headers: any = { ...extra };
     if (this.sessionCookie) headers['Cookie'] = this.sessionCookie;
     if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
@@ -141,77 +172,66 @@ export class XUIService {
 
   private parseJson<T>(value: unknown, fallback: T): T {
     if (typeof value !== 'string' || value.trim() === '') return fallback;
+    try { return JSON.parse(value) as T; } catch { return fallback; }
+  }
+
+  async checkHealth(): Promise<boolean> {
+    if (!this.host) throw new Error('Host is not configured');
     try {
-      return JSON.parse(value) as T;
-    } catch (err) {
-      console.warn(`⚠️ [XUI] Invalid JSON detected, using fallback:`, (err as Error).message);
-      return fallback;
+      await this.getInbounds();
+      return true;
+    } catch (e: any) {
+      console.error(`❌ [XUI] Connection failed [${this.host}${this.basePath}]:`, e.message);
+      return false;
     }
   }
 
-  private validateJsonOrThrow(value: string, fieldName: string): void {
-    if (!value || value.trim() === '') return;
+  async checkConfig(): Promise<boolean> {
+    return this.checkHealth();
+  }
+
+  async getInbounds(): Promise<XuiInbound[]> {
+    if (!this.sessionCookie) await this.login();
     try {
-      JSON.parse(value);
-    } catch (err) {
-      throw new Error(`INFRA-003: Invalid JSON in ${fieldName}: ${(err as Error).message}`);
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/list`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+      return Array.isArray(resp.data?.obj) ? resp.data.obj : [];
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getInbounds();
+      }
+      console.warn(`⚠️ [XUI] getInbounds error: ${error.message}`);
+      return [];
     }
-  }
-
-  private async getInbounds(): Promise<XuiInbound[]> {
-    await this.login();
-    const listUrl = `${this.host}${this.basePath}/panel/api/inbounds/list`;
-    const resp = await axios.get(listUrl, getRequestConfig(listUrl, this.authHeaders()));
-    return Array.isArray(resp.data?.obj) ? resp.data.obj : [];
-  }
-
-  private findRealityInbound(inbounds: XuiInbound[], fallbackId: number): XuiInbound | undefined {
-    return inbounds.find((ib) => {
-      const streamSettings = this.parseJson<Record<string, any>>(ib.streamSettings, {});
-      return ib.port === 443 || streamSettings.security === 'reality';
-    }) || inbounds.find((ib) => ib.id === fallbackId);
   }
 
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     await this.login();
 
-    // Сначала получаем inbound чтобы определить Reality
     let flow = '';
     try {
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
       if (resp.data?.success) {
         const streamSettings = this.parseJson<Record<string, any>>(resp.data.obj?.streamSettings, {});
-        if (streamSettings.security === 'reality') {
-          flow = 'xtls-rprx-vision';
-        }
+        if (streamSettings.security === 'reality') flow = 'xtls-rprx-vision';
       }
     } catch (e) {
-      console.warn(`⚠️ [XUI] Could not fetch inbound settings for Reality detection`);
+      console.warn(`⚠️ [XUI] Could not fetch inbound settings`);
     }
 
     const clientData = {
       id: inboundId,
       settings: JSON.stringify({
-        clients: [{
-          id: uuid,
-          flow: flow,
-          email: email,
-          limitIp: 0, // Разрешаем несколько IP (смена WiFi/4G)
-          totalGB: limitBytes,
-          expiryTime: expiryTime,
-          enable: true,
-          tgId: '',
-          subId: ''
-        }]
+        clients: [{ id: uuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: '', subId: '' }]
       })
     };
 
     try {
-      const addClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
-      const response = await axios.post(addClientUrl, clientData, getRequestConfig(addClientUrl, this.authHeaders({
-        'Content-Type': 'application/json'
-      })));
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
+      const response = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
 
       if (response.data?.success) {
         console.log(`✅ [XUI] Client ${email} added to ${this.host}`);
@@ -219,7 +239,6 @@ export class XUIService {
       } else {
         const msg = response.data?.msg || '';
         if (msg.includes('Duplicate email')) {
-          console.log(`ℹ️ [XUI] Client ${email} already exists, updating...`);
           const serverClient = await this.getClientByEmail(inboundId, email);
           const effectiveUuid = serverClient?.id || uuid;
           const effectiveInboundId = serverClient?.inboundId || inboundId;
@@ -239,78 +258,63 @@ export class XUIService {
   }
 
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
+    if (!this.sessionCookie) await this.login();
+
     try {
-      await this.login();
       const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders(), 10000));
       if (!resp.data?.success || !resp.data?.obj) throw new Error('Inbound not found');
 
       const inbound = resp.data.obj;
-      const streamSettings = this.parseJson<Record<string, any>>(inbound.streamSettings, {});
+      const inboundSettings = this.parseJson<any>(inbound.settings, {});
+      const streamSettings = this.parseJson<any>(inbound.streamSettings, {});
       const port = inbound.port;
       const encodedEmail = encodeURIComponent(`izinet_${email}`);
+      const hostName = this.displayDomain || 'server.izinet.app';
 
-      const { data: server } = await supabase.from('vpn_servers')
-        .select('ip, domain')
-        .or(`ip.ilike.%${this.displayDomain}%,domain.eq.${this.displayDomain}`)
-        .maybeSingle();
+      const security = streamSettings.security || 'none';
 
-      let connectAddress = server?.ip || server?.domain || this.displayDomain;
-      const cleanHost = (str: string) => {
-        if (!str) return str;
-        return str.trim().replace(/^https?:\/\//, '').split('/')[0].split(':')[0].replace(/[^a-zA-Z0-9.\-]/g, '');
-      };
-      connectAddress = cleanHost(connectAddress);
-
-      if (streamSettings.security === 'reality') {
-        const rs = streamSettings.realitySettings || {};
-        const sni = rs.serverNames?.[0] || 'www.microsoft.com';
-        const pbk = (process.env.XUI_REALITY_PUB_KEY || rs.publicKey || '').trim();
-        const sid = rs.shortIds?.[0] || '79b27cf7799d5b4c';
-
-        return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=chrome&sid=${encodeURIComponent(sid)}&spx=%2F&flow=xtls-rprx-vision#${encodedEmail}`;
+      if (security === 'reality') {
+        const realitySettings = streamSettings.realitySettings || {};
+        const rs = realitySettings.settings || realitySettings;
+        const sni = rs.serverNames?.[0] || hostName;
+        const pbk = (rs.publicKey || process.env.XUI_REALITY_PUB_KEY || '').trim();
+        const sid = rs.shortIds?.[0] || '';
+        const fp = rs.fingerprint || 'chrome';
+        const spiderX = rs.spiderX || '/';
+        let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
+        return `${link}#${encodedEmail}`;
       }
-      return `vless://${uuid}@${connectAddress}:${port}?type=tcp&encryption=none&security=none#${encodedEmail}`;
+
+      if (security === 'tls') {
+        const tlsSettings = streamSettings.tlsSettings || {};
+        const sni = tlsSettings.serverNames?.[0] || hostName;
+        return `vless://${uuid}@${hostName}:${port}?type=tcp&security=tls&sni=${encodeURIComponent(sni)}&fp=${streamSettings.fingerprint || 'chrome'}#${encodedEmail}`;
+      }
+
+      return `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none#${encodedEmail}`;
     } catch (err: any) {
-      // CORE-002: Ошибка генерации ссылки должна логироваться с контекстом и возвращаться вызывающему коду, а не ронять Node.js необработанным исключением.
-      console.error(`❌ [XUI] getInboundLink failed for inbound ${inboundId}, email ${email}:`, err.message);
+      console.error(`❌ [XUI] getInboundLink failed for ${this.host}, inbound ${inboundId}:`, err.message);
       throw err;
     }
   }
 
-  async checkHealth(): Promise<boolean> {
-    try { await this.login(); return true; } catch (e) { return false; }
-  }
-
-  async checkConfig(): Promise<boolean> {
-    // CORE-003: maintenance исторически вызывает checkConfig(); оставляем совместимую обертку над реальной проверкой здоровья панели.
-    return this.checkHealth();
-  }
-
-  async getClientByEmail(inboundId: number, email: string): Promise<any> {
-    await this.login();
+  async getClientByEmail(inboundId: number, email: string) {
+    if (!this.sessionCookie) await this.login();
     try {
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
       if (resp.data?.success && resp.data?.obj) {
         const settings = this.parseJson<any>(resp.data.obj.settings, {});
-        const clients = settings.clients || [];
-        const found = clients.find((c: any) => c.email === email);
-        if (found) {
-          return { ...found, id: found.id || found.uuid, inboundId };
-        }
+        const found = (settings.clients || []).find((c: any) => c.email === email);
+        if (found) return { ...found, id: found.id || found.uuid, inboundId };
       }
-
-      // Fallback: ищем во всех inbound'ах
       const inbounds = await this.getInbounds();
-      for (const inbound of inbounds) {
-        if (inbound.id === inboundId) continue;
-        const settings = this.parseJson<any>(inbound.settings, {});
-        const clients = settings.clients || [];
-        const found = clients.find((c: any) => c.email === email);
-        if (found) {
-          return { ...found, id: found.id || found.uuid, inboundId: inbound.id };
-        }
+      for (const ib of inbounds) {
+        if (ib.id === inboundId) continue;
+        const settings = this.parseJson<any>(ib.settings, {});
+        const found = (settings.clients || []).find((c: any) => c.email === email);
+        if (found) return { ...found, id: found.id || found.uuid, inboundId: ib.id };
       }
     } catch (e: any) {
       console.warn(`⚠️ [XUI] Error getting client by email ${email}: ${e.message}`);
@@ -332,45 +336,35 @@ export class XUIService {
 
     if (!effectiveUuid) return false;
 
-    let flow = '';
+    let flow = 'xtls-rprx-vision';
     try {
-      const getInboundUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
-      const resp = await axios.get(getInboundUrl, getRequestConfig(getInboundUrl, this.authHeaders()));
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
       if (resp.data?.success) {
-        const streamSettings = this.parseJson<Record<string, any>>(resp.data.obj?.streamSettings, {});
+        const streamSettings = this.parseJson<any>(resp.data.obj?.streamSettings, {});
         if (streamSettings.security === 'reality') flow = 'xtls-rprx-vision';
       }
-    } catch (e) {
-      flow = 'xtls-rprx-vision';
-    }
+    } catch (e) {}
 
     const clientData = {
       id: effectiveInboundId,
       settings: JSON.stringify({
-        clients: [{
-          id: effectiveUuid,
-          flow,
-          email,
-          limitIp: 0,
-          totalGB: limitBytes,
-          expiryTime,
-          enable: true,
-          tgId: '',
-          subId: ''
-        }]
+        clients: [{ id: effectiveUuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: '', subId: '' }]
       })
     };
 
     try {
-      const updateClientUrl = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${effectiveUuid}`;
-      const response = await axios.post(updateClientUrl, clientData, getRequestConfig(updateClientUrl, this.authHeaders({
-        'Content-Type': 'application/json'
-      })));
-      return response.data?.success === true;
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${effectiveUuid}`;
+      const response = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      if (response.data?.success) {
+        console.log(`✅ [XUI] Client ${email} updated on ${this.host}`);
+        return true;
+      }
+      return false;
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
-        await this.login();
+        await this.login(true);
         return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
       console.error(`❌ [XUI] updateClient error: ${error.message}`);
@@ -378,81 +372,104 @@ export class XUIService {
     }
   }
 
-  async getClientTraffic(email: string): Promise<{ up: number; down: number; used: number } | null> {
+  async deleteClient(uuid: string, email?: string) {
+    if (!this.sessionCookie) await this.login();
+
+    let effectiveUuid = uuid;
+
+    if (email) {
+      try {
+        const inbounds = await this.getInbounds();
+        for (const inbound of inbounds) {
+          const serverClient = await this.getClientByEmail(inbound.id, email);
+          if (serverClient?.id) {
+            effectiveUuid = serverClient.id;
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
     try {
-      await this.login();
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${encodeURIComponent(email)}`;
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${effectiveUuid}`;
+      await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      console.log(`✅ [XUI] Client ${email || effectiveUuid} deleted from ${this.host}`);
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.deleteClient(uuid, email);
+      }
+      if (error.response?.status === 404) return;
+      console.warn(`⚠️ [XUI] deleteClient error: ${error.message}`);
+    }
+  }
+
+  async getClientTraffic(email: string) {
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${email}`;
       const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
-      const obj = resp.data?.obj;
-      if (!resp.data?.success || !obj) return null;
-      const up = Number(obj.up || 0);
-      const down = Number(obj.down || 0);
-      return { up, down, used: up + down };
-    } catch (err: any) {
-      console.warn(`⚠️ [XUI] Could not read traffic for ${email}: ${err.message}`);
+      if (resp.data?.success && resp.data?.obj) {
+        const stats = resp.data.obj;
+        return { up: stats.up || 0, down: stats.down || 0, used: (stats.up || 0) + (stats.down || 0), limit: stats.total || 0 };
+      }
+      return null;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        return this.getClientTraffic(email);
+      }
+      console.warn(`⚠️ [XUI] Could not read traffic for ${email}: ${error.message}`);
       return null;
     }
   }
 
   async getSettings(): Promise<XuiSettings> {
-    await this.login();
-    const candidates = [
-      `${this.host}${this.basePath}/panel/api/server/getConfig`,
-      `${this.host}${this.basePath}/panel/api/server/getXrayConfig`
-    ];
-
-    let lastError: unknown;
-    for (const url of candidates) {
-      try {
-        const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
-        if (resp.data?.success && resp.data?.obj) return resp.data.obj;
-      } catch (err) {
-        lastError = err;
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/all`;
+      const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      return resp.data.obj;
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.getSettings();
       }
+      throw e;
     }
-    throw lastError instanceof Error ? lastError : new Error('XUI settings endpoint unavailable');
   }
 
   async updateSettings(settings: XuiSettings): Promise<void> {
-    await this.login();
-
-    // INFRA-003: Validate xrayTemplateConfig before saving
-    if (settings.xrayTemplateConfig) {
-      this.validateJsonOrThrow(settings.xrayTemplateConfig, 'xrayTemplateConfig');
-    }
-
-    const candidates = [
-      `${this.host}${this.basePath}/panel/api/server/updateConfig`,
-      `${this.host}${this.basePath}/panel/api/server/updateXrayConfig`
-    ];
-
-    let lastError: unknown;
-    for (const url of candidates) {
-      try {
-        const resp = await axios.post(url, settings, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
-        if (resp.data?.success !== false) return;
-        lastError = new Error(resp.data?.msg || resp.data?.message || 'XUI settings update rejected');
-      } catch (err) {
-        lastError = err;
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/update`;
+      const encodedData = new URLSearchParams();
+      for (const key in settings) {
+        if (typeof settings[key] === 'object') {
+          encodedData.append(key, JSON.stringify(settings[key]));
+        } else {
+          encodedData.append(key, settings[key] as string);
+        }
       }
+      await axios.post(url, encodedData.toString(), getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' })));
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateSettings(settings);
+      }
+      throw e;
     }
-    throw lastError instanceof Error ? lastError : new Error('XUI settings update endpoint unavailable');
   }
 
   async restartPanel(): Promise<void> {
-    await this.login();
-    const candidates = [
-      `${this.host}${this.basePath}/panel/api/server/restartXrayService`,
-      `${this.host}${this.basePath}/panel/api/server/restartXray`
-    ];
-
-    for (const url of candidates) {
-      try {
-        const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
-        if (resp.data?.success !== false) return;
-      } catch (err) {}
-    }
-    console.warn(`⚠️ [XUI] Xray restart endpoint unavailable for ${this.host}; settings were saved but restart must be checked manually.`);
+    if (!this.sessionCookie) await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/setting/restartPanel`;
+      await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+    } catch (e) {}
   }
 
   async syncRealityKeys(privateKey: string, publicKey: string): Promise<void> {
@@ -460,12 +477,10 @@ export class XUIService {
     try {
       const inbounds = await this.getInbounds();
       const realityInbounds = inbounds.filter((ib) => this.parseJson<Record<string, any>>(ib.streamSettings, {}).security === 'reality');
-
       for (const inbound of realityInbounds) {
         const streamSettings = this.parseJson<Record<string, any>>(inbound.streamSettings, {});
         const realitySettings = streamSettings.realitySettings || {};
         if (realitySettings.privateKey === privateKey && realitySettings.publicKey === publicKey) continue;
-
         streamSettings.realitySettings = { ...realitySettings, privateKey, publicKey };
         const payload = { ...inbound, streamSettings: JSON.stringify(streamSettings) };
         const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inbound.id}`;
@@ -476,32 +491,35 @@ export class XUIService {
     }
   }
 
-  
   async resetClientTraffic(inboundId: number, email: string): Promise<void> {
     try {
       await this.login();
       const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${encodeURIComponent(email)}`;
       await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
-      console.log(`✅ [XUI] Traffic reset for ${email} on inbound ${inboundId}`);
+      console.log(`✅ [XUI] Traffic reset for ${email}`);
     } catch (err: any) {
-      console.warn(`⚠️ [XUI] Could not reset traffic for ${email} on inbound ${inboundId}: ${err.message}`);
+      console.warn(`⚠️ [XUI] Could not reset traffic for ${email}: ${err.message}`);
     }
   }
-
-  async deleteClient(uuid: string, email: string) {
-    try {
-      await this.login();
-      const realityInbound = this.findRealityInbound(await this.getInbounds(), parseInt(process.env.XUI_INBOUND_ID || '1'));
-      if (realityInbound) {
-        await axios.post(`${this.host}${this.basePath}/panel/api/inbounds/${realityInbound.id}/delClient/${uuid}`, {}, getRequestConfig('', this.authHeaders()));
-      }
-    } catch (e) {}
-  }
 }
+
+// Кэш экземпляров XUIService
+const xuiInstances = new Map<string, XUIService>();
 
 export async function getXuiForServer(serverId: string) {
   const { data: server, error } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
   if (error || !server) throw new Error('Server not found');
-  const instance = new XUIService({ host: server.ip || server.domain, username: server.username, password: server.password });
+
+  const cacheKey = `${server.ip || server.domain}_${server.username}`;
+  let instance = xuiInstances.get(cacheKey);
+
+  if (!instance) {
+    instance = new XUIService({ host: server.ip || server.domain, username: server.username, password: server.password });
+    if (server.domain && !server.domain.startsWith('/')) {
+      instance.displayDomain = server.domain;
+    }
+    xuiInstances.set(cacheKey, instance);
+  }
+
   return { instance, server };
 }
