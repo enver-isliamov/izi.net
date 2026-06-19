@@ -5,6 +5,6 @@ coverage/
 .DS_Store
 *.log
 .env*
-.read only
+.read only/
 !.env.example
 
