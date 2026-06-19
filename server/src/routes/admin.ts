@@ -154,15 +154,50 @@ router.get('/servers/diag', adminOnly, async (req, res) => {
   try {
     const { data: servers, error } = await supabase.from('vpn_servers').select('*').eq('is_active', true).order('created_at', { ascending: false });
     if (error) throw error;
-    const results = await Promise.all((servers || []).map(async (server: any) => {
+
+    const results = [];
+    for (const server of (servers || [])) {
       try {
         const { instance } = await getXuiForServer(server.id);
-        const online = await instance.checkHealth();
-        return { id: server.id, name: server.name, status: online ? 'ok' : 'error', ok: online, online, message: online ? 'X-UI доступен' : 'X-UI не отвечает' };
+        const inbounds = await instance.getInbounds();
+        const realityInbound = inbounds.find((i: any) => {
+          let ss = i.streamSettings;
+          if (typeof ss === 'string') ss = JSON.parse(ss);
+          return ss.security === 'reality';
+        });
+
+        if (!realityInbound) {
+          results.push({ id: server.id, name: server.name, status: 'warning', message: 'Reality inbound не найден' });
+          continue;
+        }
+
+        let ss: any = realityInbound.streamSettings;
+        if (typeof ss === 'string') ss = JSON.parse(ss);
+
+        const realitySettings = ss.realitySettings || {};
+        const rs = realitySettings.settings || realitySettings;
+
+        const sni = (rs.serverNames?.[0] || realitySettings.serverNames?.[0]) || '';
+        const pbk = rs.publicKey || realitySettings.publicKey || '';
+        const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
+
+        const issues: string[] = [];
+        if (!sni) issues.push('SNI (Server Names) пуст');
+        if (!pbk) issues.push('Public Key пуст');
+        if (!sid) issues.push('Short IDs пуст');
+        if (sni && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(sni)) issues.push('SNI не может быть IP-адресом');
+
+        results.push({
+          id: server.id,
+          name: server.name,
+          status: issues.length > 0 ? 'error' : 'ok',
+          details: { sni, pbk, sid, port: realityInbound.port },
+          issues
+        });
       } catch (err: any) {
-        return { id: server.id, name: server.name, status: 'error', ok: false, online: false, error: err.message };
+        results.push({ id: server.id, name: server.name, status: 'offline', message: err.message });
       }
-    }));
+    }
     res.json(results);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

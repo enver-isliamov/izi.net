@@ -508,7 +508,7 @@ export class XUIService {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
       const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       if (response.data?.success && Array.isArray(response.data.obj)) {
-        const uniqueOnlines = [...new Set(response.data.obj.map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
+        const uniqueOnlines = [...new Set((response.data.obj as any[]).map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
         return uniqueOnlines;
       }
       return [];
