@@ -37,6 +37,9 @@ export class RoutingService {
 
           let xrayConfig = JSON.parse(settings.xrayTemplateConfig || '{}');
 
+          // DEBUG: Log current state
+          console.log(`🔍 [Routing] ${server.name} template BEFORE: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
+
           // --- Xray API Initialization (API ядра Xray) ---
           if (!xrayConfig.api) {
             xrayConfig.api = { tag: 'api', services: ['HandlerService', 'LoggerService', 'StatsService'] };
@@ -86,6 +89,9 @@ export class RoutingService {
 
           // Ensure API port is set
           if (settings.apiPort === 0 || !settings.apiPort) settings.apiPort = 62789;
+
+          // DEBUG: Log what we're about to save
+          console.log(`🔍 [Routing] ${server.name} template AFTER: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
 
           await instance.updateSettings(settings);
           await instance.restartPanel();
