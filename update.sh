@@ -29,7 +29,12 @@ echo "🐳 Пересобираю и запускаю контейнеры..."
 docker compose down
 docker compose up -d --build
 
-# 4. Проверка логов
+# 4. Перезапуск x3-ui чтобы перечитать SQLite (xrayTemplateConfig)
+echo "🔄 Перезапускаю x3-ui для применения xray конфига..."
+sleep 3
+docker restart x3-ui
+
+# 5. Проверка логов
 echo -e "${GREEN}⏳ Жду 10 секунд для запуска...${NC}"
 sleep 10
 echo -e "${GREEN}📊 Статус контейнеров:${NC}"

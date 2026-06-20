@@ -94,7 +94,13 @@ export class RoutingService {
           // DEBUG: Log what we're about to save
           console.log(`🔍 [Routing] ${server.name} template AFTER: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
 
-          // Write xrayTemplateConfig directly to SQLite (HTTP API ignores it in X-UI v26.4.25)
+          // 1. Update via HTTP API (JSON format — X-UI v26.4.25 requires JSON, not form-urlencoded)
+          await instance.updateSettings(settings);
+
+          // 2. Restart panel to apply changes to xray core
+          await instance.restartPanel();
+
+          // 3. Write to SQLite as backup (after HTTP update, so it doesn't get overwritten)
           const configJson = JSON.stringify(xrayConfig, null, 2);
           const writeOk = updateXrayTemplateConfig(configJson);
 
@@ -106,10 +112,6 @@ export class RoutingService {
           } else {
             console.error(`❌ [XUI-DB] Verify FAILED — could not read back from SQLite`);
           }
-
-          // Also update apiPort via HTTP API (this works fine)
-          await instance.updateSettings(settings);
-          await instance.restartPanel();
 
           console.log(`✅ [Routing] Rules synced to ${server.name}`);
         } catch (e: any) {
