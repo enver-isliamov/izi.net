@@ -3,8 +3,8 @@ import { getXuiForServer } from './xui.service';
 
 export class RoutingService {
   /**
-   * Pushes routing rules from DB to all active VPN servers
-   * Ensures izinet.online and server IP are ALWAYS 'direct'
+   * Pushes routing rules from DB to all active VPN servers.
+   * Also initializes Xray API inbound, stats, and policy in xrayTemplateConfig.
    */
   static async syncAll() {
     console.log('🔄 [Routing] Synchronizing rules to all panels...');
@@ -13,9 +13,8 @@ export class RoutingService {
       const { data: existing } = await supabase.from('vpn_routing_rules').select('*').limit(1);
       if (!existing || existing.length === 0) {
         await supabase.from('vpn_routing_rules').insert([
-          { name: 'Self-Bypass (Critical)', domains: ['domain:izinet.online', 'full:izinet.online', 'domain:izinet.online'], outbound_tag: 'direct', is_active: true },
-          { name: 'Google/Gemini Services', domains: ['geosite:google', 'geosite:openai'], outbound_tag: 'direct', is_active: true },
-          { name: 'Russia Bypass', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
+          { name: 'Gemini / Google Services', domains: ['geosite:google', 'geosite:openai', 'geosite:gemini', 'domain:ai.com', 'geosite:anthropic'], outbound_tag: 'direct', is_active: true },
+          { name: 'Russia Bypass (GeoIP + GeoSite)', domains: ['geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct', is_active: true }
         ]);
       }
 
@@ -35,30 +34,62 @@ export class RoutingService {
         try {
           const { instance } = await getXuiForServer(server.id);
           const settings = await instance.getSettings();
-          
-          let xrayConfig = JSON.parse(settings.xrayTemplateConfig || '{}');
-          if (!xrayConfig.routing) xrayConfig.routing = { rules: [] };
-          if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
 
-          // Clean old managed rules
-          xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed);
-          
-          // Prepend new rules
-          xrayConfig.routing.rules = [...xrayRules, ...xrayConfig.routing.rules];
-          
-          // INFRA-003: Validate JSON before saving
-          try {
-            JSON.parse(settings.xrayTemplateConfig || '{}');
-          } catch (err) {
-            console.error(`❌ [Routing] Invalid JSON in xrayTemplateConfig for ${server.name}:`, (err as Error).message);
-            continue;
+          let xrayConfig = JSON.parse(settings.xrayTemplateConfig || '{}');
+
+          // --- Xray API Initialization (API ядра Xray) ---
+          if (!xrayConfig.api) {
+            xrayConfig.api = { tag: 'api', services: ['HandlerService', 'LoggerService', 'StatsService'] };
+          }
+          if (!xrayConfig.stats) xrayConfig.stats = {};
+          if (!xrayConfig.policy) {
+            xrayConfig.policy = {
+              levels: { '0': { statsUserUplink: true, statsUserDownlink: true } },
+              system: { statsInboundUplink: true, statsInboundDownlink: true, statsOutboundUplink: true, statsOutboundDownlink: true }
+            };
           }
 
+          // Ensure API inbound exists (dokodemo-door on 127.0.0.1:62789)
+          if (!xrayConfig.inbounds) xrayConfig.inbounds = [];
+          if (!xrayConfig.inbounds.find((i: any) => i.tag === 'api')) {
+            xrayConfig.inbounds.unshift({
+              listen: '127.0.0.1',
+              port: 62789,
+              protocol: 'dokodemo-door',
+              settings: { address: '127.0.0.1' },
+              tag: 'api'
+            });
+          }
+
+          // --- Routing Initialization ---
+          if (!xrayConfig.routing) xrayConfig.routing = {};
+          if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
+
+          // Add api routing if missing
+          if (!xrayConfig.routing.rules.find((r: any) => r.outboundTag === 'api')) {
+            xrayConfig.routing.rules.unshift({
+              inboundTag: ['api'],
+              outboundTag: 'api',
+              type: 'field',
+              izinet_managed: true
+            });
+          }
+
+          // Remove old managed rules (excluding api)
+          xrayConfig.routing.rules = xrayConfig.routing.rules.filter((r: any) => !r.izinet_managed || r.outboundTag === 'api');
+
+          // Prepend current rules from DB
+          const finalRules = xrayRules.map(r => ({ ...r, izinet_managed: true }));
+          xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
+
           settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
+
+          // Ensure API port is set
+          if (settings.apiPort === 0 || !settings.apiPort) settings.apiPort = 62789;
+
           await instance.updateSettings(settings);
-          // Restart core to apply
           await instance.restartPanel();
-          
+
           console.log(`✅ [Routing] Rules synced to ${server.name}`);
         } catch (e: any) {
           console.error(`❌ [Routing] Failed on ${server.name}:`, e.message);
