@@ -278,7 +278,7 @@ export class XUIService {
         const realitySettings = streamSettings.realitySettings || {};
         const rs = realitySettings.settings || realitySettings;
         const sni = rs.serverNames?.[0] || realitySettings.serverNames?.[0] || (hostName && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostName) ? hostName : 'www.microsoft.com');
-        const pbk = (rs.publicKey || realitySettings.publicKey || process.env.XUI_REALITY_PUB_KEY || '').trim();
+        const pbk = (rs.publicKey || realitySettings.publicKey || '').trim();
         const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
         const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
         const spiderX = rs.spiderX || realitySettings.spiderX || '/';
