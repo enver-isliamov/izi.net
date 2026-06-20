@@ -16,6 +16,8 @@ services:
       - NODE_ENV=production
       - XUI_HOST=http://x3-ui:2053
       - IS_DOCKER=true
+    volumes:
+      - ./xui-db:/etc/x-ui
     env_file:
       - .env
     depends_on:

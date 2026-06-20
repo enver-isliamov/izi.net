@@ -487,17 +487,7 @@ export class XUIService {
         }
       }
 
-      // DEBUG: Log what we're sending
-      const hasXrayConfig = encodedData.has('xrayTemplateConfig');
-      const configLength = encodedData.get('xrayTemplateConfig')?.length || 0;
-      console.log(`🔍 [XUI] updateSettings: hasXrayConfig=${hasXrayConfig} configLength=${configLength}`);
-
       await axios.post(url, encodedData.toString(), getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' })));
-      
-      // DEBUG: Verify by reading back
-      const verifySettings = await this.getSettings();
-      const verifyConfig = JSON.parse(verifySettings.xrayTemplateConfig || '{}');
-      console.log(`🔍 [XUI] After update: api=${!!verifyConfig.api} stats=${!!verifyConfig.stats} inbounds=${(verifyConfig.inbounds || []).length}`);
     } catch (e: any) {
       if (e.response?.status === 401) {
         this.sessionCookie = null;

@@ -5,6 +5,9 @@ WORKDIR /app
 # Отключаем интерактивные запросы npm
 ENV CI=true
 
+# Build tools for native modules (better-sqlite3)
+RUN apk add --no-cache python3 make g++
+
 # Копируем только файлы зависимостей
 COPY package.json package-lock.json* ./
 RUN npm install

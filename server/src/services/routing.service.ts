@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
+import { updateXrayTemplateConfig, readXrayTemplateConfig } from './xui-db';
 
 export class RoutingService {
   /**
@@ -93,6 +94,20 @@ export class RoutingService {
           // DEBUG: Log what we're about to save
           console.log(`🔍 [Routing] ${server.name} template AFTER: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
 
+          // Write xrayTemplateConfig directly to SQLite (HTTP API ignores it in X-UI v26.4.25)
+          const configJson = JSON.stringify(xrayConfig, null, 2);
+          const writeOk = updateXrayTemplateConfig(configJson);
+
+          // Verify by reading back from SQLite
+          const verifyRaw = readXrayTemplateConfig();
+          if (verifyRaw) {
+            const verifyConfig = JSON.parse(verifyRaw);
+            console.log(`🔍 [XUI-DB] Verify AFTER write: api=${!!verifyConfig.api} stats=${!!verifyConfig.stats} inbounds=${(verifyConfig.inbounds || []).length} rules=${(verifyConfig.routing?.rules || []).length}`);
+          } else {
+            console.error(`❌ [XUI-DB] Verify FAILED — could not read back from SQLite`);
+          }
+
+          // Also update apiPort via HTTP API (this works fine)
           await instance.updateSettings(settings);
           await instance.restartPanel();
 
