@@ -8,3 +8,4 @@ coverage/
 .read only/
 !.env.example
 
+.read only/Терминал.txt
