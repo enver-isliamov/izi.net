@@ -277,11 +277,24 @@ export class XUIService {
       if (security === 'reality') {
         const realitySettings = streamSettings.realitySettings || {};
         const rs = realitySettings.settings || realitySettings;
-        const sni = rs.serverNames?.[0] || hostName;
-        const pbk = (rs.publicKey || process.env.XUI_REALITY_PUB_KEY || '').trim();
-        const sid = rs.shortIds?.[0] || '';
-        const fp = rs.fingerprint || 'chrome';
-        const spiderX = rs.spiderX || '/';
+        const sni = rs.serverNames?.[0] || realitySettings.serverNames?.[0] || (hostName && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostName) ? hostName : 'www.microsoft.com');
+        const pbk = (rs.publicKey || realitySettings.publicKey || process.env.XUI_REALITY_PUB_KEY || '').trim();
+        const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
+        const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
+        const spiderX = rs.spiderX || realitySettings.spiderX || '/';
+
+        // Валидация Reality параметров
+        const issues: string[] = [];
+        if (!pbk || pbk.includes('m_G-oZ_9a6')) issues.push('Public Key пуст или некорректен');
+        if (!sid) issues.push('Short IDs пуст');
+        if (!sni || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(sni)) issues.push('SNI пуст или является IP');
+
+        if (issues.length > 0) {
+          console.error(`❌ [XUI] Reality validation failed for ${email}: ${issues.join(', ')}`);
+          throw new Error(`Reality настройки некорректны: ${issues.join(', ')}. Проверьте панель X-UI.`);
+        }
+
+        console.log(`✅ [XUI] Reality link for ${email}: SNI=${sni}, SID=${sid.substring(0, 10)}...`);
         let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
         return `${link}#${encodedEmail}`;
       }
