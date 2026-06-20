@@ -322,26 +322,45 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
 
-    // Шаг 1: Деактивировать все активные подписки пользователя
-    await supabase.from('subscriptions')
-      .update({ status: 'expired' })
+    // Шаг 1: Проверяем есть ли уже подписка у пользователя
+    const { data: existingSub } = await supabase
+      .from('subscriptions')
+      .select('*')
       .eq('user_id', userId)
-      .eq('status', 'active');
+      .maybeSingle();
 
-    // Шаг 2: Вставить новую подписку
-    const { data: newSub, error: insertErr } = await supabase.from('subscriptions').insert({
-      user_id: userId,
-      server_id: serverId,
-      plan_type: 'basic',
-      status: 'active',
-      traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
-      traffic_used_mb: 0,
-      device_limit: 2,
-      period_months: parseInt(periodMonths) || 1,
-      expires_at: expiresAt.toISOString(),
-      v2ray_config: '[]'
-    }).select('*').single();
-    if (insertErr) throw insertErr;
+    let subId: string;
+
+    if (existingSub) {
+      // Шаг 2a: Обновляем существующую подписку
+      const { error: updateErr } = await supabase.from('subscriptions').update({
+        status: 'active',
+        expires_at: expiresAt.toISOString(),
+        traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
+        traffic_used_mb: 0,
+        server_id: serverId || existingSub.server_id,
+        v2ray_config: '[]',
+        updated_at: new Date().toISOString()
+      }).eq('id', existingSub.id);
+      if (updateErr) throw updateErr;
+      subId = existingSub.id;
+    } else {
+      // Шаг 2b: Создаём новую подписку
+      const { data: newSub, error: insertErr } = await supabase.from('subscriptions').insert({
+        user_id: userId,
+        server_id: serverId,
+        plan_type: 'basic',
+        status: 'active',
+        traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
+        traffic_used_mb: 0,
+        device_limit: 2,
+        period_months: parseInt(periodMonths) || 1,
+        expires_at: expiresAt.toISOString(),
+        v2ray_config: '[]'
+      }).select('*').single();
+      if (insertErr) throw insertErr;
+      subId = newSub.id;
+    }
 
     // Шаг 3: Создать VPN ключи на всех активных серверах
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
@@ -379,10 +398,10 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     if (devices.length > 0) {
       await supabase.from('subscriptions').update({
         v2ray_config: JSON.stringify(devices)
-      }).eq('id', newSub.id);
+      }).eq('id', subId);
     }
 
-    res.json({ success: true, subscriptionId: newSub.id, devices: devices.length });
+    res.json({ success: true, subscriptionId: subId, devices: devices.length });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
