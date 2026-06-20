@@ -207,6 +207,26 @@ export class XUIService {
     }
   }
 
+  async addInbound(inboundData: any): Promise<any> {
+    await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/add`;
+      const response = await axios.post(url, inboundData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      if (response.data?.success) {
+        console.log(`✅ [XUI] Inbound added: ${inboundData.remark || inboundData.tag}`);
+        return response.data.obj;
+      }
+      throw new Error(response.data?.msg || 'Failed to add inbound');
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        return this.addInbound(inboundData);
+      }
+      console.error(`❌ [XUI] addInbound error: ${error.message}`);
+      throw error;
+    }
+  }
+
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     await this.login();
 

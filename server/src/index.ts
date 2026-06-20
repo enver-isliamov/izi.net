@@ -14,6 +14,7 @@ import axios from 'axios';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
 import { MaintenanceService } from './services/maintenance.service';
+import { RoutingService } from './services/routing.service';
 
 import adminRoutes from './routes/admin';
 import paymentRoutes from './routes/payments';
@@ -114,6 +115,8 @@ async function start() {
   if (dbOk) {
     botService.init();
     MaintenanceService.init();
+    // Восстановление inbound'ов из backup при старте
+    RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
   }
   app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));
 }

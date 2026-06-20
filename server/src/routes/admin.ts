@@ -389,6 +389,20 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
             serverId: server.id
           });
         }
+        // ADMIN-013: Автоматический backup inbound'ов после addClient
+        try {
+          const inbounds = await instance.getInbounds();
+          await supabase.from('vpn_servers').update({
+            xui_config_state: {
+              inbounds: inbounds,
+              backup_at: new Date().toISOString(),
+              server_name: server.name,
+              ip: server.ip
+            }
+          }).eq('id', server.id);
+        } catch (backupErr: any) {
+          console.warn(`⚠️ [Admin] Backup failed for ${server.name}: ${backupErr.message}`);
+        }
       } catch (e: any) {
         console.warn(`⚠️ [Admin] Failed to provision on ${server.name}: ${e.message}`);
       }

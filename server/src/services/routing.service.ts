@@ -99,4 +99,52 @@ export class RoutingService {
       console.error('❌ [Routing] Sync failed:', err.message);
     }
   }
+
+  /**
+   * Restores inbound configs from Supabase backup to X-UI panels.
+   * Called at server startup to restore configs after fresh deploy or reinstall.
+   */
+  static async restoreAllPanelsFromBackup() {
+    console.log('🔄 [Routing] Checking for panels that need config restoration...');
+    try {
+      const { data: servers } = await supabase
+        .from('vpn_servers')
+        .select('*')
+        .eq('is_active', true);
+
+      if (!servers) return;
+
+      for (const server of servers) {
+        const configState = server.xui_config_state;
+        if (!configState?.inbounds?.length) continue;
+
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          const currentInbounds = await instance.getInbounds();
+
+          // Если inbound'ов нет — восстанавливаем из backup
+          if (currentInbounds.length === 0) {
+            console.log(`🔄 [Routing] Restoring ${configState.inbounds.length} inbounds for ${server.name}...`);
+            for (const inbound of configState.inbounds) {
+              const newInbound = { ...inbound };
+              delete (newInbound as any).id;
+              delete (newInbound as any).up;
+              delete (newInbound as any).down;
+              delete (newInbound as any).total;
+              try {
+                await instance.addInbound(newInbound);
+              } catch (e: any) {
+                console.warn(`⚠️ [Routing] Failed to restore inbound ${inbound.remark || inbound.id}: ${e.message}`);
+              }
+            }
+            console.log(`✅ [Routing] Restored ${configState.inbounds.length} inbounds for ${server.name}`);
+          }
+        } catch (e: any) {
+          console.warn(`⚠️ [Routing] Could not check/restore ${server.name}: ${e.message}`);
+        }
+      }
+    } catch (err: any) {
+      console.error('❌ [Routing] Restore failed:', err.message);
+    }
+  }
 }
