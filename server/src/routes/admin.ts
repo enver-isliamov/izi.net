@@ -360,15 +360,17 @@ router.post('/servers/:id/restore', adminOnly, async (req, res) => {
       updateXrayTemplateConfig(configState.xrayTemplateConfig);
     }
 
-    console.log(`[Restore] Restarting x3-ui to apply changes...`);
-    await restartContainer('x3-ui');
-
     res.json({ 
       success: true, 
-      message: 'Конфигурация (инбаунды и клиенты) успешно восстановлена на сервер',
+      message: 'Конфигурация (инбаунды и клиенты) успешно восстановлена. x3-ui перезапускается...',
       restored_inbounds: restoredCount,
       has_xray_config: !!configState.xrayTemplateConfig
     });
+
+    setTimeout(() => {
+      console.log(`[Restore] Restarting x3-ui to apply changes...`);
+      restartContainer('x3-ui').catch(e => console.error(`[Restore] Restart failed: ${e.message}`));
+    }, 1000);
   } catch (err: any) {
     console.error(`[AdminRestore] Error for server ${id}:`, err.message);
     res.status(500).json({ error: 'Ошибка при восстановлении бэкапа: ' + err.message });

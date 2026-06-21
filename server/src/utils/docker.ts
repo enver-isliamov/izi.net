@@ -1,35 +1,22 @@
-import http from 'http';
+import { exec } from 'child_process';
 
 export function restartContainer(containerName: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const socketPath = process.env.DOCKER_SOCKET || '/var/run/docker.sock';
-    
-    const req = http.request({
-      socketPath,
-      path: `/containers/${containerName}/restart?t=5`,
-      method: 'POST',
-      timeout: 15000,
-    }, (res) => {
-      if (res.statusCode === 204 || res.statusCode === 200) {
+    const isDocker = process.env.IS_DOCKER === 'true';
+    if (!isDocker) {
+      console.warn(`⚠️ [Docker] Not in Docker, skipping restart of ${containerName}`);
+      resolve(false);
+      return;
+    }
+
+    exec(`docker restart ${containerName}`, { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.warn(`⚠️ [Docker] Could not restart ${containerName}: ${error.message}`);
+        resolve(false);
+      } else {
         console.log(`✅ [Docker] Container ${containerName} restarted successfully`);
         resolve(true);
-      } else {
-        console.warn(`⚠️ [Docker] Restart returned status ${res.statusCode}`);
-        resolve(false);
       }
     });
-    
-    req.on('error', (err) => {
-      console.warn(`⚠️ [Docker] Could not restart ${containerName}: ${err.message}`);
-      resolve(false);
-    });
-    
-    req.on('timeout', () => {
-      req.destroy();
-      console.warn(`⚠️ [Docker] Restart timeout for ${containerName}`);
-      resolve(false);
-    });
-    
-    req.end();
   });
 }

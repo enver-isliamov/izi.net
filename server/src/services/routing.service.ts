@@ -121,7 +121,7 @@ export class RoutingService {
       }
 
       console.log('🔄 [Routing] Restarting x3-ui to apply xrayTemplateConfig...');
-      await restartContainer('x3-ui');
+      restartContainer('x3-ui').catch(e => console.warn(`⚠️ [Routing] x3-ui restart failed: ${e.message}`));
 
     } catch (err: any) {
       console.error('❌ [Routing] Sync failed:', err.message);

@@ -31,6 +31,9 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 
+# Docker CLI for container restart (restart x3-ui after config changes)
+RUN apk add --no-cache docker-cli
+
 # Копируем результат сборки
 COPY --from=builder /app ./
 
