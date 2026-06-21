@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
 import { updateXrayTemplateConfig, readXrayTemplateConfig } from './xui-db';
+import { restartContainer } from '../utils/docker';
 
 export class RoutingService {
   /**
@@ -118,6 +119,10 @@ export class RoutingService {
           console.error(`❌ [Routing] Failed on ${server.name}:`, e.message);
         }
       }
+
+      console.log('🔄 [Routing] Restarting x3-ui to apply xrayTemplateConfig...');
+      await restartContainer('x3-ui');
+
     } catch (err: any) {
       console.error('❌ [Routing] Sync failed:', err.message);
     }

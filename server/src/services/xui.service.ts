@@ -405,6 +405,22 @@ export class XUIService {
     }
   }
 
+  async deleteInbound(inboundId: number): Promise<void> {
+    await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/del/${inboundId}`;
+      await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
+      console.log(`✅ [XUI] Inbound ${inboundId} deleted from ${this.host}`);
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.deleteInbound(inboundId);
+      }
+      console.warn(`⚠️ [XUI] deleteInbound error: ${error.message}`);
+    }
+  }
+
   async deleteClient(uuid: string, email?: string) {
     if (!this.sessionCookie) await this.login();
 

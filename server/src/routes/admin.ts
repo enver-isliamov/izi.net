@@ -4,6 +4,11 @@ import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
 import { parseVpnDevices, VpnDevice } from '../utils/vpn';
+import { updateXrayTemplateConfig } from '../services/xui-db';
+import { getRequestConfig } from '../utils/axios';
+import { restartContainer } from '../utils/docker';
+import axios from 'axios';
+import http from 'http';
 import crypto from 'crypto';
 import { paymentService } from '../services/payment.service';
 
@@ -247,7 +252,46 @@ router.delete('/servers/:id', adminOnly, async (req, res) => {
 });
 
 router.post('/servers/:id/backup', adminOnly, async (req, res) => {
-  res.json({ success: true, message: 'Бэкап сохранен в текущей конфигурации сервера' });
+  const { id } = req.params;
+  try {
+    const { instance, server } = await getXuiForServer(id);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+
+    console.log(`[Backup] Starting cloud backup for server: ${server.name} (${id})`);
+    
+    const inbounds = await instance.getInbounds();
+    if (!inbounds || inbounds.length === 0) {
+      return res.status(400).json({ error: 'На сервере не найдено инбаундов для бэкапа.' });
+    }
+
+    const settings = await instance.getSettings();
+    const xrayTemplateConfig = settings.xrayTemplateConfig || null;
+
+    const { error } = await supabase
+      .from('vpn_servers')
+      .update({ 
+        xui_config_state: { 
+          inbounds: inbounds, 
+          xrayTemplateConfig: xrayTemplateConfig,
+          backup_at: new Date().toISOString(),
+          server_name: server.name,
+          ip: server.ip
+        } 
+      })
+      .eq('id', id);
+
+    if (error) throw error;
+
+    res.json({ 
+      success: true, 
+      message: 'Конфигурация сервера успешно сохранена в Supabase',
+      inbounds_count: inbounds.length,
+      has_xray_config: !!xrayTemplateConfig
+    });
+  } catch (err: any) {
+    console.error(`[AdminBackup] Error for server ${id}:`, err.message);
+    res.status(500).json({ error: 'Ошибка при создании бэкапа: ' + err.message });
+  }
 });
 
 router.post('/servers/:id/check', adminOnly, async (req, res) => {
@@ -259,7 +303,76 @@ router.post('/servers/:id/check', adminOnly, async (req, res) => {
 });
 
 router.post('/servers/:id/restore', adminOnly, async (req, res) => {
-  res.json({ success: true, message: 'Restore logic executed' });
+  const { id } = req.params;
+  const { sourceId } = req.body || {};
+  try {
+    const { instance, server } = await getXuiForServer(id);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+
+    console.log(`[Restore] Starting cloud restore for server: ${server.name} (${id}) ${sourceId ? `from source server ID: ${sourceId}` : ''}`);
+    
+    let configState: any;
+    if (sourceId) {
+      const { data: sourceServer, error: sErr } = await supabase
+        .from('vpn_servers')
+        .select('xui_config_state, name')
+        .eq('id', sourceId)
+        .maybeSingle();
+      
+      if (sErr) throw sErr;
+      if (!sourceServer?.xui_config_state?.inbounds) {
+        return res.status(400).json({ error: `В базе нет инбаундов для сервера-источника ${sourceServer?.name || sourceId}. Сделайте бэкап с него сначала.` });
+      }
+      configState = sourceServer.xui_config_state;
+    } else {
+      if (!server.xui_config_state?.inbounds) {
+        return res.status(400).json({ error: 'В базе нет инбаундов для этого сервера. Сделайте бэкап сначала.' });
+      }
+      configState = server.xui_config_state;
+    }
+    
+    const inbounds = configState.inbounds;
+    
+    await instance.login(true);
+
+    const existingInbounds = await instance.getInbounds();
+    
+    let restoredCount = 0;
+    for (const inbound of inbounds) {
+      const exists = existingInbounds.find((ei: any) => ei.port === inbound.port && ei.protocol === inbound.protocol);
+      if (exists) {
+        console.log(`[Restore] Deleting existing inbound on port ${inbound.port}`);
+        await instance.deleteInbound(exists.id);
+      }
+      
+      const newInbound = { ...inbound };
+      delete (newInbound as any).id;
+      (newInbound as any).up = 0;
+      (newInbound as any).down = 0;
+      
+      console.log(`[Restore] Creating inbound: ${inbound.remark} on port ${inbound.port}`);
+      await instance.addInbound(newInbound);
+      restoredCount++;
+    }
+
+    if (configState.xrayTemplateConfig) {
+      console.log(`[Restore] Restoring xrayTemplateConfig from backup...`);
+      updateXrayTemplateConfig(configState.xrayTemplateConfig);
+    }
+
+    console.log(`[Restore] Restarting x3-ui to apply changes...`);
+    await restartContainer('x3-ui');
+
+    res.json({ 
+      success: true, 
+      message: 'Конфигурация (инбаунды и клиенты) успешно восстановлена на сервер',
+      restored_inbounds: restoredCount,
+      has_xray_config: !!configState.xrayTemplateConfig
+    });
+  } catch (err: any) {
+    console.error(`[AdminRestore] Error for server ${id}:`, err.message);
+    res.status(500).json({ error: 'Ошибка при восстановлении бэкапа: ' + err.message });
+  }
 });
 
 router.post('/system/sync-servers', adminOnly, async (req, res) => {
