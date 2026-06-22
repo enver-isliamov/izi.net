@@ -584,7 +584,8 @@ router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req
       try {
         const { instance } = await getXuiForServer(server.id);
         if (oldDevice.uuid && oldDevice.email) await instance.deleteClient(oldDevice.uuid, oldDevice.email).catch(() => {});
-        const cfg = await instance.addClient(newEmail, newUuid, 1, expiresAtMs, limitBytes);
+        const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+        const cfg = await instance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
         if (cfg) configs.push(cfg.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
       } catch (err: any) {
         console.warn(`⚠️ [Admin] regenerate failed on ${server.name}: ${err.message}`);
