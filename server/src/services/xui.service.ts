@@ -287,11 +287,27 @@ export class XUIService {
       } else {
         const msg = response.data?.msg || JSON.stringify(response.data);
         console.error(`❌ [XUI] addClient failed for ${email}: ${msg}`);
+        // If "record not found" — session might be stale, force re-login and retry once
+        if (msg.includes('record not found') || msg.includes('not found')) {
+          console.log(`🔄 [XUI] Forcing re-login due to "${msg}" and retrying...`);
+          this.sessionCookie = null;
+          this.csrfToken = null;
+          await this.login(true);
+          // Retry addClient once
+          const retryResp = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+          if (retryResp.data?.success) {
+            console.log(`✅ [XUI] Client ${email} added on retry to ${this.host}`);
+            return this.getInboundLink(inboundId, uuid, email);
+          }
+          const retryMsg = retryResp.data?.msg || JSON.stringify(retryResp.data);
+          throw new Error(`Retry also failed: ${retryMsg}`);
+        }
         throw new Error(msg || 'Failed to add client');
       }
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.sessionCookie = null;
+        this.csrfToken = null;
         return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
       console.error(`❌ [XUI] addClient error for ${email}: ${error.message}`);
