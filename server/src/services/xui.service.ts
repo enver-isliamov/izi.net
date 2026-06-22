@@ -239,8 +239,17 @@ export class XUIService {
         if (streamSettings.security === 'reality') flow = 'xtls-rprx-vision';
       }
     } catch (e) {
-      console.warn(`⚠️ [XUI] Could not fetch inbound settings`);
+      console.warn(`⚠️ [XUI] Could not fetch inbound settings for ${inboundId}`);
     }
+
+    // First, try to delete old client if exists (clean stale records)
+    try {
+      const existingClient = await this.getClientByEmail(inboundId, email);
+      if (existingClient?.id) {
+        console.log(`🔄 [XUI] Deleting stale client ${email} (id: ${existingClient.id}) before re-adding`);
+        await this.deleteClient(existingClient.id, email);
+      }
+    } catch (e) {}
 
     const clientData = {
       id: inboundId,
@@ -257,14 +266,8 @@ export class XUIService {
         console.log(`✅ [XUI] Client ${email} added to ${this.host}`);
         return this.getInboundLink(inboundId, uuid, email);
       } else {
-        const msg = response.data?.msg || '';
-        if (msg.includes('Duplicate email')) {
-          const serverClient = await this.getClientByEmail(inboundId, email);
-          const effectiveUuid = serverClient?.id || uuid;
-          const effectiveInboundId = serverClient?.inboundId || inboundId;
-          await this.updateClient(email, effectiveUuid, effectiveInboundId, expiryTime, limitBytes);
-          return this.getInboundLink(effectiveInboundId, effectiveUuid, email);
-        }
+        const msg = response.data?.msg || JSON.stringify(response.data);
+        console.error(`❌ [XUI] addClient failed for ${email}: ${msg}`);
         throw new Error(msg || 'Failed to add client');
       }
     } catch (error: any) {
@@ -272,7 +275,7 @@ export class XUIService {
         this.sessionCookie = null;
         return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
-      console.error(`❌ [XUI] addClient error: ${error.message}`);
+      console.error(`❌ [XUI] addClient error for ${email}: ${error.message}`);
       throw error;
     }
   }
