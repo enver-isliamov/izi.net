@@ -146,7 +146,7 @@ except Exception as e:
                     *FINGERPRINT*) check_warn "$issue" "В 3x-ui → vpn-main → Stream → uTLS → chrome" ;;
                     *microsoft.com*) check_warn "$issue" "В 3x-ui → vpn-main → Stream → Server Names → добавить microsoft.com" ;;
                     *SPIDERX*) check_warn "$issue" "В 3x-ui → vpn-main → Stream → SpiderX → /" ;;
-                    *NO FALLBACK*) check_fail "$issue" "В 3x-ui → vpn-main → Protocol → добавить fallback rules" ;;
+                    *"NO FALLBACK"*) check_fail "$issue" "В 3x-ui → vpn-main → Protocol → добавить fallback rules" ;;
                     *SNIFFING*) check_fail "$issue" "В 3x-ui → vpn-main → Sniffing → включить" ;;
                     *) check_warn "$issue" "" ;;
                 esac

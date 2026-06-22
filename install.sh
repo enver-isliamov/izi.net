@@ -114,7 +114,6 @@ echo "Configuring Nginx on port 3443..."
 cat <<NGINXEOF | sudo tee /etc/nginx/sites-available/izinet > /dev/null
 server {
     listen 3443 ssl;
-    http2 on;
     server_name $DOMAIN www.$DOMAIN;
 
     ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
