@@ -112,46 +112,34 @@ fi
 echo "Configuring Nginx on port 3443..."
 
 cat <<NGINXEOF | sudo tee /etc/nginx/sites-available/izinet > /dev/null
-events {
-    worker_connections 1024;
+server {
+    listen 3443 ssl;
+    http2 on;
+    server_name $DOMAIN www.$DOMAIN;
+
+    ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    add_header X-Backend-Server "izinet-app" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3005;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
 }
 
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-
-    access_log /var/log/nginx/izinet_access.log;
-    error_log  /var/log/nginx/izinet_error.log info;
-
-    server {
-        listen 3443 ssl;
-        http2 on;
-        server_name $DOMAIN www.$DOMAIN;
-
-        ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-        ssl_protocols       TLSv1.2 TLSv1.3;
-        ssl_ciphers         HIGH:!aNULL:!MD5;
-
-        add_header X-Backend-Server "izinet-app" always;
-
-        location / {
-            proxy_pass http://127.0.0.1:3005;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
-        }
-    }
-
-    server {
-        listen 80;
-        server_name $DOMAIN www.$DOMAIN;
-        return 301 https://\$host\$request_uri;
-    }
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+    return 301 https://\$host\$request_uri;
 }
 NGINXEOF
 

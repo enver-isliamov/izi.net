@@ -1,89 +1,101 @@
 #!/bin/bash
-# izinet VPS Diagnostic Tool
-# This script inspects the VPS networks, docker containers, sqlite settings, SSL certificates, and local ports.
+# ══════════════════════════════════════════════════════════════
+# IZINET VPS — Автоматическая диагностика
+# Запуск: bash diagnose.sh 2>&1 | tee /tmp/diag_result.txt
+# Копируйте вывод и скидывайте для анализа.
+# ══════════════════════════════════════════════════════════════
 
-echo "============================================="
-echo "🔍 НАЧАЛО ДИАГНОСТИКИ СЕРВЕРА IZINET"
-echo "============================================="
-echo "Текущее время: $(date)"
-echo ""
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+BOLD='\033[1m'
 
-# 1. Проверка существования и контента БД X-UI
-echo "--- 📦 1. Конфигурация Панели 3x-ui (SQLite DB) ---"
-DB_PATH="/opt/izinet/xui-db/x-ui.db"
-if [ -f "$DB_PATH" ]; then
-    echo "✅ Файл базы данных найден: $DB_PATH"
-    
-    # Пытаемся найти sqlite3 на хосте, если нет — используем Python, который гарантированно есть на VPS
-    if command -v sqlite3 &> /dev/null; then
-        echo "Порт, базовый путь и сертификаты из базы настроек:"
-        sqlite3 "$DB_PATH" "SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');"
-    else
-        echo "sqlite3 не установлен на хосте. Извлекаем данные конфигурации с помощью Python3..."
-        python3 -c "import sqlite3; conn=sqlite3.connect('$DB_PATH'); c=conn.cursor(); c.execute(\"SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');\"); print('\n'.join(f'  🔹 {r[0]}: {r[1]}' for r in c.fetchall()))" 2>/dev/null || {
-            echo "Пробуем прочитать через докер..."
-            docker exec x3-ui sqlite3 /etc/x-ui/x-ui.db "SELECT key, value FROM settings WHERE key IN ('webPort', 'webBasePath', 'webCertFile', 'webKeyFile');" 2>/dev/null || echo "❌ Не удалось прочитать БД даже через докер."
-        }
-    fi
+OK=0; FAIL=0; WARN=0
+
+check_ok()   { echo -e "  ${GREEN}[✅ OK]${NC}    $1"; ((OK++)); }
+check_fail() { echo -e "  ${RED}[❌ FAIL]${NC}  $1"; echo -e "           ${YELLOW}→ ИСПРАВЛЕНИЕ: $2${NC}"; ((FAIL++)); }
+check_warn() { echo -e "  ${YELLOW}[⚠️ WARN]${NC}  $1"; echo -e "           ${YELLOW}→ РЕКОМАЦИЯ: $2${NC}"; ((WARN++)); }
+section()    { echo -e "\n${BOLD}═══ $1 ═══${NC}"; }
+
+echo "═══════════════════════════════════════════════"
+echo "  IZINET VPS — ДИАГНОСТИКА"
+echo "  $(date)"
+echo "  Сервер: $(hostname) ($(curl -s ifconfig.me 2>/dev/null || echo 'N/A'))"
+echo "═══════════════════════════════════════════════"
+
+# ─── 1. Docker контейнеры ─────────────────────────────────────
+section "1. Docker контейнеры"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    check_ok "x3-ui запущен"
+    docker ps --filter name=x3-ui --format '           Порты: {{.Ports}}'
 else
-    echo "❌ Файл базы данных x-ui.db по пути $DB_PATH НЕ найден!"
+    check_fail "x3-ui НЕ запущен" "cd /opt/izinet && docker compose up -d x3-ui"
 fi
-echo ""
 
-# 2. Проверка SSL Сертификатов
-echo "--- 🔑 2. Наличие SSL Сертификатов на хосте ---"
-CERT_DIR="/opt/izinet/xui-cert"
-if [ -d "$CERT_DIR" ]; then
-    echo "Содержимое папки сертификатов $CERT_DIR:"
-    ls -la "$CERT_DIR"
+if docker ps --format '{{.Names}}' | grep -q izinet-app; then
+    check_ok "izinet-app запущен"
+    docker ps --filter name=izinet-app --format '           Порты: {{.Ports}}'
 else
-    echo "❌ Директория сертификатов $CERT_DIR НЕ найдена!"
+    check_fail "izinet-app НЕ запущен" "cd /opt/izinet && docker compose up -d izinet-app"
 fi
-echo ""
 
-# 2.5 Вывод конфигурационных файлов Nginx для детального анализа
-echo "--- 📄 2.5 Конфигурационные файлы Nginx ---"
-NGINX_CONF_PATHS=(
-    "/etc/nginx/sites-available/izinet"
-    "/etc/nginx/sites-enabled/izinet"
-    "/etc/nginx/nginx.conf"
-)
-for p in "${NGINX_CONF_PATHS[@]}"; do
-    if [ -f "$p" ]; then
-        echo "📂 Файл конфигурации: $p"
-        echo "----------------------------------------------------"
-        cat "$p" | grep -v '^\s*#' | grep -v '^\s*$' # убираем пустые строки и комментарии для чистоты
-        echo "----------------------------------------------------"
-    else
-        echo "⚠️  Файл конфигурации $p не найден."
-    fi
-    echo ""
-done
+# ─── 2. Nginx на хосте ────────────────────────────────────────
+section "2. Nginx на хосте"
 
-# 2.6 Проверка запущенных процессов на ключевых портах
-echo "--- 🔌 2.6 Проверка процессов на портах (443, 3443, 3005, 2053) ---"
-if command -v ss &>/dev/null; then
-    ss -tlnp | grep -E "(:443|:3443|:3005|:2053)" || echo "⚠️ Не удалось получить список портов через ss (возможно, нет прав root)"
-elif command -v netstat &>/dev/null; then
-    netstat -tlnp | grep -E "(:443|:3443|:3005|:2053)" || echo "⚠️ Не удалось получить список портов через netstat"
+if command -v nginx &>/dev/null; then
+    check_ok "nginx установлен ($(nginx -v 2>&1))"
 else
-    echo "⚠️ ss и netstat отсутствуют на хосте."
+    check_fail "nginx НЕ установлен" "apt-get install -y nginx"
 fi
-echo ""
 
-# 2.7 Проверка Reality Inbound и ключей
-echo "--- 🔐 2.7 Проверка Reality Inbound (порт 443) ---"
-if docker ps | grep -q "x3-ui"; then
+if sudo nginx -t 2>&1 | grep -q "successful"; then
+    check_ok "nginx -t проходит"
+else
+    NGINX_ERR=$(sudo nginx -t 2>&1)
+    check_fail "nginx -t ОШИБКА: $NGINX_ERR" "Исправить /etc/nginx/sites-available/izinet"
+fi
+
+if ss -tlnp 2>/dev/null | grep -q ":3443"; then
+    check_ok "nginx слушает 3443"
+elif ss -tlnp 2>/dev/null | grep ":443" | grep -q nginx; then
+    check_fail "nginx слушает 443 (КОНФЛИКТ с x3-ui!)" "Изменить listen на 3443 в /etc/nginx/sites-available/izinet"
+else
+    check_fail "nginx НЕ слушает 3443" "systemctl restart nginx"
+fi
+
+# Проверка SSL сертификата
+CERT_DIR="/etc/letsencrypt/live/izinet.online"
+if [ -f "$CERT_DIR/fullchain.pem" ]; then
+    EXPIRY=$(openssl x509 -enddate -noout -in "$CERT_DIR/fullchain.pem" 2>/dev/null | cut -d= -f2)
+    check_ok "SSL сертификат существует (до: $EXPIRY)"
+else
+    check_fail "SSL сертификат НЕ найден в $CERT_DIR" "certbot certonly --standalone -d izinet.online -d www.izinet.online"
+fi
+
+# Проверка curl localhost:3443
+CURL_3443=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 3 https://127.0.0.1:3443/ 2>/dev/null)
+if [ "$CURL_3443" = "200" ] || [ "$CURL_3443" = "301" ] || [ "$CURL_3443" = "302" ]; then
+    check_ok "curl localhost:3443 → HTTP $CURL_3443"
+else
+    check_fail "curl localhost:3443 → HTTP $CURL_3443 (сайт не отвечает)" "Проверить Nginx и SSL"
+fi
+
+# ─── 3. Reality inbound (порт 443) ────────────────────────────
+section "3. Reality inbound (порт 443)"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
     REALITY_CHECK=$(docker exec x3-ui python3 -c "
 import sqlite3, json, sys
 try:
     conn = sqlite3.connect('/etc/x-ui/x-ui.db')
     c = conn.cursor()
-    c.execute(\"SELECT id, port, settings, stream_settings, sniffing FROM inbounds WHERE port=443\")
+    c.execute('SELECT id, port, settings, stream_settings, sniffing FROM inbounds WHERE port=443')
     row = c.fetchone()
     conn.close()
     if not row:
-        print('MISSING: No inbound on port 443')
+        print('MISSING')
         sys.exit(1)
     iid, port, sett_raw, stream_raw, sniff_raw = row
     ss = json.loads(stream_raw or '{}')
@@ -91,7 +103,7 @@ try:
     snif = json.loads(sniff_raw or '{}')
     security = ss.get('security', 'none')
     if security != 'reality':
-        print(f'WRONG_SECURITY: {security} (expected reality)')
+        print(f'WRONG_SECURITY:{security}')
         sys.exit(1)
     rs = ss.get('realitySettings', {})
     inner = rs.get('settings', rs)
@@ -102,153 +114,305 @@ try:
     spx = inner.get('spiderX', rs.get('spiderX', ''))
     fb = sett.get('fallbacks', [])
     issues = []
-    if not pbk or 'm_G-oZ_9a6' in pbk: issues.append('publicKey empty/invalid')
-    if not sid: issues.append('shortIds empty')
-    if not sni or sni.replace('.','').isdigit(): issues.append(f'SNI invalid: {sni}')
-    if fp and fp != 'chrome': issues.append(f'fingerprint={fp} (should be chrome)')
-    if spx and spx != '/': issues.append(f'spiderX={spx} (should be /)')
-    if not fb: issues.append('NO fallback rules!')
-    if not snif.get('enabled'): issues.append('SNI sniffing disabled!')
-    dests = [f.get('dest','') for f in fb]
-    if fb and not any('3443' in d for d in dests): issues.append(f'fallback dest missing :3443')
+    if not pbk or 'CXL0o8BEC7wz' in pbk or 'm_G-oZ_9a6' in pbk:
+        issues.append(f'PUBLIC_KEY HARDCODED: {pbk[:20]}...')
+    if fp and fp != 'chrome':
+        issues.append(f'FINGERPRINT={fp} (should be chrome)')
+    if 'microsoft.com' not in str(rs.get('serverNames', [])) and 'microsoft.com' not in str(inner.get('serverNames', [])):
+        issues.append('ServerNames missing microsoft.com')
+    if spx and spx != '/':
+        issues.append(f'SPIDERX={spx} (should be /)')
+    if not fb:
+        issues.append('NO FALLBACK RULES!')
+    if not snif.get('enabled'):
+        issues.append('SNIFFING DISABLED!')
     if issues:
-        print(f'ISSUES: {\";\".join(issues)}')
+        print(f'ISSUES:{\";\".join(issues)}')
         sys.exit(2)
-    print(f'OK: pbk={pbk[:15]}... sni={sni} fp={fp} spx={spx} fb={len(fb)} sniff={snif.get(\"enabled\",False)}')
+    print(f'OK:pbk={pbk[:15]}...;sni={sni};fp={fp};fb={len(fb)};sniff={snif.get(\"enabled\",False)}')
 except Exception as e:
-    print(f'ERROR: {e}')
+    print(f'ERROR:{e}')
     sys.exit(3)
 " 2>/dev/null)
 
     case $? in
-        0) echo "  🟢 Reality Inbound: $REALITY_CHECK" ;;
-        1) echo "  🔴 Reality Inbound: $REALITY_CHECK" ;;
-        2) echo "  🟡 Reality Inbound: $REALITY_CHECK" ;;
-        3) echo "  🔴 Reality Inbound: $REALITY_CHECK" ;;
-        *) echo "  ⚠️ Could not check Reality inbound" ;;
+        0) check_ok "Reality inbound (порт 443): $(echo $REALITY_CHECK | sed 's/OK://')" ;;
+        1) check_fail "Reality inbound: $REALITY_CHECK" "Запустить python3 xui_bootstrap.py --wait-db 5" ;;
+        2) {
+            IFS=';' read -ra ISSUES <<< "$(echo $REALITY_CHECK | sed 's/ISSUES://')"
+            for issue in "${ISSUES[@]}"; do
+                case $issue in
+                    *HARDCODED*) check_fail "$issue" "В 3x-ui → vpn-main → Stream → Get New Cert" ;;
+                    *FINGERPRINT*) check_warn "$issue" "В 3x-ui → vpn-main → Stream → uTLS → chrome" ;;
+                    *microsoft.com*) check_warn "$issue" "В 3x-ui → vpn-main → Stream → Server Names → добавить microsoft.com" ;;
+                    *SPIDERX*) check_warn "$issue" "В 3x-ui → vpn-main → Stream → SpiderX → /" ;;
+                    *NO FALLBACK*) check_fail "$issue" "В 3x-ui → vpn-main → Protocol → добавить fallback rules" ;;
+                    *SNIFFING*) check_fail "$issue" "В 3x-ui → vpn-main → Sniffing → включить" ;;
+                    *) check_warn "$issue" "" ;;
+                esac
+            done
+        } ;;
+        *) check_warn "Не удалось проверить Reality inbound (контейнер не запущен?)" "" ;;
     esac
+else
+    check_fail "x3-ui не запущен — невозможно проверить Reality" ""
+fi
 
-    # Проверка что ключи в БД не являются хардкод
-    KNOWN_BAD_PUB="CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw"
-    ACTUAL_PUB=$(docker exec x3-ui python3 -c "
+# ─── 4. Fallback rules ────────────────────────────────────────
+section "4. Fallback rules (Xray → Nginx)"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    FB_CHECK=$(docker exec x3-ui python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('/etc/x-ui/x-ui.db')
 c = conn.cursor()
-c.execute(\"SELECT stream_settings FROM inbounds WHERE port=443\")
+c.execute('SELECT settings FROM inbounds WHERE port=443')
+row = c.fetchone()
+conn.close()
+if not row:
+    print('NO_INBOUND')
+else:
+    sett = json.loads(row[0] or '{}')
+    fb = sett.get('fallbacks', [])
+    if not fb:
+        print('NO_FALLBACKS')
+    else:
+        ok = True
+        for f in fb:
+            dest = f.get('dest', '')
+            if '3443' not in dest:
+                ok = False
+                print(f'BAD_DEST:{dest}')
+        if ok:
+            print(f'OK:{len(fb)} rules → host.docker.internal:3443')
+" 2>/dev/null)
+
+    if echo "$FB_CHECK" | grep -q "^OK:"; then
+        check_ok "Fallback: $FB_CHECK"
+    elif echo "$FB_CHECK" | grep -q "NO_FALLBACKS"; then
+        check_fail "Нет fallback rules в inbound" "В 3x-ui → vpn-main → Protocol → Fallbacks → добавить"
+    elif echo "$FB_CHECK" | grep -q "BAD_DEST:"; then
+        DEST=$(echo $FB_CHECK | cut -d: -f2)
+        check_fail "Fallback dest НЕ на 3443: $DEST" "Изменить dest на host.docker.internal:3443"
+    else
+        check_warn "Не удалось проверить fallback" ""
+    fi
+fi
+
+# ─── 5. Sniffing ──────────────────────────────────────────────
+section "5. SNI Sniffing"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    SNIFF_CHECK=$(docker exec x3-ui python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('/etc/x-ui/x-ui.db')
+c = conn.cursor()
+c.execute('SELECT sniffing FROM inbounds WHERE port=443')
+row = c.fetchone()
+conn.close()
+if not row:
+    print('NO_INBOUND')
+else:
+    snif = json.loads(row[0] or '{}')
+    enabled = snif.get('enabled', False)
+    dest = snif.get('destOverride', [])
+    route_only = snif.get('routeOnly', False)
+    issues = []
+    if not enabled: issues.append('disabled')
+    if 'http' not in dest: issues.append('missing http')
+    if 'tls' not in dest: issues.append('missing tls')
+    if route_only: issues.append('routeOnly=true')
+    if issues:
+        print(f'ISSUES:{\";\".join(issues)}')
+    else:
+        print('OK:enabled;http+tls;routeOnly=false')
+" 2>/dev/null)
+
+    if echo "$SNIFF_CHECK" | grep -q "^OK:"; then
+        check_ok "Sniffing: $SNIFF_CHECK"
+    else
+        check_fail "Sniffing: $(echo $SNIFF_CHECK | sed 's/ISSUES://')" "В 3x-ui → vpn-main → Sniffing → включить HTTP+TLS"
+    fi
+fi
+
+# ─── 6. Xray template (Расш. шаблон) ─────────────────────────
+section "6. Xray Template (Расш. шаблон)"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    XRAY_CHECK=$(docker exec x3-ui python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('/etc/x-ui/x-ui.db')
+c = conn.cursor()
+c.execute(\"SELECT value FROM settings WHERE key='xrayTemplateConfig'\")
+row = c.fetchone()
+conn.close()
+if not row or not row[0] or row[0] == '{}':
+    print('EMPTY')
+else:
+    cfg = json.loads(row[0])
+    issues = []
+    if 'dns' not in cfg: issues.append('NO_DNS')
+    if 'outbounds' not in cfg: issues.append('NO_OUTBOUNDS')
+    routing = cfg.get('routing', {})
+    rules = routing.get('rules', [])
+    has_api = any('api' in str(r.get('outboundTag', '')) for r in rules)
+    if not has_api: issues.append('NO_API_RULE')
+    if issues:
+        print(f'ISSUES:{\";\".join(issues)}')
+    else:
+        print('OK:dns+outbounds+api_routing')
+" 2>/dev/null)
+
+    if echo "$XRAY_CHECK" | grep -q "^OK:"; then
+        check_ok "Xray template: $XRAY_CHECK"
+    elif echo "$XRAY_CHECK" | grep -q "EMPTY"; then
+        check_warn "Xray template пуст (используются default настройки)" "Не критично если default настройки работают"
+    else
+        ISSUES=$(echo $XRAY_CHECK | sed 's/ISSUES://')
+        if echo "$ISSUES" | grep -q "NO_DNS"; then
+            check_fail "Xray template: НЕТ DNS секции" "Настройки Xray → Расш. шаблон → добавить DNS (8.8.8.8, 1.1.1.1)"
+        fi
+        if echo "$ISSUES" | grep -q "NO_OUTBOUNDS"; then
+            check_warn "Xray template: нет outbounds" "Добавить default outbound"
+        fi
+    fi
+fi
+
+# ─── 7. Fallback из Docker ────────────────────────────────────
+section "7. Fallback из Docker-контейнера"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    docker exec x3-ui wget -qO- --no-check-certificate --spider --timeout=5 https://host.docker.internal:3443/ &>/dev/null
+    if [ $? -eq 0 ]; then
+        check_ok "host.docker.internal:3443 ДОСТУПЕН из x3-ui (fallback работает)"
+    else
+        check_fail "host.docker.internal:3443 НЕДОСТУПЕН из x3-ui" "Настройте Nginx на порту 3443 + UFW allow 3443"
+    fi
+fi
+
+# ─── 8. Backend ───────────────────────────────────────────────
+section "8. Backend (Express на порту 3005)"
+
+BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://127.0.0.1:3005/ 2>/dev/null)
+if [ "$BACKEND_CODE" = "200" ] || [ "$BACKEND_CODE" = "304" ] || [ "$BACKEND_CODE" = "404" ]; then
+    check_ok "Backend localhost:3005 → HTTP $BACKEND_CODE"
+else
+    check_fail "Backend localhost:3005 → HTTP $BACKEND_CODE (не отвечает)" "cd /opt/izinet && docker compose logs izinet-app | tail -20"
+fi
+
+# ─── 9. UFW ───────────────────────────────────────────────────
+section "9. UFW Firewall"
+
+if command -v ufw &>/dev/null; then
+    UFW_STATUS=$(ufw status 2>/dev/null | head -1)
+    if echo "$UFW_STATUS" | grep -q "active"; then
+        check_ok "UFW активен"
+        for PORT in 22 80 443 2053 3005 3443; do
+            if ufw status | grep -q "${PORT}/tcp.*ALLOW"; then
+                check_ok "Порт $PORT/tcp разрешён"
+            else
+                check_warn "Порт $PORT/tcp НЕ разрешён" "ufw allow ${PORT}/tcp"
+            fi
+        done
+        if ufw status | grep -q "172.16.0.0/12.*3443.*ALLOW"; then
+            check_ok "Docker subnet → 3443 разрешён"
+        else
+            check_warn "Docker subnet → 3443 НЕ разрешён" "ufw allow from 172.16.0.0/12 to any port 3443"
+        fi
+    else
+        check_fail "UFW НЕ активен" "ufw --force enable"
+    fi
+else
+    check_warn "UFW не установлен" "apt-get install ufw && ufw allow 22,80,443,2053,3005,3443/tcp && ufw enable"
+fi
+
+# ─── 10. DNS ──────────────────────────────────────────────────
+section "10. DNS резолв"
+
+DOMAIN_IP=$(dig +short izinet.online 2>/dev/null || nslookup izinet.online 2>/dev/null | grep "Address:" | tail -1 | awk '{print $2}')
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null)
+
+if [ -n "$DOMAIN_IP" ]; then
+    if [ "$DOMAIN_IP" = "$SERVER_IP" ]; then
+        check_ok "izinet.online → $DOMAIN_IP (совпадает с сервером)"
+    else
+        check_warn "izinet.online → $DOMAIN_IP (не совпадает с сервером $SERVER_IP)" "Проверьте DNS A-запись"
+    fi
+else
+    check_fail "izinet.online НЕ резолвится" "Проверьте DNS A-запись в Cloudflare/регистраторе"
+fi
+
+# ─── 11. HTTPS (сайт без VPN) ────────────────────────────────
+section "11. HTTPS (сайт без VPN)"
+
+HTTPS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 5 https://izinet.online/ 2>/dev/null)
+if [ "$HTTPS_CODE" = "200" ] || [ "$HTTPS_CODE" = "301" ] || [ "$HTTPS_CODE" = "302" ]; then
+    check_ok "https://izinet.online → HTTP $HTTPS_CODE (сайт работает!)"
+else
+    check_fail "https://izinet.online → HTTP $HTTPS_CODE (сайт НЕ работает без VPN)" "Исправить Nginx + fallback chain"
+fi
+
+# ─── 12. Логи ─────────────────────────────────────────────────
+section "12. Последние ошибки в логах"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    XRAY_ERRORS=$(docker logs --tail 30 x3-ui 2>&1 | grep -i "ERROR\|FATAL\|Failed to start" | tail -5)
+    if [ -n "$XRAY_ERRORS" ]; then
+        check_fail "Ошибки в логах x3-ui:" ""
+        echo "$XRAY_ERRORS" | sed 's/^/           /'
+    else
+        check_ok "Нет критических ошибок в логах x3-ui"
+    fi
+fi
+
+# ─── 13. Клиенты в inbound ────────────────────────────────────
+section "13. Клиенты в Reality inbound"
+
+if docker ps --format '{{.Names}}' | grep -q x3-ui; then
+    CLIENT_CHECK=$(docker exec x3-ui python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('/etc/x-ui/x-ui.db')
+c = conn.cursor()
+c.execute('SELECT settings FROM inbounds WHERE port=443')
 row = c.fetchone()
 conn.close()
 if row:
-    ss = json.loads(row[0] or '{}')
-    rs = ss.get('realitySettings', {})
-    inner = rs.get('settings', rs)
-    print(inner.get('publicKey', '') or rs.get('publicKey', ''))
+    sett = json.loads(row[0] or '{}')
+    clients = sett.get('clients', [])
+    print(f'TOTAL:{len(clients)}')
+    # Check for emails containing 'izinet_'
+    izinet_clients = [cl for cl in clients if 'izinet_' in cl.get('email', '')]
+    print(f'IZINET:{len(izinet_clients)}')
+else:
+    print('NO_INBOUND')
 " 2>/dev/null)
 
-    if [ "$ACTUAL_PUB" = "$KNOWN_BAD_PUB" ]; then
-        echo "  🔴 CRITICAL: Reality public key is HARDCODED (known insecure!)"
-        echo "     Run: python3 xui_bootstrap.py --wait-db 5"
-    elif [ -n "$ACTUAL_PUB" ]; then
-        echo "  ✅ Reality public key is unique: ${ACTUAL_PUB:0:20}..."
+    if echo "$CLIENT_CHECK" | grep -q "TOTAL:"; then
+        TOTAL=$(echo $CLIENT_CHECK | grep "TOTAL:" | cut -d: -f2)
+        IZINET=$(echo $CLIENT_CHECK | grep "IZINET:" | cut -d: -f2)
+        check_ok "Клиентов в inbound: $TOTAL (из них izinet_: $IZINET)"
     fi
+fi
+
+# ─── СВОДКА ───────────────────────────────────────────────────
+TOTAL=$((OK + FAIL + WARN))
+echo ""
+echo "═══════════════════════════════════════════════"
+echo -e "  ${BOLD}ДИАГНОСТИКА ИЗИНЕТ — СВОДКА${NC}"
+echo "═══════════════════════════════════════════════"
+echo -e "  ${GREEN}✅ OK:     $OK из $TOTAL проверок${NC}"
+echo -e "  ${RED}❌ FAIL:   $FAIL из $TOTAL проверок${NC}"
+echo -e "  ${YELLOW}⚠️ WARN:   $WARN из $TOTAL проверок${NC}"
+echo "═══════════════════════════════════════════════"
+
+if [ $FAIL -gt 0 ]; then
+    echo -e "  ${RED}СЕРЬЁЗНЫЕ ПРОБЛЕМЫ — сайт/VPN не работают${NC}"
+    echo "  Исправьте все ❌ FAIL перед проверкой."
+elif [ $WARN -gt 0 ]; then
+    echo -e "  ${YELLOW}ЕСТЬ ЗАМЕЧАНИЯ — рекомендуется исправить${NC}"
 else
-    echo "  ❌ x3-ui контейнер не запущен!"
+    echo -e "  ${GREEN}ВСЁ ОТЛИЧНО — сайт и VPN должны работать!${NC}"
 fi
+echo "═══════════════════════════════════════════════"
 echo ""
-
-# 3. Анализ локальной доступности портов (curl на localhost)
-echo "--- 🔌 3. Проверка доступности веб-сервисов (локальный curl) ---"
-
-# 3.2 Чтение конфигурации Xray из панели 3x-ui
-echo "--- ⚙️ 3.2 Конфигурация Xray (config.json внутри контейнера) ---"
-if docker ps | grep -q "x3-ui"; then
-    echo "Содержимое config.json (основная часть VLESS):"
-    docker exec x3-ui cat /etc/x-ui/config.json 2>/dev/null | python3 -c '
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    inbounds = data.get("inbounds", [])
-    for ib in inbounds:
-        if ib.get("port") == 443:
-            print(json.dumps(ib, indent=2))
-except Exception as e:
-    print("Ошибка чтения /etc/x-ui/config.json:", e)
-' 2>/dev/null || {
-    docker exec x3-ui cat /bin/config.json 2>/dev/null | python3 -c '
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    inbounds = data.get("inbounds", [])
-    for ib in inbounds:
-        if ib.get("port") == 443:
-            print(json.dumps(ib, indent=2))
-except Exception as e:
-    print("Ошибка чтения /bin/config.json:", e)
-' 2>/dev/null
-}
-fi
-echo ""
-
-echo "Бекенд (изнутри хоста, порт 3005):"
-curl -Is http://127.0.0.1:3005 | head -n 1 || echo "❌ Бекенд на порту 3005 не отвечает"
-
-echo "Панель 3x-ui по умолчанию (порт 2053):"
-curl -Is http://127.0.0.1:2053 | head -n 1 || echo "❌ Панель на порту 2053 не отвечает через HTTP"
-curl -Is -k https://127.0.0.1:2053 | head -n 1 || echo "❌ Панель на порту 2053 не отвечает через HTTPS"
-
-echo "Панель 3x-ui кастомная (порт 41758):"
-curl -Is http://127.0.0.1:41758 | head -n 1 || echo "❌ Панель на порту 41758 не отвечает через HTTP"
-curl -Is -k https://127.0.0.1:41758 | head -n 1 || echo "❌ Панель на порту 41758 не отвечает через HTTPS"
-echo ""
-
-# 3.5 Проверка обратной связи изнутри контейнера Docker x3-ui на порт SSL-декриптора (3443)
-echo "--- 🐳 3.5 Проверка доступности хоста из контейнера x3-ui (Reality Fallback) ---"
-if docker ps | grep -q "x3-ui"; then
-    echo "Контейнер x3-ui запущен. Проверяем резолв host.docker.internal..."
-    docker exec x3-ui ping -c 1 -W 2 host.docker.internal &>/dev/null
-    if [ $? -eq 0 ]; then
-        echo "  ✅ host.docker.internal успешно резолвится внутри контейнера!"
-    else
-        echo "  ⚠️ ПРИМЕЧАНИЕ: Стандартный ping внутри x3-ui заблокирован или не резолвится."
-    fi
-
-    echo "Проверяем подключение на порт 3443 изнутри контейнера (wget/nc)..."
-    docker exec x3-ui wget -qO- --no-check-certificate --spider --timeout=3 https://host.docker.internal:3443/ &>/dev/null
-    if [ $? -eq 0 ]; then
-        echo "  🟢 [Внутриконтейнерный тест]: ДОСТУПЕН! Контейнер x3-ui видит хост-порт 3443 (Nginx ssl_decrypt). Поток Fallback будет работать идеально!"
-    else
-        echo "  🔴 [Внутриконтейнерный тест]: ОШИБКА! x3-ui НЕ может достучаться до host.docker.internal:3443"
-        echo "     Это означает, что Reality Fallback НЕ сможет передавать веб-трафик на сайт при входе в личный кабинет через https на порту 443!"
-        echo "     Возможные причины: "
-        echo "     1. UFW или iptables блокирует соединения из docker на хост (проверьте правила ufw и разрешите ufw allow 3443/tcp)."
-        echo "     2. Nginx на хосте не слушает порт 3443 со всех адресов (убедитесь, что там listen 3443 ssl, а не 127.0.0.1:3443)."
-    fi
-else
-    echo "❌ Контейнер x3-ui НЕ запущен!"
-fi
-echo ""
-
-# 4. Проверка DNS домена izinet.online
-echo "--- 🌐 4. Проверка DNS Домена izinet.online ---"
-echo "Куда резолвится ваш домен на самом сервере:"
-nslookup izinet.online 2>/dev/null || host izinet.online 2>/dev/null || ping -c 1 -t 1 izinet.online 2>/dev/null || echo "❌ DNS утилиты недоступны или домен не резолвится"
-echo "Внешний IP сервера (определено через Ifconfig): $(curl -s ifconfig.me)"
-echo ""
-
-# 5. Изучаем серое облако Cloudflare (проверка хоста сайта)
-echo "--- ☁️ 5. Проверка заголовков и доступности через DNS ---"
-echo "Проверка HTTP на порту 80:"
-curl -Is http://izinet.online/ | head -n 5 || echo "❌ http://izinet.online/ недоступен"
-echo "Проверка HTTPS на порту 443:"
-curl -Is -k https://izinet.online/ | head -n 5 || echo "❌ https://izinet.online/ недоступен"
-echo ""
-
-# 6. Чтение последних строк логов приложений
-echo "--- ⚠️ 6. Последние 15 строк логов приложений ---"
-echo ">>> ЛОГИ izinet-app:"
-docker logs --tail 15 izinet-app
-echo ""
-echo ">>> ЛОГИ x3-ui:"
-docker logs --tail 15 x3-ui
-echo "============================================="
-echo "🏁 ДИАГНОСТИКА ЗАВЕРШЕНА. Скопируйте этот вывод в чат!"
-echo "============================================="
+echo "Скопируйте весь вывод выше и скиньте для анализа."
