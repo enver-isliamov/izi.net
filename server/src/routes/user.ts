@@ -60,7 +60,21 @@ async function provisionDeviceOnServers(params: {
   for (const server of params.activeServers) {
     try {
       const { instance } = await getXuiForServer(server.id);
-      const rawConfig = await instance.addClient(email, uuid, params.inboundId, params.expiresAt.getTime(), limitBytes);
+      
+      // Auto-detect Reality inbound ID from panel
+      let effectiveInboundId = params.inboundId;
+      try {
+        const inbounds = await instance.getInbounds();
+        const realityInbound = inbounds.find((ib: any) => {
+          try {
+            const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+            return ss.security === 'reality' && ib.port === 443;
+          } catch { return false; }
+        });
+        if (realityInbound) effectiveInboundId = realityInbound.id;
+      } catch (e) {}
+
+      const rawConfig = await instance.addClient(email, uuid, effectiveInboundId, params.expiresAt.getTime(), limitBytes);
       if (rawConfig) {
         const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
         configLines.push(configWithSuffix);
@@ -322,17 +336,32 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
     for (const server of activeServers) {
       try {
         const { instance } = await getXuiForServer(server.id);
-        // Удаляем старый ключ перед созданием нового
+        
+        // Auto-detect Reality inbound ID from panel
+        let effectiveInboundId = inboundId;
+        try {
+          const inbounds = await instance.getInbounds();
+          const realityInbound = inbounds.find((ib: any) => {
+            try {
+              const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+              return ss.security === 'reality' && ib.port === 443;
+            } catch { return false; }
+          });
+          if (realityInbound) effectiveInboundId = realityInbound.id;
+        } catch (e) {}
+
         if (target.uuid && target.email) await instance.deleteClient(target.uuid, target.email).catch(() => {});
-        const rawConfig = await instance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
+        const rawConfig = await instance.addClient(newEmail, newUuid, effectiveInboundId, expiresAtMs, limitBytes);
         if (rawConfig) {
           const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
           configLines.push(configWithSuffix);
         }
-      } catch (e) {}
+      } catch (e: any) {
+        console.error(`❌ [User] regenerate failed for device ${deviceId} on ${server.name}: ${e.message}`);
+      }
     }
 
-    if (configLines.length === 0) throw new Error('Не удалось связаться с VPN серверами');
+    if (configLines.length === 0) throw new Error('Не удалось связаться с VPN серверами. Проверьте настройки сервера в админке.');
 
     devices[targetIdx] = { ...target, config: configLines.join('\n'), email: newEmail, uuid: newUuid };
     await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices) }).eq('id', sub.id);

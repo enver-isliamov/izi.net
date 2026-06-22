@@ -110,16 +110,25 @@ export class MaintenanceService {
           const devices = parseVpnDevices(sub.v2ray_config);
           if (devices.length === 0) continue;
 
-          const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+          const defaultInboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
           const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
           const expiryTime = new Date(sub.expires_at).getTime();
 
           for (const server of activeServers) {
             const { instance } = await getXuiForServer(server.id);
 
-            // Reality keys are managed by xui_bootstrap.py in SQLite.
-            // Server reads keys from 3x-ui panel API — no .env sync needed.
-            // Only sync if XUI_REALITY_PRIV_KEY is explicitly set (manual override).
+            // Auto-detect Reality inbound ID per server
+            let inboundId = defaultInboundId;
+            try {
+              const inbounds = await instance.getInbounds();
+              const realityInbound = inbounds.find((ib: any) => {
+                try {
+                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                  return ss.security === 'reality' && ib.port === 443;
+                } catch { return false; }
+              });
+              if (realityInbound) inboundId = realityInbound.id;
+            } catch (e) {}
 
             for (const dev of devices) {
               await instance.addClient(dev.email, dev.uuid, inboundId, expiryTime, limitBytes).catch(e => {

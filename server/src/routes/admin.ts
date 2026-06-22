@@ -583,16 +583,31 @@ router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req
     for (const server of servers) {
       try {
         const { instance } = await getXuiForServer(server.id);
+        
+        // Auto-detect Reality inbound ID from panel
+        let inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+        try {
+          const inbounds = await instance.getInbounds();
+          const realityInbound = inbounds.find((ib: any) => {
+            try {
+              const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+              return ss.security === 'reality' && ib.port === 443;
+            } catch { return false; }
+          });
+          if (realityInbound) inboundId = realityInbound.id;
+        } catch (e: any) {
+          console.warn(`⚠️ [Admin] Could not auto-detect inbound for ${server.name}: ${e.message}`);
+        }
+
         if (oldDevice.uuid && oldDevice.email) await instance.deleteClient(oldDevice.uuid, oldDevice.email).catch(() => {});
-        const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
         const cfg = await instance.addClient(newEmail, newUuid, inboundId, expiresAtMs, limitBytes);
         if (cfg) configs.push(cfg.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
       } catch (err: any) {
-        console.warn(`⚠️ [Admin] regenerate failed on ${server.name}: ${err.message}`);
+        console.error(`❌ [Admin] regenerate failed on ${server.name}: ${err.message}`);
       }
     }
 
-    if (configs.length === 0) throw new Error('Не удалось связаться с VPN серверами');
+    if (configs.length === 0) throw new Error('Не удалось связаться ни с одним VPN сервером. Проверьте: 1) 3x-ui панель доступна, 2) Reality inbound создан, 3) сервер "OneD" активен в админке');
     devices[targetIdx] = { ...oldDevice, config: configs.join('\n'), email: newEmail, uuid: newUuid, trafficUsedBytes: 0 };
     const { error } = await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
     if (error) throw error;

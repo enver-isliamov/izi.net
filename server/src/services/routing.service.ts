@@ -54,6 +54,21 @@ export class RoutingService {
             };
           }
 
+          // --- DNS Configuration ---
+          if (!xrayConfig.dns) {
+            xrayConfig.dns = {
+              servers: ['8.8.8.8', '1.1.1.1', 'localhost']
+            };
+          }
+
+          // --- Outbounds (required for routing to work) ---
+          if (!xrayConfig.outbounds || xrayConfig.outbounds.length === 0) {
+            xrayConfig.outbounds = [
+              { protocol: 'freedom', tag: 'direct' },
+              { protocol: 'blackhole', tag: 'blocked' }
+            ];
+          }
+
           // Ensure API inbound exists (dokodemo-door on 127.0.0.1:62789)
           if (!xrayConfig.inbounds) xrayConfig.inbounds = [];
           if (!xrayConfig.inbounds.find((i: any) => i.tag === 'api')) {
