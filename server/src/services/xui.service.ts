@@ -242,14 +242,23 @@ export class XUIService {
       console.warn(`⚠️ [XUI] Could not fetch inbound settings for ${inboundId}`);
     }
 
-    // First, try to delete old client if exists (clean stale records)
+    // Delete client from ALL inbounds to avoid "Duplicate email" across inbounds
     try {
-      const existingClient = await this.getClientByEmail(inboundId, email);
-      if (existingClient?.id) {
-        console.log(`🔄 [XUI] Deleting stale client ${email} (id: ${existingClient.id}) before re-adding`);
-        await this.deleteClient(existingClient.id, email);
+      const allInbounds = await this.getInbounds();
+      for (const ib of allInbounds) {
+        try {
+          const settings = this.parseJson<any>(ib.settings, {});
+          const clients = settings.clients || [];
+          const existing = clients.find((c: any) => c.email === email);
+          if (existing) {
+            console.log(`🔄 [XUI] Deleting stale client ${email} from inbound ${ib.id} (${ib.remark || ib.port})`);
+            await this.deleteClient(existing.id || existing.uuid, email);
+          }
+        } catch (e) {}
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn(`⚠️ [XUI] Could not clean stale clients: ${e}`);
+    }
 
     const clientData = {
       id: inboundId,
@@ -263,7 +272,7 @@ export class XUIService {
       const response = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
 
       if (response.data?.success) {
-        console.log(`✅ [XUI] Client ${email} added to ${this.host}`);
+        console.log(`✅ [XUI] Client ${email} added to ${this.host} (inbound ${inboundId})`);
         return this.getInboundLink(inboundId, uuid, email);
       } else {
         const msg = response.data?.msg || JSON.stringify(response.data);
