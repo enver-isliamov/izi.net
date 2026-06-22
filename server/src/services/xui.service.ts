@@ -251,8 +251,18 @@ export class XUIService {
           const clients = settings.clients || [];
           const existing = clients.find((c: any) => c.email === email);
           if (existing) {
-            console.log(`🔄 [XUI] Deleting stale client ${email} from inbound ${ib.id} (${ib.remark || ib.port})`);
-            await this.deleteClient(existing.id || existing.uuid, email);
+            const clientUuid = existing.id || existing.uuid;
+            console.log(`🔄 [XUI] Deleting stale client ${email} (uuid=${clientUuid}) from inbound ${ib.id} (${ib.remark || ib.port})`);
+            // Delete directly by UUID from THIS specific inbound
+            try {
+              const delUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${clientUuid}`;
+              await axios.post(delUrl, {}, getRequestConfig(delUrl, this.authHeaders()));
+              console.log(`✅ [XUI] Deleted ${email} from inbound ${ib.id}`);
+            } catch (delErr: any) {
+              if (delErr.response?.status !== 404) {
+                console.warn(`⚠️ [XUI] Delete failed for ${email} on inbound ${ib.id}: ${delErr.message}`);
+              }
+            }
           }
         } catch (e) {}
       }
