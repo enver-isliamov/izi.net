@@ -71,6 +71,90 @@ else
 fi
 echo ""
 
+# 2.7 Проверка Reality Inbound и ключей
+echo "--- 🔐 2.7 Проверка Reality Inbound (порт 443) ---"
+if docker ps | grep -q "x3-ui"; then
+    REALITY_CHECK=$(docker exec x3-ui python3 -c "
+import sqlite3, json, sys
+try:
+    conn = sqlite3.connect('/etc/x-ui/x-ui.db')
+    c = conn.cursor()
+    c.execute(\"SELECT id, port, settings, stream_settings, sniffing FROM inbounds WHERE port=443\")
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        print('MISSING: No inbound on port 443')
+        sys.exit(1)
+    iid, port, sett_raw, stream_raw, sniff_raw = row
+    ss = json.loads(stream_raw or '{}')
+    sett = json.loads(sett_raw or '{}')
+    snif = json.loads(sniff_raw or '{}')
+    security = ss.get('security', 'none')
+    if security != 'reality':
+        print(f'WRONG_SECURITY: {security} (expected reality)')
+        sys.exit(1)
+    rs = ss.get('realitySettings', {})
+    inner = rs.get('settings', rs)
+    pbk = inner.get('publicKey', '') or rs.get('publicKey', '')
+    sid = (inner.get('shortIds', rs.get('shortIds', [''])))[0] if isinstance(inner.get('shortIds', rs.get('shortIds', [])), list) else ''
+    sni = inner.get('serverName', '') or (rs.get('serverNames', [''])[0] if rs.get('serverNames') else '')
+    fp = inner.get('fingerprint', rs.get('fingerprint', ''))
+    spx = inner.get('spiderX', rs.get('spiderX', ''))
+    fb = sett.get('fallbacks', [])
+    issues = []
+    if not pbk or 'm_G-oZ_9a6' in pbk: issues.append('publicKey empty/invalid')
+    if not sid: issues.append('shortIds empty')
+    if not sni or sni.replace('.','').isdigit(): issues.append(f'SNI invalid: {sni}')
+    if fp and fp != 'chrome': issues.append(f'fingerprint={fp} (should be chrome)')
+    if spx and spx != '/': issues.append(f'spiderX={spx} (should be /)')
+    if not fb: issues.append('NO fallback rules!')
+    if not snif.get('enabled'): issues.append('SNI sniffing disabled!')
+    dests = [f.get('dest','') for f in fb]
+    if fb and not any('3443' in d for d in dests): issues.append(f'fallback dest missing :3443')
+    if issues:
+        print(f'ISSUES: {\";\".join(issues)}')
+        sys.exit(2)
+    print(f'OK: pbk={pbk[:15]}... sni={sni} fp={fp} spx={spx} fb={len(fb)} sniff={snif.get(\"enabled\",False)}')
+except Exception as e:
+    print(f'ERROR: {e}')
+    sys.exit(3)
+" 2>/dev/null)
+
+    case $? in
+        0) echo "  🟢 Reality Inbound: $REALITY_CHECK" ;;
+        1) echo "  🔴 Reality Inbound: $REALITY_CHECK" ;;
+        2) echo "  🟡 Reality Inbound: $REALITY_CHECK" ;;
+        3) echo "  🔴 Reality Inbound: $REALITY_CHECK" ;;
+        *) echo "  ⚠️ Could not check Reality inbound" ;;
+    esac
+
+    # Проверка что ключи в БД не являются хардкод
+    KNOWN_BAD_PUB="CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw"
+    ACTUAL_PUB=$(docker exec x3-ui python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('/etc/x-ui/x-ui.db')
+c = conn.cursor()
+c.execute(\"SELECT stream_settings FROM inbounds WHERE port=443\")
+row = c.fetchone()
+conn.close()
+if row:
+    ss = json.loads(row[0] or '{}')
+    rs = ss.get('realitySettings', {})
+    inner = rs.get('settings', rs)
+    print(inner.get('publicKey', '') or rs.get('publicKey', ''))
+" 2>/dev/null)
+
+    if [ "$ACTUAL_PUB" = "$KNOWN_BAD_PUB" ]; then
+        echo "  🔴 CRITICAL: Reality public key is HARDCODED (known insecure!)"
+        echo "     Run: python3 xui_bootstrap.py --wait-db 5"
+    elif [ -n "$ACTUAL_PUB" ]; then
+        echo "  ✅ Reality public key is unique: ${ACTUAL_PUB:0:20}..."
+    fi
+else
+    echo "  ❌ x3-ui контейнер не запущен!"
+fi
+echo ""
+
 # 3. Анализ локальной доступности портов (curl на localhost)
 echo "--- 🔌 3. Проверка доступности веб-сервисов (локальный curl) ---"
 

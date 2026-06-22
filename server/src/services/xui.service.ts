@@ -514,7 +514,10 @@ export class XUIService {
   }
 
   async syncRealityKeys(privateKey: string, publicKey: string): Promise<void> {
+    // DEPRECATED: Reality keys should be managed by xui_bootstrap.py in SQLite.
+    // This method is kept only for manual admin override via /api/admin/system/sync-reality-keys.
     if (!privateKey || !publicKey) return;
+    console.warn(`⚠️ [XUI] syncRealityKeys called manually for ${this.host}. Consider using xui_bootstrap.py instead.`);
     try {
       const inbounds = await this.getInbounds();
       const realityInbounds = inbounds.filter((ib) => this.parseJson<Record<string, any>>(ib.streamSettings, {}).security === 'reality');
@@ -526,9 +529,49 @@ export class XUIService {
         const payload = { ...inbound, streamSettings: JSON.stringify(streamSettings) };
         const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inbound.id}`;
         await axios.post(url, payload, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+        console.log(`✅ [XUI] Reality keys updated on ${this.host}`);
       }
     } catch (err: any) {
-      console.warn(`⚠️ [XUI] Reality key sync skipped for ${this.host}: ${err.message}`);
+      console.warn(`⚠️ [XUI] Reality key sync failed for ${this.host}: ${err.message}`);
+    }
+  }
+
+  async checkRealityInbound(): Promise<{ exists: boolean; hasValidKeys: boolean; sni?: string; details?: string }> {
+    try {
+      const inbounds = await this.getInbounds();
+      const realityInbound = inbounds.find((ib) => {
+        const ss = this.parseJson<Record<string, any>>(ib.streamSettings, {});
+        return ss.security === 'reality' && ib.port === 443;
+      });
+
+      if (!realityInbound) {
+        return { exists: false, hasValidKeys: false, details: 'Reality inbound on port 443 not found. Run: python3 xui_bootstrap.py' };
+      }
+
+      const ss = this.parseJson<Record<string, any>>(realityInbound.streamSettings, {});
+      const rs = ss.realitySettings || {};
+      const settings = rs.settings || rs;
+      const pbk = settings.publicKey || rs.publicKey || '';
+      const sid = (settings.shortIds || rs.shortIds || [])[0] || '';
+      const sni = (settings.serverName || (settings.serverNames || rs.serverNames || [])[0] || '');
+      const fp = settings.fingerprint || rs.fingerprint || '';
+      const spiderX = settings.spiderX || rs.spiderX || '';
+
+      const issues: string[] = [];
+      if (!pbk || pbk.includes('m_G-oZ_9a6')) issues.push('publicKey is empty or invalid');
+      if (!sid) issues.push('shortIds is empty');
+      if (!sni || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(sni)) issues.push('SNI is empty or an IP address');
+      if (fp && fp !== 'chrome') issues.push(`fingerprint is "${fp}" (should be "chrome")`);
+      if (spiderX && spiderX !== '/') issues.push(`spiderX is "${spiderX}" (should be "/")`);
+
+      return {
+        exists: true,
+        hasValidKeys: issues.length === 0,
+        sni,
+        details: issues.length > 0 ? `Issues: ${issues.join('; ')}` : 'OK'
+      };
+    } catch (err: any) {
+      return { exists: false, hasValidKeys: false, details: `Error: ${err.message}` };
     }
   }
 

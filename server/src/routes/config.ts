@@ -50,7 +50,7 @@ router.get('/sub/:id', async (req, res) => {
       return res.status(404).send('Subscription not found');
     }
 
-    // CACHE-001: VPN-клиенты (Happ/Hiddify/INCY) должны всегда получать актуальную подписку, без 304/прокси-кэша.
+    // CACHE-001: VPN clients always get fresh subscription data
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -60,9 +60,34 @@ router.get('/sub/:id', async (req, res) => {
       if (configText.startsWith('[')) {
         let devices = JSON.parse(configText);
         if (deviceId) devices = devices.filter((d: any) => d.id === deviceId);
-        configText = devices.map((d: any) => d.config).join('\\n');
+
+        // Get active server names for filtering
+        const { data: activeServers } = await supabase
+          .from('vpn_servers')
+          .select('name')
+          .eq('is_active', true);
+        const activeNames = (activeServers || []).map((s: any) => s.name.replace(/\s+/g, '_'));
+
+        // Join device configs with real newline
+        const allLines = devices.map((d: any) => d.config).join('\n');
+
+        // Filter: keep lines from active servers (or all if no active servers found)
+        if (activeNames.length > 0) {
+          const filtered = allLines.split('\n').filter((line: string) => {
+            const suffix = line.split('#')[1] || '';
+            return activeNames.some((name: string) => suffix.includes(name));
+          });
+          configText = filtered.length > 0 ? filtered.join('\n') : allLines;
+        } else {
+          configText = allLines;
+        }
       }
     } catch (e) {}
+
+    // Fallback: if config is empty after filtering, return all non-empty vless lines
+    if (!configText || !configText.trim()) {
+      return res.status(404).send('No valid VPN configs found for this subscription');
+    }
 
     const base64Config = Buffer.from(configText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

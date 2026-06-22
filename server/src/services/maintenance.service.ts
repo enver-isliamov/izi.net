@@ -116,13 +116,10 @@ export class MaintenanceService {
 
           for (const server of activeServers) {
             const { instance } = await getXuiForServer(server.id);
-            
-            // Синхронизация ключей Reality при каждом обслуживании
-            const privKey = process.env.XUI_REALITY_PRIV_KEY;
-            const pubKey = process.env.XUI_REALITY_PUB_KEY;
-            if (privKey && pubKey) {
-              await instance.syncRealityKeys(privKey, pubKey).catch(() => {});
-            }
+
+            // Reality keys are managed by xui_bootstrap.py in SQLite.
+            // Server reads keys from 3x-ui panel API — no .env sync needed.
+            // Only sync if XUI_REALITY_PRIV_KEY is explicitly set (manual override).
 
             for (const dev of devices) {
               await instance.addClient(dev.email, dev.uuid, inboundId, expiryTime, limitBytes).catch(e => {
