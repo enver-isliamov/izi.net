@@ -242,33 +242,15 @@ export class XUIService {
       console.warn(`⚠️ [XUI] Could not fetch inbound settings for ${inboundId}`);
     }
 
-    // Delete client from ALL inbounds to avoid "Duplicate email" across inbounds
+    // Check if client already exists in this inbound
     try {
-      const allInbounds = await this.getInbounds();
-      for (const ib of allInbounds) {
-        try {
-          const settings = this.parseJson<any>(ib.settings, {});
-          const clients = settings.clients || [];
-          const existing = clients.find((c: any) => c.email === email);
-          if (existing) {
-            const clientUuid = existing.id || existing.uuid;
-            console.log(`🔄 [XUI] Deleting stale client ${email} (uuid=${clientUuid}) from inbound ${ib.id} (${ib.remark || ib.port})`);
-            // Delete directly by UUID from THIS specific inbound
-            try {
-              const delUrl = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${clientUuid}`;
-              await axios.post(delUrl, {}, getRequestConfig(delUrl, this.authHeaders()));
-              console.log(`✅ [XUI] Deleted ${email} from inbound ${ib.id}`);
-            } catch (delErr: any) {
-              if (delErr.response?.status !== 404) {
-                console.warn(`⚠️ [XUI] Delete failed for ${email} on inbound ${ib.id}: ${delErr.message}`);
-              }
-            }
-          }
-        } catch (e) {}
+      const existingClient = await this.getClientByEmail(inboundId, email);
+      if (existingClient?.id) {
+        console.log(`🔄 [XUI] Client ${email} already exists in inbound ${inboundId} (uuid=${existingClient.id}) — updating instead`);
+        await this.updateClient(email, existingClient.id, existingClient.inboundId || inboundId, expiryTime, limitBytes);
+        return this.getInboundLink(existingClient.inboundId || inboundId, existingClient.id, email);
       }
-    } catch (e) {
-      console.warn(`⚠️ [XUI] Could not clean stale clients: ${e}`);
-    }
+    } catch (e) {}
 
     const clientData = {
       id: inboundId,
@@ -287,20 +269,21 @@ export class XUIService {
       } else {
         const msg = response.data?.msg || JSON.stringify(response.data);
         console.error(`❌ [XUI] addClient failed for ${email}: ${msg}`);
-        // If "record not found" — session might be stale, force re-login and retry once
-        if (msg.includes('record not found') || msg.includes('not found')) {
-          console.log(`🔄 [XUI] Forcing re-login due to "${msg}" and retrying...`);
-          this.sessionCookie = null;
-          this.csrfToken = null;
-          await this.login(true);
-          // Retry addClient once
-          const retryResp = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
-          if (retryResp.data?.success) {
-            console.log(`✅ [XUI] Client ${email} added on retry to ${this.host}`);
-            return this.getInboundLink(inboundId, uuid, email);
+        // If "Duplicate email" — client exists somewhere, use updateClient fallback
+        if (msg.includes('Duplicate email')) {
+          console.log(`🔄 [XUI] Duplicate email detected — searching all inbounds for ${email}`);
+          const allInbounds = await this.getInbounds();
+          for (const ib of allInbounds) {
+            try {
+              const settings = this.parseJson<any>(ib.settings, {});
+              const found = (settings.clients || []).find((c: any) => c.email === email);
+              if (found) {
+                console.log(`🔄 [XUI] Found ${email} in inbound ${ib.id} — updating`);
+                await this.updateClient(email, found.id || found.uuid, ib.id, expiryTime, limitBytes);
+                return this.getInboundLink(ib.id, found.id || found.uuid, email);
+              }
+            } catch (e) {}
           }
-          const retryMsg = retryResp.data?.msg || JSON.stringify(retryResp.data);
-          throw new Error(`Retry also failed: ${retryMsg}`);
         }
         throw new Error(msg || 'Failed to add client');
       }
