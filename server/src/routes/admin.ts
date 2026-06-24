@@ -752,6 +752,81 @@ router.post('/system/repair-vless', adminOnly, async (req, res) => {
   res.json({ success: true, message: 'Команда ремонта принята', stdout: 'Маршрут API доступен. Для полного ремонта используйте repair_xui.py на VPS.', stderr: '' });
 });
 
+router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
+  try {
+    const { data: subs, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('status', 'active');
+    if (subErr) throw subErr;
+    if (!subs || subs.length === 0) return res.json({ success: true, updated: 0, message: 'Нет активных подписок' });
+
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!activeServers || activeServers.length === 0) throw new Error('Нет активных VPN серверов');
+
+    let updated = 0;
+    let errors = 0;
+
+    for (const sub of subs) {
+      try {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+        let changed = false;
+
+        for (const device of devices) {
+          if (!device.uuid || !device.email) continue;
+
+          const newConfigLines: string[] = [];
+          for (const server of activeServers) {
+            try {
+              const { instance } = await getXuiForServer(server.id);
+              const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+
+              let effectiveInboundId = inboundId;
+              try {
+                const inbounds = await instance.getInbounds();
+                const realityInbound = inbounds.find((ib: any) => {
+                  try {
+                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                    return ss.security === 'reality' && ib.port === 443;
+                  } catch { return false; }
+                });
+                if (realityInbound) effectiveInboundId = realityInbound.id;
+              } catch (e) {}
+
+              const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
+              if (rawLink) {
+                const linkWithSuffix = rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
+                newConfigLines.push(linkWithSuffix);
+              }
+            } catch (e) {}
+          }
+
+          if (newConfigLines.length > 0) {
+            const newConfig = newConfigLines.join('\n');
+            if (device.config !== newConfig) {
+              device.config = newConfig;
+              changed = true;
+            }
+          }
+        }
+
+        if (changed) {
+          await supabase
+            .from('subscriptions')
+            .update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() })
+            .eq('id', sub.id);
+          updated++;
+        }
+      } catch (e: any) {
+        console.error(`❌ [Admin] Regenerate failed for sub ${sub.id}:`, e.message);
+        errors++;
+      }
+    }
+
+    res.json({ success: true, updated, errors, total: subs.length });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/stats', adminOnly, async (req, res) => {
   try {
     const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
