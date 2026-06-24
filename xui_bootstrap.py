@@ -285,6 +285,20 @@ def patch_inbounds(cursor):
     return updated
 
 
+def disable_broken_inbounds(cursor):
+    if not table_exists(cursor, "inbounds"):
+        return 0
+    disabled = 0
+    cursor.execute("SELECT id, remark, port, enable FROM inbounds;")
+    for row in cursor.fetchall():
+        inbound_id, remark, port, enable = row
+        if enable and port == 8443:
+            print(f"  ⚠️ Disabling inbound-8443 ({remark}) — requires missing TLS cert")
+            cursor.execute("UPDATE inbounds SET enable=0 WHERE id=?;", (inbound_id,))
+            disabled += 1
+    return disabled
+
+
 def patch_xray_settings(cursor):
     if not table_exists(cursor, "settings"):
         return 0
@@ -318,11 +332,13 @@ def main():
             set_setting(cursor, "externalTrafficInformURI", "")
         created = ensure_default_inbound(cursor)
         inbound_updates = patch_inbounds(cursor)
+        broken_disabled = disable_broken_inbounds(cursor)
         xray_updates = patch_xray_settings(cursor)
         conn.commit()
         print(
             "xui-bootstrap: repaired persistent 3x-ui DB "
-            f"(created_inbounds={created}, updated_inbounds={inbound_updates}, xray_settings={xray_updates})"
+            f"(created_inbounds={created}, updated_inbounds={inbound_updates}, "
+            f"broken_disabled={broken_disabled}, xray_settings={xray_updates})"
         )
     finally:
         conn.close()

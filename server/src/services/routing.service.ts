@@ -165,6 +165,18 @@ export class RoutingService {
           const { instance } = await getXuiForServer(server.id);
           const currentInbounds = await instance.getInbounds();
 
+          // Отключаем inbound-8443 если он включён (требует несуществующий сертификат)
+          for (const ib of currentInbounds) {
+            if (ib.port === 8443 && ib.enable) {
+              console.log(`⚠️ [Routing] Disabling inbound-8443 (${ib.remark}) on ${server.name} — requires missing TLS cert`);
+              try {
+                await instance.deleteInbound(ib.id);
+              } catch (e: any) {
+                console.warn(`⚠️ [Routing] Could not disable inbound-8443: ${e.message}`);
+              }
+            }
+          }
+
           // Если inbound'ов нет — восстанавливаем из backup
           if (currentInbounds.length === 0) {
             console.log(`🔄 [Routing] Restoring ${configState.inbounds.length} inbounds for ${server.name}...`);
