@@ -26,6 +26,7 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
   const [editLocks, setEditLocks] = useState<Record<string, boolean>>({
     MONTHLY_PRICE: true,
@@ -205,6 +206,31 @@ docker image prune -f`;
       toast.error('Ошибка: ' + (e.response?.data?.error || e.message), { id: 'sync-all' });
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleRegenerateLinks = async () => {
+    try {
+      setIsRegenerating(true);
+      setSystemLogs([
+        '[Старт] Обновление всех VPN-ссылок (Reality: chrome fp, актуальный publicKey)...',
+        '[Система] Подождите, операция может занять до 30 секунд...'
+      ]);
+      toast.loading('Обновление VPN-ссылок...', { id: 'regen-links' });
+
+      const { data } = await axios.post('/api/admin/system/regenerate-all-links', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+
+      const msg = `Обновлено: ${data.updated} из ${data.total} подписок` + (data.errors ? `, ошибок: ${data.errors}` : '');
+      setSystemLogs(prev => [...prev, `[Успех] ${msg}`]);
+      toast.success(msg, { id: 'regen-links' });
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Ошибка: ' + errMsg, { id: 'regen-links' });
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
@@ -710,6 +736,25 @@ docker image prune -f`}
               >
                 {isDiagnosing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
                 Диагностика системы
+              </button>
+            </div>
+
+            {/* Regenerate All VPN Links Card */}
+            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Обновить все VPN-ссылки</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Пересоздаст VLESS-ссылки для всех активных подписок с текущими настройками Reality (chrome fp, актуальный publicKey).
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isRegenerating}
+                onClick={handleRegenerateLinks}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-500/10 text-green-400 hover:bg-green-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-green-500/20"
+              >
+                {isRegenerating ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                Обновить все ссылки
               </button>
             </div>
           </div>
