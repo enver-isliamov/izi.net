@@ -302,7 +302,7 @@ def disable_broken_inbounds(cursor):
 def patch_xray_settings(cursor):
     if not table_exists(cursor, "settings"):
         return 0
-    cursor.execute("SELECT key, value FROM settings WHERE key IN ('xrayConfig', 'xraySetting');")
+    cursor.execute("SELECT key, value FROM settings WHERE key = 'xrayTemplateConfig';")
     updated = 0
     for key, value in cursor.fetchall():
         config = load_json(value, None)

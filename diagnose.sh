@@ -114,7 +114,7 @@ try:
     spx = inner.get('spiderX', rs.get('spiderX', ''))
     fb = sett.get('fallbacks', [])
     issues = []
-    if not pbk or 'CXL0o8BEC7wz' in pbk or 'm_G-oZ_9a6' in pbk:
+    if not pbk or pbk == 'CXL0o8BEC7wz-TluA7w-QBbJIadSsb9xL7G6UB410Xw' or pbk == 'm_G-oZ_9a6':
         issues.append(f'PUBLIC_KEY HARDCODED: {pbk[:20]}...')
     if fp and fp != 'chrome':
         issues.append(f'FINGERPRINT={fp} (should be chrome)')

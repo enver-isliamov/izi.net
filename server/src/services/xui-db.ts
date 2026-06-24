@@ -15,7 +15,7 @@ export function updateXrayTemplateConfig(configJson: string): boolean {
   try {
     const database = getDb();
     const stmt = database.prepare(
-      "INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayConfig', ?)"
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)"
     );
     stmt.run(configJson);
     console.log(`✅ [XUI-DB] xrayTemplateConfig written to SQLite (${configJson.length} chars)`);
@@ -29,7 +29,7 @@ export function updateXrayTemplateConfig(configJson: string): boolean {
 export function readXrayTemplateConfig(): string | null {
   try {
     const database = getDb();
-    const stmt = database.prepare("SELECT value FROM settings WHERE key = 'xrayConfig'");
+    const stmt = database.prepare("SELECT value FROM settings WHERE key = 'xrayTemplateConfig'");
     const row = stmt.get() as { value: string } | undefined;
     return row?.value || null;
   } catch (e: any) {
