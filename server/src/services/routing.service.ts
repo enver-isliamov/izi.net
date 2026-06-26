@@ -53,8 +53,8 @@ export class RoutingService {
             };
           }
 
-          // --- DNS Configuration ---
-          if (!xrayConfig.dns) {
+          // --- DNS Configuration (only set if empty, don't overwrite bootstrap DNS) ---
+          if (!xrayConfig.dns || !xrayConfig.dns.servers || xrayConfig.dns.servers.length === 0) {
             xrayConfig.dns = {
               servers: ['8.8.8.8', '1.1.1.1', 'localhost']
             };
@@ -80,41 +80,12 @@ export class RoutingService {
             });
           }
 
-          // --- VLESS Reality Inbound (port 443) — for "Advanced Template" visibility ---
-          // This mirrors xui_bootstrap.py config so the inbound shows in xrayTemplateConfig.
-          // Clients are managed via inbounds API, not template — clients array stays empty here.
-          if (!xrayConfig.inbounds.find((i: any) => i.tag === 'vless-reality')) {
-            xrayConfig.inbounds.push({
-              port: 443,
-              protocol: 'vless',
-              settings: {
-                clients: [],
-                fallbacks: [
-                  { name: 'izinet.online', alpn: '', path: '', dest: 'host.docker.internal:3443', xver: 0 },
-                  { name: 'www.izinet.online', alpn: '', path: '', dest: 'host.docker.internal:3443', xver: 0 },
-                  { dest: 'host.docker.internal:3443', xver: 0 }
-                ]
-              },
-              streamSettings: {
-                network: 'tcp',
-                security: 'reality',
-                realitySettings: {
-                  target: 'host.docker.internal:3443',
-                  dest: 'host.docker.internal:3443',
-                  serverNames: ['izinet.online', 'www.izinet.online'],
-                  privateKey: '',
-                  publicKey: '',
-                  shortIds: [''],
-                  spiderX: '/'
-                }
-              },
-              sniffing: {
-                enabled: true,
-                destOverride: ['http', 'tls'],
-                routeOnly: false
-              },
-              tag: 'vless-reality'
-            });
+          // Remove any vless-reality inbound from template (Reality lives in SQLite, not template)
+          // Previous buggy code injected a dummy inbound with empty keys that broke Xray.
+          const beforeLen = xrayConfig.inbounds.length;
+          xrayConfig.inbounds = xrayConfig.inbounds.filter((i: any) => i.tag !== 'vless-reality');
+          if (xrayConfig.inbounds.length < beforeLen) {
+            console.log(`🧹 [Routing] Removed ${beforeLen - xrayConfig.inbounds.length} stale vless-reality from template`);
           }
 
           // --- Routing Initialization ---
