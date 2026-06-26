@@ -29,12 +29,27 @@ echo "🐳 Пересобираю и запускаю контейнеры..."
 docker compose down
 docker compose up -d --build
 
-# 4. Перезапуск x3-ui чтобы перечитать SQLite (xrayTemplateConfig)
-echo "🔄 Перезапускаю x3-ui для применения xray конфига..."
+# 4. Исправление SQLite (Reality ключи, fallbacks, xrayTemplateConfig)
+echo "🔧 Запускаю xui_bootstrap.py..."
 sleep 3
-docker restart x3-ui
+python3 xui_bootstrap.py || echo "⚠️ Bootstrap failed, continuing..."
 
-# 5. UFW порты (всегда открывать при обновлении)
+# 5. Перезапуск x3-ui чтобы перечитать SQLite
+echo "🔄 Перезапускаю x3-ui..."
+docker restart x3-ui
+sleep 5
+
+# 6. Запуск Nginx (fallback для сайта)
+echo "🌐 Проверяю Nginx..."
+if command -v nginx &> /dev/null; then
+    systemctl start nginx 2>/dev/null || true
+    systemctl enable nginx 2>/dev/null || true
+    echo "✅ Nginx запущен."
+else
+    echo "⚠️ Nginx не установлен."
+fi
+
+# 7. UFW порты (всегда открывать при обновлении)
 echo "🔥 Проверяю UFW порты..."
 if command -v ufw &> /dev/null; then
     ufw allow 22/tcp 2>/dev/null || true
@@ -50,9 +65,20 @@ else
     echo "⚠️ UFW не установлен, пропускаю."
 fi
 
-# 6. Проверка логов
-echo -e "${GREEN}⏳ Жду 10 секунд для запуска...${NC}"
+# 8. Перегенерация VPN-ссылок (чтобы VLESS ссылки в Supabase совпадали с текущими Reality ключами)
+echo "🔗 Перегенерирую VPN-ссылки..."
 sleep 10
+REGEN_RESULT=$(curl -s -X POST http://localhost:3005/api/admin/system/regenerate-all-links \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(curl -s -X POST http://localhost:3005/api/supabase-proxy/auth/v1/token?grant_type=password \
+    -H "Content-Type: application/json" \
+    -H "apikey: ${VITE_SUPABASE_ANON_KEY}" \
+    -d "{\"email\":\"${ADMIN_EMAIL:-admin@izinet.online}\",\"password\":\"${ADMIN_PASSWORD:-admin}\"}" 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)" 2>/dev/null)
+echo "Результат: $REGEN_RESULT"
+
+# 9. Проверка логов
+echo -e "${GREEN}⏳ Жду 5 секунд для финализации...${NC}"
+sleep 5
 echo -e "${GREEN}📊 Статус контейнеров:${NC}"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 

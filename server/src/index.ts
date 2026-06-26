@@ -109,14 +109,70 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
+async function regenerateAllVlessLinks() {
+  try {
+    const { supabase } = await import('./services/supabase');
+    const { getXuiForServer } = await import('./services/xui.service');
+    const { parseVpnDevices } = await import('./utils/vpn');
+
+    const { data: subs } = await supabase.from('subscriptions').select('*').eq('status', 'active');
+    if (!subs || subs.length === 0) return;
+
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!activeServers || activeServers.length === 0) return;
+
+    let updated = 0;
+    for (const sub of subs) {
+      try {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+        let changed = false;
+        for (const device of devices) {
+          if (!device.uuid || !device.email) continue;
+          const newConfigLines: string[] = [];
+          for (const server of activeServers) {
+            try {
+              const { instance } = await getXuiForServer(server.id);
+              let inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+              try {
+                const inbounds = await instance.getInbounds();
+                const realityInbound = inbounds.find((ib: any) => {
+                  try {
+                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                    return ss.security === 'reality' && ib.port === 443;
+                  } catch { return false; }
+                });
+                if (realityInbound) inboundId = realityInbound.id;
+              } catch (e) {}
+              const rawLink = await instance.getInboundLink(inboundId, device.uuid, device.email);
+              if (rawLink) newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+            } catch (e) {}
+          }
+          if (newConfigLines.length > 0) {
+            const newConfig = newConfigLines.join('\n');
+            if (device.config !== newConfig) { device.config = newConfig; changed = true; }
+          }
+        }
+        if (changed) {
+          await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+          updated++;
+        }
+      } catch (e) {}
+    }
+    if (updated > 0) console.log(`✅ [BOOT] Перегенерировано VPN-ссылок: ${updated}/${subs.length}`);
+  } catch (err: any) {
+    console.error('❌ [BOOT] Regenerate links failed:', err.message);
+  }
+}
+
 async function start() {
   console.log('🚀 [BOOT] Проверка Supabase...');
   const dbOk = await checkDatabase();
   if (dbOk) {
     botService.init();
     MaintenanceService.init();
-    // Восстановление inbound'ов из backup при старте
     RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
+    // Перегенерация VPN-ссылок через 15 сек после старта (чтобы Reality ключи из панели были актуальны)
+    setTimeout(() => regenerateAllVlessLinks(), 15000);
   }
   app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));
 }
