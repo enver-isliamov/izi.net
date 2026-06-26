@@ -4,7 +4,7 @@ import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
 import { parseVpnDevices, VpnDevice } from '../utils/vpn';
-import { updateXrayTemplateConfig } from '../services/xui-db';
+
 import { getRequestConfig } from '../utils/axios';
 import { restartContainer } from '../utils/docker';
 import axios from 'axios';
@@ -355,22 +355,26 @@ router.post('/servers/:id/restore', adminOnly, async (req, res) => {
       restoredCount++;
     }
 
+    // Restore xrayTemplateConfig via panel HTTP API (works for remote servers too)
     if (configState.xrayTemplateConfig) {
-      console.log(`[Restore] Restoring xrayTemplateConfig from backup...`);
-      updateXrayTemplateConfig(configState.xrayTemplateConfig);
+      console.log(`[Restore] Restoring xrayTemplateConfig via panel API...`);
+      await instance.updateSettings({ xrayTemplateConfig: configState.xrayTemplateConfig });
+      await instance.restartPanel();
+      console.log(`[Restore] xrayTemplateConfig restored and panel restarted`);
+    } else {
+      // No xrayTemplateConfig in backup — still restart to apply inbound changes
+      setTimeout(() => {
+        console.log(`[Restore] Restarting x3-ui to apply inbound changes...`);
+        restartContainer('x3-ui').catch(e => console.error(`[Restore] Restart failed: ${e.message}`));
+      }, 1000);
     }
 
-    res.json({ 
-      success: true, 
-      message: 'Конфигурация (инбаунды и клиенты) успешно восстановлена. x3-ui перезапускается...',
+    res.json({
+      success: true,
+      message: 'Конфигурация (инбаунды, клиенты, xray шаблон) успешно восстановлена.',
       restored_inbounds: restoredCount,
       has_xray_config: !!configState.xrayTemplateConfig
     });
-
-    setTimeout(() => {
-      console.log(`[Restore] Restarting x3-ui to apply changes...`);
-      restartContainer('x3-ui').catch(e => console.error(`[Restore] Restart failed: ${e.message}`));
-    }, 1000);
   } catch (err: any) {
     console.error(`[AdminRestore] Error for server ${id}:`, err.message);
     res.status(500).json({ error: 'Ошибка при восстановлении бэкапа: ' + err.message });
