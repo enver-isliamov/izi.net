@@ -80,6 +80,43 @@ export class RoutingService {
             });
           }
 
+          // --- VLESS Reality Inbound (port 443) — for "Advanced Template" visibility ---
+          // This mirrors xui_bootstrap.py config so the inbound shows in xrayTemplateConfig.
+          // Clients are managed via inbounds API, not template — clients array stays empty here.
+          if (!xrayConfig.inbounds.find((i: any) => i.tag === 'vless-reality')) {
+            xrayConfig.inbounds.push({
+              port: 443,
+              protocol: 'vless',
+              settings: {
+                clients: [],
+                fallbacks: [
+                  { name: 'izinet.online', alpn: '', path: '', dest: 'host.docker.internal:3443', xver: 0 },
+                  { name: 'www.izinet.online', alpn: '', path: '', dest: 'host.docker.internal:3443', xver: 0 },
+                  { dest: 'host.docker.internal:3443', xver: 0 }
+                ]
+              },
+              streamSettings: {
+                network: 'tcp',
+                security: 'reality',
+                realitySettings: {
+                  target: 'host.docker.internal:3443',
+                  dest: 'host.docker.internal:3443',
+                  serverNames: ['izinet.online', 'www.izinet.online'],
+                  privateKey: '',
+                  publicKey: '',
+                  shortIds: [''],
+                  spiderX: '/'
+                }
+              },
+              sniffing: {
+                enabled: true,
+                destOverride: ['http', 'tls'],
+                routeOnly: false
+              },
+              tag: 'vless-reality'
+            });
+          }
+
           // --- Routing Initialization ---
           if (!xrayConfig.routing) xrayConfig.routing = {};
           if (!xrayConfig.routing.rules) xrayConfig.routing.rules = [];
@@ -132,6 +169,7 @@ export class RoutingService {
   /**
    * Restores inbound configs from Supabase backup to X-UI panels.
    * Called at server startup to restore configs after fresh deploy or reinstall.
+   * Compares backup inbounds with current panel inbounds by port+protocol.
    */
   static async restoreAllPanelsFromBackup() {
     console.log('🔄 [Routing] Checking for panels that need config restoration...');
@@ -163,10 +201,17 @@ export class RoutingService {
             }
           }
 
-          // Если inbound'ов нет — восстанавливаем из backup
-          if (currentInbounds.length === 0) {
-            console.log(`🔄 [Routing] Restoring ${configState.inbounds.length} inbounds for ${server.name}...`);
-            for (const inbound of configState.inbounds) {
+          // Определяем какие inbound'ы из backup отсутствуют в панели
+          const missingInbounds = configState.inbounds.filter((backupInbound: any) => {
+            const exists = currentInbounds.find((ci: any) =>
+              ci.port === backupInbound.port && ci.protocol === backupInbound.protocol
+            );
+            return !exists;
+          });
+
+          if (missingInbounds.length > 0) {
+            console.log(`🔄 [Routing] Restoring ${missingInbounds.length} missing inbounds for ${server.name}...`);
+            for (const inbound of missingInbounds) {
               const newInbound = { ...inbound };
               delete (newInbound as any).id;
               delete (newInbound as any).up;
@@ -174,11 +219,26 @@ export class RoutingService {
               delete (newInbound as any).total;
               try {
                 await instance.addInbound(newInbound);
+                console.log(`  ✅ Restored inbound: ${inbound.remark || inbound.port}/${inbound.protocol}`);
               } catch (e: any) {
-                console.warn(`⚠️ [Routing] Failed to restore inbound ${inbound.remark || inbound.id}: ${e.message}`);
+                console.warn(`  ⚠️ Failed to restore inbound ${inbound.remark || inbound.port}: ${e.message}`);
               }
             }
-            console.log(`✅ [Routing] Restored ${configState.inbounds.length} inbounds for ${server.name}`);
+          }
+
+          // Восстанавливаем xrayTemplateConfig из backup
+          if (configState.xrayTemplateConfig) {
+            const settings = await instance.getSettings();
+            if (settings.xrayTemplateConfig !== configState.xrayTemplateConfig) {
+              console.log(`🔄 [Routing] Restoring xrayTemplateConfig for ${server.name}...`);
+              settings.xrayTemplateConfig = configState.xrayTemplateConfig;
+              await instance.updateSettings(settings);
+              console.log(`✅ [Routing] xrayTemplateConfig restored for ${server.name}`);
+            }
+          }
+
+          if (missingInbounds.length === 0 && !configState.xrayTemplateConfig) {
+            console.log(`✅ [Routing] ${server.name} — backup matches current state, no restore needed`);
           }
         } catch (e: any) {
           console.warn(`⚠️ [Routing] Could not check/restore ${server.name}: ${e.message}`);
