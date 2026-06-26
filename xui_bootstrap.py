@@ -289,14 +289,23 @@ def disable_broken_inbounds(cursor):
     if not table_exists(cursor, "inbounds"):
         return 0
     disabled = 0
-    cursor.execute("SELECT id, remark, port, enable FROM inbounds;")
+    cursor.execute("SELECT id, remark, port, enable, stream_settings FROM inbounds;")
     for row in cursor.fetchall():
-        inbound_id, remark, port, enable = row
+        inbound_id, remark, port, enable, stream_raw = row
         if enable and port == 8443:
+            ss = load_json(stream_raw or '{}', {})
+            if ss.get('network') == 'ws' and ss.get('security') == 'reality':
+                print(f"  ℹ️ Keeping inbound-8443 ({remark}) — Reality+WebSocket")
+                continue
             print(f"  ⚠️ Disabling inbound-8443 ({remark}) — requires missing TLS cert")
             cursor.execute("UPDATE inbounds SET enable=0 WHERE id=?;", (inbound_id,))
             disabled += 1
         elif port == 8443 and not enable:
+            ss = load_json(stream_raw or '{}', {})
+            if ss.get('network') == 'ws' and ss.get('security') == 'reality':
+                cursor.execute("UPDATE inbounds SET enable=1 WHERE id=?;", (inbound_id,))
+                print(f"  ✅ Re-enabled inbound-8443 ({remark}) — Reality+WebSocket")
+                continue
             print(f"  ℹ️ inbound-8443 ({remark}) already disabled, removing")
             cursor.execute("DELETE FROM inbounds WHERE id=?;", (inbound_id,))
             disabled += 1

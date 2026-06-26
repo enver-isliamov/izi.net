@@ -91,6 +91,9 @@ router.get('/sub/:id', async (req, res) => {
 
     const base64Config = Buffer.from(configText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('profile-title', 'izi.net VPN');
+    res.setHeader('profile-web-page-url', 'https://izinet.online');
+    res.setHeader('profile-update-interval', '12');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));
     res.send(base64Config);
   } catch (err) {

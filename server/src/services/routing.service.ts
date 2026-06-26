@@ -174,6 +174,12 @@ export class RoutingService {
 
           // Определяем какие inbound'ы из backup отсутствуют в панели
           const missingInbounds = configState.inbounds.filter((backupInbound: any) => {
+            if (backupInbound.port === 8443) {
+              try {
+                const ss = JSON.parse(backupInbound.streamSettings || '{}');
+                if (ss.security === 'tls') return false;
+              } catch {}
+            }
             const exists = currentInbounds.find((ci: any) =>
               ci.port === backupInbound.port && ci.protocol === backupInbound.protocol
             );

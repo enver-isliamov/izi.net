@@ -34,6 +34,10 @@ echo "🔧 Запускаю xui_bootstrap.py..."
 sleep 3
 python3 xui_bootstrap.py || echo "⚠️ Bootstrap failed, continuing..."
 
+# 4b. Создание Reality+WebSocket inbound (если ещё нет)
+echo "🔌 Проверяю Reality+WebSocket inbound..."
+bash add_reality_ws.sh || echo "⚠️ Reality+WS setup skipped"
+
 # 5. Перезапуск x3-ui чтобы перечитать SQLite
 echo "🔄 Перезапускаю x3-ui..."
 docker restart x3-ui

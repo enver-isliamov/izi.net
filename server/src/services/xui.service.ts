@@ -323,8 +323,8 @@ export class XUIService {
         const sid = (rs.shortIds?.[0] || realitySettings.shortIds?.[0]) || '';
         const fp = rs.fingerprint || realitySettings.fingerprint || 'chrome';
         const spiderX = rs.spiderX || realitySettings.spiderX || '/';
+        const network = streamSettings.network || 'tcp';
 
-        // Валидация Reality параметров
         const issues: string[] = [];
         if (!pbk || pbk.includes('m_G-oZ_9a6')) issues.push('Public Key пуст или некорректен');
         if (!sid) issues.push('Short IDs пуст');
@@ -335,8 +335,15 @@ export class XUIService {
           throw new Error(`Reality настройки некорректны: ${issues.join(', ')}. Проверьте панель X-UI.`);
         }
 
-        console.log(`✅ [XUI] Reality link for ${email}: SNI=${sni}, SID=${sid.substring(0, 10)}...`);
-        let link = `vless://${uuid}@${hostName}:${port}?type=tcp&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
+        let transportParams = 'type=tcp';
+        if (network === 'ws') {
+          const wsPath = streamSettings.wsSettings?.path || '/ws';
+          const wsHost = streamSettings.wsSettings?.headers?.Host || sni;
+          transportParams = `type=ws&path=${encodeURIComponent(wsPath)}&host=${encodeURIComponent(wsHost)}`;
+        }
+
+        console.log(`✅ [XUI] Reality link for ${email}: transport=${network}, SNI=${sni}, SID=${sid.substring(0, 10)}...`);
+        let link = `vless://${uuid}@${hostName}:${port}?${transportParams}&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
         return `${link}#${encodedEmail}`;
       }
 

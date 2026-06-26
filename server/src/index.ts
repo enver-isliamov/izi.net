@@ -132,19 +132,19 @@ async function regenerateAllVlessLinks() {
           for (const server of activeServers) {
             try {
               const { instance } = await getXuiForServer(server.id);
-              let inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-              try {
-                const inbounds = await instance.getInbounds();
-                const realityInbound = inbounds.find((ib: any) => {
-                  try {
-                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                    return ss.security === 'reality' && ib.port === 443;
-                  } catch { return false; }
-                });
-                if (realityInbound) inboundId = realityInbound.id;
-              } catch (e) {}
-              const rawLink = await instance.getInboundLink(inboundId, device.uuid, device.email);
-              if (rawLink) newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+              const inbounds = await instance.getInbounds();
+              const realityInbounds = inbounds.filter((ib: any) => {
+                try {
+                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                  return ss.security === 'reality' && ib.enable !== false;
+                } catch { return false; }
+              });
+              for (const ri of realityInbounds) {
+                try {
+                  const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                  if (rawLink) newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                } catch (e) {}
+              }
             } catch (e) {}
           }
           if (newConfigLines.length > 0) {

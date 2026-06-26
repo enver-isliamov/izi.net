@@ -1,42 +1,75 @@
 #!/bin/bash
+# IZINET — Добавление Reality+WebSocket inbound в 3x-ui
+# Запуск: bash add_reality_ws.sh
+# Идемпотентный — пропускает если inbound уже существует
+
 set -e
-rm -f /tmp/xc3 2>/dev/null
+rm -f /tmp/xc_ws 2>/dev/null
 
-echo "=== Шаг 1: Логин ==="
-curl -s -c /tmp/xc3 http://localhost:2053/ >/dev/null 2>&1
-CSRF=$(curl -s -b /tmp/xc3 http://localhost:2053/csrf-token | python3 -c "import sys,json;print(json.load(sys.stdin).get('obj',''))")
-curl -s -c /tmp/xc3 -b /tmp/xc3 -H "X-CSRF-Token: $CSRF" -X POST http://localhost:2053/login -H "Content-Type: application/x-www-form-urlencoded" -d 'username=oja&password=sireyra' >/dev/null 2>&1
-echo "OK"
+echo "=== IZINET: Reality+WebSocket Setup ==="
 
-echo "=== Шаг 2: Чтение Reality ключей из inbound 443 ==="
-KEYS=$(curl -s -b /tmp/xc3 http://localhost:2053/panel/api/inbounds/get/32 | python3 -c "
+# 1. Логин
+echo "[1/5] Логин в панель..."
+curl -s -c /tmp/xc_ws http://localhost:2053/ >/dev/null 2>&1
+CSRF=$(curl -s -b /tmp/xc_ws http://localhost:2053/csrf-token 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('obj',''))" 2>/dev/null)
+curl -s -c /tmp/xc_ws -b /tmp/xc_ws -H "X-CSRF-Token: $CSRF" -X POST http://localhost:2053/login -H "Content-Type: application/x-www-form-urlencoded" -d 'username=oja&password=sireyra' >/dev/null 2>&1
+echo "  OK"
+
+# 2. Проверяем есть ли уже inbound на 8443
+echo "[2/5] Проверка существующих inbound'ов..."
+EXISTING=$(curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for ib in d.get('obj',[]):
+  if ib.get('port')==8443:
+    ss=json.loads(ib.get('streamSettings','{}'))
+    net=ss.get('network','tcp')
+    sec=ss.get('security','none')
+    print(f'EXISTS id={ib[\"id\"]} net={net} sec={sec} remark={ib.get(\"remark\",\"?\")} enable={ib.get(\"enable\",\"?\")}')
+    break
+else:
+  print('NOT_FOUND')
+" 2>/dev/null)
+
+if echo "$EXISTING" | grep -q "EXISTS.*ws.*reality"; then
+  echo "  Reality+WS inbound уже существует — пропускаю"
+  echo "  $EXISTING"
+  exit 0
+fi
+echo "  Reality+WS inbound не найден — создаю"
+
+# 3. Читаем Reality ключи из inbound 443
+echo "[3/5] Чтение Reality ключей из inbound 443..."
+KEYS=$(curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/get/32 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 ib=d.get('obj',{})
 ss=json.loads(ib.get('streamSettings','{}'))
 rs=ss.get('realitySettings',{})
 s=rs.get('settings',rs)
-priv=rs.get('privateKey','')
-pub=s.get('publicKey','')
-sids=s.get('shortIds',rs.get('shortIds',[]))
-print(priv)
-print(pub)
-print(json.dumps(sids))
-")
+print(rs.get('privateKey',''))
+print(s.get('publicKey',''))
+print(json.dumps(s.get('shortIds',rs.get('shortIds',[]))))
+" 2>/dev/null)
+
 PRIV=$(echo "$KEYS" | sed -n '1p')
 PUB=$(echo "$KEYS" | sed -n '2p')
 SIDS=$(echo "$KEYS" | sed -n '3p')
-echo "Private: ${PRIV:0:15}..."
-echo "Public: ${PUB:0:15}..."
-echo "ShortIDs: $SIDS"
 
-echo "=== Шаг 3: Создание inbound Reality+WS на порту 8443 ==="
-python3 << PYEOF
+if [ -z "$PRIV" ] || [ -z "$PUB" ]; then
+  echo "  ОШИБКА: Не удалось прочитать Reality ключи из inbound 443"
+  exit 1
+fi
+echo "  Public Key: ${PUB:0:25}..."
+
+# 4. Создаём inbound Reality+WS
+echo "[4/5] Создание inbound Reality+WS на порту 8443..."
+RESULT=$(python3 << PYEOF
 import json, urllib.request
 
-priv="$PRIV"
-pub="$PUB"
-sids=$SIDS
+priv = "$PRIV"
+pub = "$PUB"
+sids = json.loads('$SIDS')
 
 settings = {
     "clients": [],
@@ -83,13 +116,11 @@ body = json.dumps({
     "sniffing": json.dumps(sniffing)
 }).encode()
 
-cookies = open("/tmp/xc3").read()
 cookie_str = ""
-for line in open("/tmp/xc3"):
-    if "session" in line.lower() or "3x-ui" in line.lower():
-        parts = line.strip().split("\t")
-        if len(parts) >= 7:
-            cookie_str += f"{parts[5]}={parts[6]}; "
+for line in open("/tmp/xc_ws"):
+    parts = line.strip().split("\\t")
+    if len(parts) >= 7 and parts[0] and not parts[0].startswith("#"):
+        cookie_str += f"{parts[5]}={parts[6]}; "
 
 req = urllib.request.Request(
     "http://localhost:2053/panel/api/inbounds/add",
@@ -104,28 +135,43 @@ try:
     resp = urllib.request.urlopen(req)
     result = json.loads(resp.read())
     if result.get("success"):
-        print(f"OK! Inbound ID: {result.get('obj',{}).get('id','?')}")
+        print(f"OK id={result.get('obj',{}).get('id','?')}")
     else:
         print(f"ERROR: {result.get('msg', result)}")
 except Exception as e:
     print(f"ERROR: {e}")
 PYEOF
+)
 
-echo "=== Шаг 4: Перезапуск Xray ==="
+echo "  $RESULT"
+
+if echo "$RESULT" | grep -q "ERROR"; then
+  echo "  Не удалось создать inbound. Проверь логи."
+  exit 1
+fi
+
+# 5. Перезапуск Xray
+echo "[5/5] Перезапуск Xray..."
 sleep 2
-curl -s -b /tmp/xc3 -X POST http://localhost:2053/panel/setting/restartPanel >/dev/null 2>&1
+curl -s -b /tmp/xc_ws -X POST http://localhost:2053/panel/setting/restartPanel >/dev/null 2>&1
 sleep 3
 
-echo "=== Шаг 5: Проверка ==="
-curl -s -b /tmp/xc3 http://localhost:2053/panel/api/inbounds/list | python3 -c "
+# 6. Проверка
+echo ""
+echo "=== ПРОВЕРКА ==="
+curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for ib in d.get('obj',[]):
-  print(f'ID={ib[\"id\"]} port={ib[\"port\"]} remark={ib.get(\"remark\",\"?\")} enable={ib.get(\"enable\",\"?\")}')
-"
+  if ib.get('port') in (443, 8443):
+    ss=json.loads(ib.get('streamSettings','{}'))
+    net=ss.get('network','tcp')
+    sec=ss.get('security','none')
+    print(f'  ID={ib[\"id\"]} port={ib[\"port\"]} network={net} security={sec} remark={ib.get(\"remark\",\"?\")} enable={ib.get(\"enable\",\"?\")}')
+" 2>/dev/null
 
 echo ""
 echo "=== ГОТОВО ==="
-echo "Новый inbound: izinet-reality-ws на порту 8443"
-echo "VLESS ссылка:"
-echo "vless://ВСТАВЬ_UUID@vpn.izinet.online:8443?type=ws&security=reality&sni=www.microsoft.com&pbk=${PUB}&fp=chrome&sid=ВСТАВЬ_SID&spx=%2F&path=%2Fws&host=www.microsoft.com&flow=xtls-rprx-vision#OneD-WS"
+echo "Reality+WS inbound создан на порту 8443"
+echo "Ссылка для клиента (пример):"
+echo "vless://UUID@vpn.izinet.online:8443?type=ws&path=%2Fws&host=www.microsoft.com&encryption=none&security=reality&sni=www.microsoft.com&pbk=${PUB}&fp=chrome&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#OneD-WS"
