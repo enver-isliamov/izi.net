@@ -296,24 +296,47 @@ def disable_broken_inbounds(cursor):
             print(f"  ⚠️ Disabling inbound-8443 ({remark}) — requires missing TLS cert")
             cursor.execute("UPDATE inbounds SET enable=0 WHERE id=?;", (inbound_id,))
             disabled += 1
+        elif port == 8443 and not enable:
+            print(f"  ℹ️ inbound-8443 ({remark}) already disabled, removing")
+            cursor.execute("DELETE FROM inbounds WHERE id=?;", (inbound_id,))
+            disabled += 1
     return disabled
 
 
-def patch_xray_settings(cursor):
+def patch_xray_template(cursor):
     if not table_exists(cursor, "settings"):
         return 0
     cursor.execute("SELECT key, value FROM settings WHERE key = 'xrayTemplateConfig';")
+    row = cursor.fetchone()
     updated = 0
-    for key, value in cursor.fetchall():
-        config = load_json(value, None)
-        if not isinstance(config, dict):
-            continue
-        xray = config.get("xraySetting") if isinstance(config.get("xraySetting"), dict) else config
-        dns = xray.setdefault("dns", {})
+    if not row or not row[1] or row[1] == '{}':
+        config = {
+            "dns": {"servers": SAFE_DNS_SERVERS},
+            "outbounds": [
+                {"protocol": "freedom", "tag": "direct"},
+                {"protocol": "blackhole", "tag": "blocked"}
+            ]
+        }
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?);",
+                       (dump_json(config),))
+        updated = 1
+    else:
+        config = load_json(row[1], {})
+        changed = False
+        dns = config.setdefault("dns", {})
         if dns.get("servers") != SAFE_DNS_SERVERS:
             dns["servers"] = SAFE_DNS_SERVERS
-            cursor.execute("UPDATE settings SET value=? WHERE key=?;", (dump_json(config), key))
-            updated += 1
+            changed = True
+        if not config.get("outbounds") or len(config["outbounds"]) == 0:
+            config["outbounds"] = [
+                {"protocol": "freedom", "tag": "direct"},
+                {"protocol": "blackhole", "tag": "blocked"}
+            ]
+            changed = True
+        if changed:
+            cursor.execute("UPDATE settings SET value=? WHERE key='xrayTemplateConfig';",
+                           (dump_json(config),))
+            updated = 1
     return updated
 
 
@@ -333,12 +356,12 @@ def main():
         created = ensure_default_inbound(cursor)
         inbound_updates = patch_inbounds(cursor)
         broken_disabled = disable_broken_inbounds(cursor)
-        xray_updates = patch_xray_settings(cursor)
+        xray_updates = patch_xray_template(cursor)
         conn.commit()
         print(
             "xui-bootstrap: repaired persistent 3x-ui DB "
             f"(created_inbounds={created}, updated_inbounds={inbound_updates}, "
-            f"broken_disabled={broken_disabled}, xray_settings={xray_updates})"
+            f"broken_disabled={broken_disabled}, xray_template={xray_updates})"
         )
     finally:
         conn.close()

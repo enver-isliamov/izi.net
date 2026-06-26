@@ -1,6 +1,5 @@
 import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
-import { updateXrayTemplateConfig, readXrayTemplateConfig } from './xui-db';
 import { restartContainer } from '../utils/docker';
 
 export class RoutingService {
@@ -115,19 +114,6 @@ export class RoutingService {
 
           // 2. Restart panel to apply changes to xray core
           await instance.restartPanel();
-
-          // 3. Write to SQLite as backup (after HTTP update, so it doesn't get overwritten)
-          const configJson = JSON.stringify(xrayConfig, null, 2);
-          const writeOk = updateXrayTemplateConfig(configJson);
-
-          // Verify by reading back from SQLite
-          const verifyRaw = readXrayTemplateConfig();
-          if (verifyRaw) {
-            const verifyConfig = JSON.parse(verifyRaw);
-            console.log(`🔍 [XUI-DB] Verify AFTER write: api=${!!verifyConfig.api} stats=${!!verifyConfig.stats} inbounds=${(verifyConfig.inbounds || []).length} rules=${(verifyConfig.routing?.rules || []).length}`);
-          } else {
-            console.error(`❌ [XUI-DB] Verify FAILED — could not read back from SQLite`);
-          }
 
           console.log(`✅ [Routing] Rules synced to ${server.name}`);
         } catch (e: any) {
