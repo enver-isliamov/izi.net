@@ -164,14 +164,65 @@ async function regenerateAllVlessLinks() {
   }
 }
 
+async function autoDetectServerFields() {
+  try {
+    const { supabase } = await import('./services/supabase');
+    const { getXuiForServer } = await import('./services/xui.service');
+
+    const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!servers) return;
+
+    for (const server of servers) {
+      const needsUpdate: any = {};
+      let changed = false;
+
+      if (!server.inbound_id || server.inbound_id === 0) {
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          const inbounds = await instance.getInbounds();
+          const realityInbound = inbounds.find((ib: any) => {
+            try {
+              const ss = JSON.parse(ib.streamSettings || '{}');
+              return ss.security === 'reality' && ib.port === 443;
+            } catch { return false; }
+          });
+          if (realityInbound) {
+            needsUpdate.inbound_id = realityInbound.id;
+            changed = true;
+            console.log(`  🔧 ${server.name}: inbound_id → ${realityInbound.id}`);
+          }
+        } catch (e: any) {
+          console.warn(`  ⚠️ ${server.name}: cannot detect inbound_id: ${e.message}`);
+        }
+      }
+
+      if (!server.public_host) {
+        const host = (server.ip || '').replace(/^https?:\/\//, '').split(':')[0] || (server.domain || '').replace(/^https?:\/\//, '').split(':')[0];
+        if (host) {
+          needsUpdate.public_host = host;
+          changed = true;
+          console.log(`  🔧 ${server.name}: public_host → ${host}`);
+        }
+      }
+
+      if (changed) {
+        needsUpdate.updated_at = new Date().toISOString();
+        await supabase.from('vpn_servers').update(needsUpdate).eq('id', server.id);
+      }
+    }
+  } catch (err: any) {
+    console.error('❌ [BOOT] autoDetectServerFields failed:', err.message);
+  }
+}
+
 async function start() {
   console.log('🚀 [BOOT] Проверка Supabase...');
   const dbOk = await checkDatabase();
   if (dbOk) {
     botService.init();
     MaintenanceService.init();
+    autoDetectServerFields().catch(e => console.error('❌ [BOOT] autoDetect failed:', e.message));
     RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
-    // Перегенерация VPN-ссылок через 15 сек после старта (чтобы Reality ключи из панели были актуальны)
     setTimeout(() => regenerateAllVlessLinks(), 15000);
   }
   app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));

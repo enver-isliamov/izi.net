@@ -247,8 +247,12 @@ export class XUIService {
       const existingClient = await this.getClientByEmail(inboundId, email);
       if (existingClient?.id) {
         console.log(`🔄 [XUI] Client ${email} already exists in inbound ${inboundId} (uuid=${existingClient.id}) — updating instead`);
-        await this.updateClient(email, existingClient.id, existingClient.inboundId || inboundId, expiryTime, limitBytes);
-        return this.getInboundLink(existingClient.inboundId || inboundId, existingClient.id, email);
+        const updated = await this.updateClient(email, existingClient.id, existingClient.inboundId || inboundId, expiryTime, limitBytes);
+        if (updated) {
+          return this.getInboundLink(existingClient.inboundId || inboundId, existingClient.id, email);
+        }
+        console.warn(`⚠️ [XUI] updateClient returned false for ${email} — trying to delete and re-add`);
+        await this.deleteClient(existingClient.id, email).catch(() => {});
       }
     } catch (e) {}
 
@@ -279,8 +283,11 @@ export class XUIService {
               const found = (settings.clients || []).find((c: any) => c.email === email);
               if (found) {
                 console.log(`🔄 [XUI] Found ${email} in inbound ${ib.id} — updating`);
-                await this.updateClient(email, found.id || found.uuid, ib.id, expiryTime, limitBytes);
-                return this.getInboundLink(ib.id, found.id || found.uuid, email);
+                const updated = await this.updateClient(email, found.id || found.uuid, ib.id, expiryTime, limitBytes);
+                if (updated) {
+                  return this.getInboundLink(ib.id, found.id || found.uuid, email);
+                }
+                console.warn(`⚠️ [XUI] updateClient failed for ${email} in inbound ${ib.id}`);
               }
             } catch (e) {}
           }
