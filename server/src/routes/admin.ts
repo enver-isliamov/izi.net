@@ -1063,5 +1063,107 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// === BUG-VPN-02: Регенерация одной подписки ===
+router.post('/subscriptions/:id/regenerate', adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: sub, error: subErr } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    if (subErr) throw subErr;
+    if (!sub) return res.status(404).json({ ok: false, error: 'Subscription not found' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!activeServers || activeServers.length === 0) throw new Error('No active servers');
+
+    let updated = 0;
+    let errors = 0;
+    for (const device of devices) {
+      if (!device.uuid || !device.email) { errors++; continue; }
+      const newConfigLines: string[] = [];
+      for (const server of activeServers) {
+        try {
+          const { instance, server: serverData } = await getXuiForServer(server.id);
+          const inboundId = serverData.inbound_id || 0;
+
+          let effectiveInboundId = inboundId;
+          if (!effectiveInboundId || effectiveInboundId <= 0) {
+            const inbounds = await instance.getInbounds();
+            const ri = inbounds.find((ib: any) => {
+              try { const ss = JSON.parse(ib.streamSettings || '{}'); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
+            });
+            if (ri) effectiveInboundId = ri.id;
+          }
+
+          const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
+          if (rawLink) newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+        } catch (e: any) {
+          errors++;
+        }
+      }
+      if (newConfigLines.length > 0) {
+        device.config = newConfigLines.join('\n');
+        updated++;
+      }
+    }
+
+    await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', id);
+    res.json({ ok: true, updated, errors, total: devices.length });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// === BUG-VPN-02: Batch регенерация всех активных подписок ===
+router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
+  try {
+    const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').eq('status', 'active');
+    if (subErr) throw subErr;
+    if (!subs || subs.length === 0) return res.json({ ok: true, updated: 0, total: 0 });
+
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!activeServers || activeServers.length === 0) throw new Error('No active servers');
+
+    let totalUpdated = 0;
+    let totalErrors = 0;
+    const BATCH = 20;
+
+    for (let i = 0; i < subs.length; i += BATCH) {
+      const batch = subs.slice(i, i + BATCH);
+      for (const sub of batch) {
+        try {
+          const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+          let changed = false;
+          for (const device of devices) {
+            if (!device.uuid || !device.email) continue;
+            const newLines: string[] = [];
+            for (const server of activeServers) {
+              try {
+                const { instance, server: serverData } = await getXuiForServer(server.id);
+                let effectiveInboundId = serverData.inbound_id || 0;
+                if (!effectiveInboundId || effectiveInboundId <= 0) {
+                  const inbounds = await instance.getInbounds();
+                  const ri = inbounds.find((ib: any) => {
+                    try { const ss = JSON.parse(ib.streamSettings || '{}'); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
+                  });
+                  if (ri) effectiveInboundId = ri.id;
+                }
+                const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
+                if (rawLink) newLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+              } catch (e) {}
+            }
+            if (newLines.length > 0) {
+              const newConfig = newLines.join('\n');
+              if (device.config !== newConfig) { device.config = newConfig; changed = true; }
+            }
+          }
+          if (changed) {
+            await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+            totalUpdated++;
+          }
+        } catch (e) { totalErrors++; }
+      }
+    }
+    res.json({ ok: true, updated: totalUpdated, errors: totalErrors, total: subs.length });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 export default router;
 

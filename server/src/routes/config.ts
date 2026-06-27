@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../services/supabase';
+import { getXuiForServer } from '../services/xui.service';
+import { parseVpnDevices } from '../utils/vpn';
 import { MaintenanceService } from '../services/maintenance.service';
 
 const router = Router();
@@ -84,7 +86,45 @@ router.get('/sub/:id', async (req, res) => {
       }
     } catch (e) {}
 
-    // Fallback: if config is empty after filtering, return all non-empty vless lines
+    // Fallback: if config is empty after filtering, try lazy regeneration
+    if (!configText || !configText.trim()) {
+      console.log(`🔄 [SUB] Lazy heal for ${id} — v2ray_config empty or no valid links`);
+      try {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+        const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+        if (devices.length > 0 && activeServers && activeServers.length > 0) {
+          let changed = false;
+          for (const device of devices) {
+            if (!device.uuid || !device.email) continue;
+            const lines: string[] = [];
+            for (const server of activeServers) {
+              try {
+                const { instance, server: serverData } = await getXuiForServer(server.id);
+                let effectiveInboundId = serverData.inbound_id || 0;
+                if (!effectiveInboundId || effectiveInboundId <= 0) {
+                  const inbounds = await instance.getInbounds();
+                  const ri = inbounds.find((ib: any) => {
+                    try { const ss = JSON.parse(ib.streamSettings || '{}'); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
+                  });
+                  if (ri) effectiveInboundId = ri.id;
+                }
+                const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
+                if (rawLink) lines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+              } catch (e) {}
+            }
+            if (lines.length > 0) { device.config = lines.join('\n'); changed = true; }
+          }
+          if (changed) {
+            await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', id);
+            configText = devices.map((d: any) => d.config).join('\n');
+            console.log(`✅ [SUB] Lazy heal succeeded for ${id}`);
+          }
+        }
+      } catch (e: any) {
+        console.error(`❌ [SUB] Lazy heal failed for ${id}: ${e.message}`);
+      }
+    }
+
     if (!configText || !configText.trim()) {
       return res.status(404).send('No valid VPN configs found for this subscription');
     }
