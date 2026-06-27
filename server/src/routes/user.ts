@@ -59,20 +59,21 @@ async function provisionDeviceOnServers(params: {
 
   for (const server of params.activeServers) {
     try {
-      const { instance } = await getXuiForServer(server.id);
+      const { instance, server: serverData } = await getXuiForServer(server.id);
       
-      // Auto-detect Reality inbound ID from panel
-      let effectiveInboundId = params.inboundId;
-      try {
-        const inbounds = await instance.getInbounds();
-        const realityInbound = inbounds.find((ib: any) => {
-          try {
-            const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-            return ss.security === 'reality' && ib.port === 443;
-          } catch { return false; }
-        });
-        if (realityInbound) effectiveInboundId = realityInbound.id;
-      } catch (e) {}
+      let effectiveInboundId = serverData.inbound_id || params.inboundId;
+      if (!effectiveInboundId || effectiveInboundId <= 0) {
+        try {
+          const inbounds = await instance.getInbounds();
+          const realityInbound = inbounds.find((ib: any) => {
+            try {
+              const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+              return ss.security === 'reality' && ib.port === 443;
+            } catch { return false; }
+          });
+          if (realityInbound) effectiveInboundId = realityInbound.id;
+        } catch (e) {}
+      }
 
       const rawConfig = await instance.addClient(email, uuid, effectiveInboundId, params.expiresAt.getTime(), limitBytes);
       if (rawConfig) {
@@ -326,7 +327,6 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
     if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов');
 
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
     const newEmail = `user_${userId.slice(0, 5)}_${Math.random().toString(36).substring(2, 5)}_reg`;
     const newUuid = crypto.randomUUID();
@@ -335,12 +335,12 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
     let configLines: string[] = [];
     for (const server of activeServers) {
       try {
-        const { instance } = await getXuiForServer(server.id);
+        const { instance, server: serverData } = await getXuiForServer(server.id);
         
-        // Auto-detect Reality inbound ID from panel
-        let effectiveInboundId = inboundId;
-        try {
-          const inbounds = await instance.getInbounds();
+        let effectiveInboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+        if (!effectiveInboundId || effectiveInboundId <= 0) {
+          try {
+            const inbounds = await instance.getInbounds();
           const realityInbound = inbounds.find((ib: any) => {
             try {
               const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});

@@ -115,20 +115,21 @@ export class MaintenanceService {
           const expiryTime = new Date(sub.expires_at).getTime();
 
           for (const server of activeServers) {
-            const { instance } = await getXuiForServer(server.id);
+            const { instance, server: serverData } = await getXuiForServer(server.id);
 
-            // Auto-detect Reality inbound ID per server
-            let inboundId = defaultInboundId;
-            try {
-              const inbounds = await instance.getInbounds();
-              const realityInbound = inbounds.find((ib: any) => {
-                try {
-                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                  return ss.security === 'reality' && ib.port === 443;
-                } catch { return false; }
-              });
-              if (realityInbound) inboundId = realityInbound.id;
-            } catch (e) {}
+            let inboundId = serverData.inbound_id || defaultInboundId;
+            if (!inboundId || inboundId <= 0) {
+              try {
+                const inbounds = await instance.getInbounds();
+                const realityInbound = inbounds.find((ib: any) => {
+                  try {
+                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                    return ss.security === 'reality' && ib.port === 443;
+                  } catch { return false; }
+                });
+                if (realityInbound) inboundId = realityInbound.id;
+              } catch (e) {}
+            }
 
             for (const dev of devices) {
               await instance.addClient(dev.email, dev.uuid, inboundId, expiryTime, limitBytes).catch(e => {

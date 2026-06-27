@@ -9,6 +9,7 @@ import { getRequestConfig } from '../utils/axios';
 import { restartContainer } from '../utils/docker';
 import axios from 'axios';
 import http from 'http';
+import net from 'net';
 import crypto from 'crypto';
 import { paymentService } from '../services/payment.service';
 
@@ -483,7 +484,6 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
 
     // Шаг 3: Создать VPN ключи на всех активных серверах
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
     const limitBytes = (parseInt(trafficLimitMb) || 102400) * 1024 * 1024;
     const expiresAtMs = expiresAt.getTime();
 
@@ -493,7 +493,8 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
 
     for (const server of (activeServers || [])) {
       try {
-        const { instance } = await getXuiForServer(server.id);
+        const { instance, server: serverData } = await getXuiForServer(server.id);
+        const inboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
         const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
         if (rawConfig) {
           devices.push({
@@ -586,21 +587,22 @@ router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req
 
     for (const server of servers) {
       try {
-        const { instance } = await getXuiForServer(server.id);
+        const { instance, server: serverData } = await getXuiForServer(server.id);
         
-        // Auto-detect Reality inbound ID from panel
-        let inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
-        try {
-          const inbounds = await instance.getInbounds();
-          const realityInbound = inbounds.find((ib: any) => {
-            try {
-              const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-              return ss.security === 'reality' && ib.port === 443;
-            } catch { return false; }
-          });
-          if (realityInbound) inboundId = realityInbound.id;
-        } catch (e: any) {
-          console.warn(`⚠️ [Admin] Could not auto-detect inbound for ${server.name}: ${e.message}`);
+        let inboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+        if (!inboundId || inboundId <= 0) {
+          try {
+            const inbounds = await instance.getInbounds();
+            const realityInbound = inbounds.find((ib: any) => {
+              try {
+                const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                return ss.security === 'reality' && ib.port === 443;
+              } catch { return false; }
+            });
+            if (realityInbound) inboundId = realityInbound.id;
+          } catch (e: any) {
+            console.warn(`⚠️ [Admin] Could not auto-detect inbound for ${server.name}: ${e.message}`);
+          }
         }
 
         if (oldDevice.uuid && oldDevice.email) await instance.deleteClient(oldDevice.uuid, oldDevice.email).catch(() => {});
@@ -782,8 +784,8 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
           const newConfigLines: string[] = [];
           for (const server of activeServers) {
             try {
-              const { instance } = await getXuiForServer(server.id);
-              const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+              const { instance, server: serverData } = await getXuiForServer(server.id);
+              const inboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
 
               let effectiveInboundId = inboundId;
               try {
@@ -861,6 +863,204 @@ router.get('/users/:userId/transactions', adminOnly, async (req, res) => {
 
     res.json({ transactions: transactions || [], summary });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// === BUG-VPN-01: Диагностика подписки как её видит VPN-клиент ===
+router.get('/subscriptions/:id/diagnose', adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: sub, error: subErr } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    if (subErr) throw subErr;
+    if (!sub) return res.status(404).json({ ok: false, errors: ['Subscription not found'] });
+
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const links: any[] = [];
+    let ok = true;
+
+    if (sub.status !== 'active') {
+      errors.push(`SUB_INACTIVE: status="${sub.status}"`);
+      ok = false;
+    }
+
+    if (!sub.v2ray_config || !sub.v2ray_config.trim()) {
+      errors.push('SUB_EMPTY: v2ray_config is empty');
+      ok = false;
+    } else {
+      let configText = sub.v2ray_config || '';
+      let devices: any[] = [];
+
+      try {
+        if (configText.startsWith('[')) {
+          devices = JSON.parse(configText);
+        }
+      } catch (e) {
+        errors.push(`PARSE_ERROR: ${e}`);
+        ok = false;
+      }
+
+      if (devices.length === 0 && configText.includes('vless://')) {
+        devices = [{ id: 'legacy', config: configText, email: 'legacy', uuid: 'unknown' }];
+        warnings.push('LEGACY_FORMAT: v2ray_config is legacy string, not JSON devices');
+      }
+
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const activeNames = (activeServers || []).map((s: any) => s.name.replace(/\s+/g, '_'));
+
+      for (const device of devices) {
+        const deviceLinks = (device.config || '').split('\n').filter((l: string) => l.trim().startsWith('vless://'));
+
+        for (const link of deviceLinks) {
+          const linkInfo: any = { link: link.substring(0, 120) + '...', device_id: device.id, email: device.email, uuid: device.uuid, issues: [] };
+
+          const fragment = link.split('#')[1] || '';
+          const serverMatch = activeNames.some((name: string) => fragment.includes(name));
+          if (activeNames.length > 0 && !serverMatch) {
+            linkInfo.issues.push('SERVER_NOT_ACTIVE: fragment does not match any active server');
+          }
+
+          const queryStr = link.split('?')[1] || '';
+          const params = new URLSearchParams(queryStr);
+
+          const sec = params.get('security');
+          if (sec !== 'reality') linkInfo.issues.push(`LINK_NOT_REALITY: security=${sec}`);
+          const pbk = params.get('pbk');
+          if (!pbk) linkInfo.issues.push('MISSING_PBK');
+          const sid = params.get('sid');
+          if (!sid) linkInfo.issues.push('MISSING_SID');
+          const sni = params.get('sni');
+          if (!sni) linkInfo.issues.push('MISSING_SNI');
+          const fp = params.get('fp');
+          if (!fp) linkInfo.issues.push('MISSING_FP');
+          const flow = params.get('flow');
+          if (flow !== 'xtls-rprx-vision') linkInfo.issues.push(`BAD_FLOW: ${flow}`);
+          const type = params.get('type');
+          if (type !== 'tcp' && type !== 'ws') linkInfo.issues.push(`UNEXPECTED_TYPE: ${type}`);
+
+          const hostPort = link.split('@')[1]?.split('?')[0] || '';
+          const host = hostPort.split(':')[0];
+          const port = parseInt(hostPort.split(':')[1] || '0');
+          linkInfo.host = host;
+          linkInfo.port = port;
+
+          if (!host) linkInfo.issues.push('MISSING_HOST');
+          if (!port || port < 1) linkInfo.issues.push('MISSING_PORT');
+
+          if (linkInfo.issues.length > 0) ok = false;
+          links.push(linkInfo);
+        }
+
+          if (device.uuid && device.uuid !== 'unknown') {
+          for (const server of activeServers || []) {
+            try {
+              const { instance } = await getXuiForServer(server.id);
+              const inbounds = await instance.getInbounds();
+              let found = false;
+              for (const ib of inbounds) {
+                const settings = JSON.parse(ib.settings || '{}');
+                const client = (settings.clients || []).find((c: any) => c.id === device.uuid || c.email === device.email);
+                if (client) {
+                  found = true;
+                  const expMs = client.expiryTime || 0;
+                  const now = Date.now();
+                  if (expMs > 0 && expMs < now) {
+                    errors.push(`XUI_EXPIRED: uuid=${device.uuid} server=${server.name} expired=${new Date(expMs).toISOString()}`);
+                    ok = false;
+                  }
+                  if (client.enable === false) {
+                    errors.push(`XUI_DISABLED: uuid=${device.uuid} server=${server.name}`);
+                    ok = false;
+                  }
+                  break;
+                }
+              }
+              if (!found) {
+                warnings.push(`XUI_CLIENT_NOT_FOUND: uuid=${device.uuid} server=${server.name}`);
+              }
+            } catch (e: any) {
+              warnings.push(`XUI_CHECK_FAILED: server=${server.name} error=${e.message}`);
+            }
+          }
+        }
+      }
+    }
+
+    if (sub.expires_at && new Date(sub.expires_at) < new Date()) {
+      errors.push(`SUB_EXPIRED: expires_at=${sub.expires_at}`);
+      ok = false;
+    }
+
+    res.json({ ok, subscription_id: id, status: sub.status, expires_at: sub.expires_at, traffic_used_mb: sub.traffic_used_mb, traffic_limit_mb: sub.traffic_limit_mb, links_count: links.length, warnings, errors, links });
+  } catch (err: any) { res.status(500).json({ ok: false, errors: [err.message] }); }
+});
+
+// === BUG-VPN-06: Расширенная проверка сервера как VPN-ноды ===
+router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: server, error } = await supabase.from('vpn_servers').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!server) return res.status(404).json({ ok: false, error: 'Server not found' });
+
+    const checks: any = { panel_ok: false, inbounds: [], reality: null, tcp_reachable: false, public_host: server.domain || server.ip, vpn_port: 443, issues: [] };
+
+    try {
+      const { instance } = await getXuiForServer(server.id);
+      checks.panel_ok = await instance.checkHealth();
+
+      if (checks.panel_ok) {
+        const inbounds = await instance.getInbounds();
+        checks.inbounds = inbounds.map((ib: any) => ({ id: ib.id, port: ib.port, protocol: ib.protocol, remark: ib.remark, enable: ib.enable }));
+
+        const realityInbound = inbounds.find((ib: any) => {
+          try {
+            const ss = JSON.parse(ib.streamSettings || '{}');
+            return ss.security === 'reality' && ib.port === 443;
+          } catch { return false; }
+        });
+
+        if (realityInbound) {
+          const ss = JSON.parse(realityInbound.streamSettings || '{}');
+          const rs = ss.realitySettings || {};
+          const s = rs.settings || rs;
+          checks.reality = {
+            id: realityInbound.id, port: realityInbound.port, network: ss.network || 'tcp',
+            publicKey: s.publicKey || rs.publicKey || '', fingerprint: s.fingerprint || '',
+            serverNames: s.serverName || rs.serverNames || [], shortIds: s.shortIds || rs.shortIds || [],
+            spiderX: s.spiderX || rs.spiderX || '', dest: rs.dest || ''
+          };
+
+          if (!checks.reality.publicKey) { checks.issues.push('REALITY_NO_PBK'); }
+          if (!checks.reality.shortIds || checks.reality.shortIds.length === 0) { checks.issues.push('REALITY_NO_SID'); }
+          if (!checks.reality.serverNames || (typeof checks.reality.serverNames === 'string' && !checks.reality.serverNames)) { checks.issues.push('REALITY_NO_SNI'); }
+        } else {
+          checks.issues.push('NO_REALITY_INBOUND_ON_443');
+        }
+
+        try {
+          const host = (server.domain || '').replace(/^https?:\/\//, '').split(':')[0] || (server.ip || '').replace(/^https?:\/\//, '').split(':')[0];
+          const port = 443;
+          checks.public_host = host;
+          checks.vpn_port = port;
+          const sock = new net.Socket();
+          await new Promise<void>((resolve, reject) => {
+            sock.setTimeout(5000);
+            sock.connect(port, host, () => { checks.tcp_reachable = true; sock.destroy(); resolve(); });
+            sock.on('timeout', () => { sock.destroy(); reject(new Error('timeout')); });
+            sock.on('error', (e) => { reject(e); });
+          });
+        } catch (e: any) {
+          checks.tcp_reachable = false;
+          checks.issues.push(`TCP_TIMEOUT: ${e.message}`);
+        }
+      }
+    } catch (e: any) {
+      checks.issues.push(`PANEL_ERROR: ${e.message}`);
+    }
+
+    const ok = checks.panel_ok && checks.reality && checks.tcp_reachable && checks.issues.length === 0;
+    res.json({ ok, server: { id: server.id, name: server.name, ip: server.ip, domain: server.domain }, ...checks });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 export default router;

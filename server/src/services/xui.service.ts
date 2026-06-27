@@ -668,16 +668,20 @@ export async function getXuiForServer(serverId: string) {
   const { data: server, error } = await supabase.from('vpn_servers').select('*').eq('id', serverId).single();
   if (error || !server) throw new Error('Server not found');
 
-  const cacheKey = `${server.ip || server.domain}_${server.username}`;
+  const panelHost = server.ip || server.domain || '';
+  const displayHost = server.public_host || server.domain || '';
+  const inboundId = server.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+
+  const cacheKey = `${panelHost}_${server.username}`;
   let instance = xuiInstances.get(cacheKey);
 
   if (!instance) {
-    instance = new XUIService({ host: server.ip || server.domain, username: server.username, password: server.password });
-    if (server.domain && !server.domain.startsWith('/')) {
-      instance.displayDomain = server.domain;
+    instance = new XUIService({ host: panelHost, username: server.username, password: server.password });
+    if (displayHost && !displayHost.startsWith('/')) {
+      instance.displayDomain = displayHost;
     }
     xuiInstances.set(cacheKey, instance);
   }
 
-  return { instance, server };
+  return { instance, server: { ...server, inbound_id: inboundId, public_host: displayHost } };
 }
