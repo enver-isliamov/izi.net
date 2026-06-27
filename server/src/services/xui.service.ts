@@ -670,7 +670,7 @@ export async function getXuiForServer(serverId: string) {
 
   const panelHost = server.ip || server.domain || '';
   const displayHost = server.public_host || server.domain || '';
-  const inboundId = server.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+  const inboundId = server.inbound_id || 0;
 
   const cacheKey = `${panelHost}_${server.username}`;
   let instance = xuiInstances.get(cacheKey);

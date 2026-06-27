@@ -494,7 +494,7 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     for (const server of (activeServers || [])) {
       try {
         const { instance, server: serverData } = await getXuiForServer(server.id);
-        const inboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+              const inboundId = serverData.inbound_id || 0;
         const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
         if (rawConfig) {
           devices.push({
@@ -589,7 +589,7 @@ router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req
       try {
         const { instance, server: serverData } = await getXuiForServer(server.id);
         
-        let inboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+        let inboundId = serverData.inbound_id || 0;
         if (!inboundId || inboundId <= 0) {
           try {
             const inbounds = await instance.getInbounds();
@@ -785,7 +785,7 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
           for (const server of activeServers) {
             try {
               const { instance, server: serverData } = await getXuiForServer(server.id);
-              const inboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+        const inboundId = serverData.inbound_id || 0;
 
               let effectiveInboundId = inboundId;
               try {

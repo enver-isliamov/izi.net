@@ -112,7 +112,7 @@ async function handleSubscriptionBuy(req: any, res: any) {
 
     const globalDeviceLimit = clampInt(await getSystemSetting('DEVICE_LIMIT', '2'), 1, 20);
     const normalizedServerType = String(serverType || 'WIFI').toUpperCase();
-    const inboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+    const inboundId = 0;
     const trafficLimitMb = 102400;
     const now = new Date();
 
@@ -337,7 +337,7 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
       try {
         const { instance, server: serverData } = await getXuiForServer(server.id);
         
-        let effectiveInboundId = serverData.inbound_id || parseInt(process.env.XUI_INBOUND_ID || '1');
+        let effectiveInboundId = serverData.inbound_id || 0;
         if (!effectiveInboundId || effectiveInboundId <= 0) {
           try {
             const inbounds = await instance.getInbounds();

@@ -110,7 +110,7 @@ export class MaintenanceService {
           const devices = parseVpnDevices(sub.v2ray_config);
           if (devices.length === 0) continue;
 
-          const defaultInboundId = parseInt(process.env.XUI_INBOUND_ID || '1');
+          const defaultInboundId = 0;
           const limitBytes = (sub.traffic_limit_mb || 102400) * 1024 * 1024;
           const expiryTime = new Date(sub.expires_at).getTime();
 
