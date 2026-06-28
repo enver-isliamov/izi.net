@@ -174,8 +174,8 @@ def normalize_reality(stream_settings):
         changed = True
     for key in ("dest", "target"):
         dest_val = str(reality.get(key, "")).lower()
-        if not dest_val or "google" in dest_val or "microsoft" in dest_val or "docker" in dest_val:
-            reality[key] = "www.cloudflare.com:443"
+        if not dest_val or "google" in dest_val or "microsoft" in dest_val:
+            reality[key] = "host.docker.internal:3443"
             changed = True
     if not reality.get("privateKey") or not reality.get("publicKey"):
         private_key, public_key = reality_keypair()
