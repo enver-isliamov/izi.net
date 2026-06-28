@@ -118,26 +118,15 @@ export class RoutingService {
           console.log(`🔍 [Routing] ${server.name} template AFTER: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
 
           // 1. Update via HTTP API (form-urlencoded — 3x-ui requires this format)
-          await instance.updateSettings(settings);
-
-          // 2. Verify template was persisted
+          // NOTE: updateSettings() may not persist xrayTemplateConfig in X-UI v26.4.25
+          // SQLite patching is handled by update.sh on the host
           try {
-            const verify = await instance.getSettings();
-            const verifyConfig = JSON.parse(verify.xrayTemplateConfig || '{}');
-            const verifyRules = verifyConfig.routing?.rules?.length || 0;
-            if (verifyRules >= 3) {
-              console.log(`✅ [Routing] xrayTemplateConfig persisted: ${verifyRules} routing rules`);
-            } else {
-              console.warn(`⚠️ [Routing] xrayTemplateConfig may not have persisted (rules=${verifyRules}). Using SQLite fallback.`);
-              // Direct SQLite write as fallback
-              const { spawn } = await import('child_process');
-              spawn('python3', ['/app/server/src/scripts/patch_xray_routing.py'], { stdio: 'inherit' });
-            }
+            await instance.updateSettings(settings);
           } catch (e: any) {
-            console.warn(`⚠️ [Routing] Verification failed: ${e.message}`);
+            console.warn(`⚠️ [Routing] updateSettings failed (non-critical, host script handles SQLite): ${e.message}`);
           }
 
-          // 3. Restart panel to apply changes to xray core
+          // 2. Restart panel to apply changes to xray core
           await instance.restartPanel();
 
           console.log(`✅ [Routing] Rules synced to ${server.name}`);
