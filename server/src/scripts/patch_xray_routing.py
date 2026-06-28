@@ -29,25 +29,17 @@ ROUTING_RULES = [
     },
     {
         "type": "field",
-        "outboundTag": "direct",
+        "outboundTag": "blocked",
         "domain": [
-            "geosite:category-ru",
-            "geosite:sberbank",
-            "geosite:tinkoff",
-            "domain:vk.com",
-            "domain:yandex.ru",
-            "domain:yandex.ua",
-            "domain:mail.ru",
-            "domain:ok.ru",
-            "domain:ru"
+            "geosite:category-ads-all"
         ],
         "izinet_managed": True
     },
     {
         "type": "field",
-        "outboundTag": "blocked",
+        "outboundTag": "direct",
         "domain": [
-            "geosite:category-ads-all"
+            "geosite:ru-available-only-inside"
         ],
         "izinet_managed": True
     },
@@ -212,7 +204,7 @@ def main():
 
     # Set routing rules
     template["routing"] = {
-        "domainStrategy": "AsIs",
+        "domainStrategy": "IPIfNonMatch",
         "rules": ROUTING_RULES
     }
 

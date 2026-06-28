@@ -46,7 +46,11 @@ python3 server/src/scripts/patch_xray_routing.py || echo "⚠️ Routing patch s
 echo "🔌 Проверяю Reality+WebSocket inbound..."
 bash add_reality_ws.sh || echo "⚠️ Reality+WS setup skipped"
 
-# 5. Перезапуск x3-ui чтобы перечитать SQLite
+# 4c. Скачивание geo файлов для маршрутизации трафика
+echo "📥 Скачиваю geo файлы (geosite.dat, geoip.dat)..."
+bash download_geo.sh || echo "⚠️ Geo download skipped"
+
+# 5. Перезапуск x3-ui чтобы перечитать SQLite и geo файлы
 echo "🔄 Перезапускаю x3-ui..."
 docker restart x3-ui
 sleep 5
