@@ -1,423 +1,259 @@
--- =========================================================================
---                     IZINET DATABASE DEFINITION (SUPABASE)
--- =========================================================================
--- ИНСТРУКЦИЯ: Скопируйте ВЕСЬ текст ниже и вставьте в SQL Editor в Supabase.
--- Данный файл является единственным актуальным источником конфигурации БД.
--- =========================================================================
+# Supabase — полная настройка базы данных для izi.net
 
--- 1. ТАБЛИЦЫ БД (БАЗОВАЯ СХЕМА)
+Скопируй ВЕСЬ этот файл и выполни одним разом в Supabase SQL Editor (https://supabase.com/dashboard → SQL Editor → New query → Paste → Run).
 
--- Профили / Пользователи
-create table if not exists public.users (
-  id uuid references auth.users on delete cascade primary key,
-  email text unique not null,
-  name text,
-  telegram_id text unique,
-  telegram_linked boolean default false,
-  referral_code text unique,
-  referred_by uuid references public.users(id),
-  role text default 'user',
-  is_pro boolean default false,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+---
+
+## 1. Таблицы
+
+```sql
+-- =============================================
+-- IZINET DATABASE SETUP
+-- Выполнить ОДИН раз в Supabase SQL Editor
+-- =============================================
+
+-- 1. USERS (через Supabase Auth, но добавляем доп. поля)
+CREATE TABLE IF NOT EXISTS users (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email text,
+  role text DEFAULT 'user',
+  is_pro boolean DEFAULT false,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
--- VPN Серверы (архитектура бесшовной сети)
-create table if not exists public.vpn_servers (
-  id uuid default gen_random_uuid() primary key,
-  name text not null,
-  ip text not null,
+-- 2. PROFILES (для admin check)
+CREATE TABLE IF NOT EXISTS profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  is_admin boolean DEFAULT false,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 3. SETTINGS (key-value)
+CREATE TABLE IF NOT EXISTS settings (
+  key text PRIMARY KEY,
+  value text,
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 4. VPN SERVERS
+CREATE TABLE IF NOT EXISTS vpn_servers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  ip text,
   domain text,
-  api_port integer default 2053,
-  username text not null,
-  password text not null,
-  location_code text default 'DE',
-  xui_config_state jsonb default '{}', -- Хранение текущего бэкапа inbounds
-  is_active boolean default true,
-  is_default boolean default false,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  api_port integer DEFAULT 2053,
+  username text DEFAULT 'oja',
+  password text DEFAULT 'sireyra',
+  location_code text DEFAULT 'DE',
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  -- Новые поля (миграция 001)
+  public_host text,
+  inbound_id integer DEFAULT 0,
+  vpn_port integer DEFAULT 443,
+  reality_sni text,
+  health_status text DEFAULT 'unknown',
+  last_health_check_at timestamptz,
+  panel_path text DEFAULT '/'
 );
 
--- Балансы пользователей
-create table if not exists public.balances (
-  user_id uuid references public.users(id) on delete cascade primary key,
-  amount numeric(12,2) default 0.00,
-  currency text default 'RUB',
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+-- 5. SUBSCRIPTIONS
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  status text DEFAULT 'active',
+  plan_type text,
+  expires_at timestamptz,
+  v2ray_config text,
+  traffic_limit_mb integer DEFAULT 102400,
+  traffic_used_mb integer DEFAULT 0,
+  device_limit integer DEFAULT 2,
+  server_id uuid REFERENCES vpn_servers(id),
+  server_type text DEFAULT 'wifi',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
--- Подписки пользователей
-create table if not exists public.subscriptions (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade not null,
-  server_id uuid references public.vpn_servers(id) on delete set null,
-  plan_type text check (plan_type in ('trial', 'basic', 'premium')) not null,
-  status text check (status in ('trial', 'active', 'expired', 'cancelled')) default 'active',
-  traffic_limit_mb bigint default 0,
-  traffic_used_mb bigint default 0,
-  device_limit integer default 1,
-  devices_connected integer default 0,
-  server_type text check (server_type in ('lte', 'wifi')) default 'wifi',
-  period_months integer default 1,
-  v2ray_config jsonb default '[]'::jsonb,
-  expires_at timestamp with time zone not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+-- 6. BALANCES
+CREATE TABLE IF NOT EXISTS balances (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  amount numeric DEFAULT 0,
+  currency text DEFAULT 'RUB',
+  updated_at timestamptz DEFAULT now()
 );
 
--- Устройства (конфигурации VPN)
-create table if not exists public.devices (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade not null,
-  subscription_id uuid references public.subscriptions(id) on delete cascade not null,
-  name text not null,
-  config_link text,
-  last_connected timestamp with time zone,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+-- 7. TRANSACTIONS
+CREATE TABLE IF NOT EXISTS transactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  amount numeric NOT NULL,
+  currency text DEFAULT 'RUB',
+  type text NOT NULL,
+  status text DEFAULT 'pending',
+  description text,
+  created_at timestamptz DEFAULT now()
 );
 
--- Поддержка: тикеты
-create table if not exists public.support_tickets (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade not null,
-  subject text not null,
-  status text check (status in ('open', 'closed', 'pending')) default 'open',
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- Поддержка: сообщения
-create table if not exists public.support_messages (
-  id uuid default gen_random_uuid() primary key,
-  ticket_id uuid references public.support_tickets(id) on delete cascade not null,
-  sender text check (sender in ('user', 'admin')) not null,
-  content text not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- Инвойсы и балансовые платежи (Enot.io)
-create table if not exists public.payments (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade,
-  amount numeric(12,2) not null,
-  currency text default 'RUB',
+-- 8. PAYMENTS
+CREATE TABLE IF NOT EXISTS payments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  amount numeric NOT NULL,
+  currency text DEFAULT 'RUB',
+  status text DEFAULT 'pending',
   payment_method text,
-  status text default 'pending',
-  payment_link text,
-  expires_at timestamp with time zone,
-  completed_at timestamp with time zone,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- Логи транзакций баланса
-create table if not exists public.transactions (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade not null,
-  amount numeric(12,2) not null,
-  currency text default 'RUB',
-  type text check (type in ('deposit', 'withdrawal', 'subscription_buy', 'referral_bonus')) not null,
-  status text check (status in ('pending', 'completed', 'failed')) default 'pending',
   external_id text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  metadata jsonb,
+  created_at timestamptz DEFAULT now()
 );
 
--- Системные настройки (Enot, Cloudflare)
-create table if not exists public.settings (
-  key text primary key,
-  value text not null,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
+-- 9. VPN ROUTING RULES
+CREATE TABLE IF NOT EXISTS vpn_routing_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  rule jsonb NOT NULL,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
 );
 
--- Правила маршрутизации (Routing Exceptions: zetflix, mega, rkn blocks, etc.)
-create table if not exists public.vpn_routing_rules (
-  id uuid default gen_random_uuid() primary key,
-  name text not null,
-  domains jsonb default '[]'::jsonb, -- список доменов (например: ["geosite:mega", "domain:zetflix.com"])
-  ips jsonb default '[]'::jsonb, -- список IP или CIDR
-  outbound_tag text not null default 'block', -- например 'block', 'direct', 'bypass'
-  is_active boolean default true,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- =============================================
+-- 2. RPC ФУНКЦИИ
+-- =============================================
 
--- Временные токены связывания Telegram аккаунта
-create table if not exists public.telegram_linking_tokens (
-  token text primary key,
-  user_id uuid references public.users(id) on delete cascade,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
-
--- 2. БЕЗОПАСНОСТЬ И КОНТРОЛЬ ДОСТУПА (RLS ПОЛИТИКИ)
-
--- Включение RLS
-alter table public.users enable row level security;
-alter table public.vpn_servers enable row level security;
-alter table public.balances enable row level security;
-alter table public.subscriptions enable row level security;
-alter table public.devices enable row level security;
-alter table public.support_tickets enable row level security;
-alter table public.support_messages enable row level security;
-alter table public.payments enable row level security;
-alter table public.transactions enable row level security;
-alter table public.settings enable row level security;
-alter table public.vpn_routing_rules enable row level security;
-alter table public.telegram_linking_tokens enable row level security;
-
--- Очистка старых политик (предотвращение конфликтов)
-drop policy if exists "Users can view own data" on public.users;
-drop policy if exists "Users can update own data" on public.users;
-drop policy if exists "Admins can manage users" on public.users;
-drop policy if exists "Users can view own balance" on public.balances;
-drop policy if exists "Admins can manage balances" on public.balances;
-drop policy if exists "Users can select active servers" on public.vpn_servers;
-drop policy if exists "Admins can manage servers" on public.vpn_servers;
-drop policy if exists "Users can view own subscriptions" on public.subscriptions;
-drop policy if exists "Admins can manage subscriptions" on public.subscriptions;
-drop policy if exists "Users can manage own devices" on public.devices;
-drop policy if exists "Admins can manage devices" on public.devices;
-drop policy if exists "Users can view own tickets" on public.support_tickets;
-drop policy if exists "Users can insert own tickets" on public.support_tickets;
-drop policy if exists "Admins can manage tickets" on public.support_tickets;
-drop policy if exists "Users can view messages of their tickets" on public.support_messages;
-drop policy if exists "Users can send messages to their tickets" on public.support_messages;
-drop policy if exists "Admins can manage support messages" on public.support_messages;
-drop policy if exists "Users can view own payments" on public.payments;
-drop policy if exists "Users can insert own payments" on public.payments;
-drop policy if exists "Admins can manage payments" on public.payments;
-drop policy if exists "Users can view own transactions" on public.transactions;
-drop policy if exists "Admins can manage transactions" on public.transactions;
-drop policy if exists "Admins can manage settings" on public.settings;
-drop policy if exists "Public access to telegram tokens" on public.telegram_linking_tokens;
-
--- Хелпер-функция безопасной проверки роли (security definer) во избежание рекурсии
-create or replace function public.is_admin()
-returns boolean as $$
-begin
-  return exists (
-    select 1 from public.users 
-    where id = auth.uid() and role in ('admin', 'superadmin')
-  );
-end;
-$$ language plpgsql security definer;
-
--- Политики пользователей (users)
-create policy "Users can view own data" on public.users for select using (auth.uid() = id);
-create policy "Users can update own data" on public.users for update using (auth.uid() = id);
-create policy "Admins can manage users" on public.users for all using (
-  public.is_admin()
-);
-
--- Политики балансов (balances)
-create policy "Users can view own balance" on public.balances for select using (auth.uid() = user_id);
-create policy "Admins can manage balances" on public.balances for all using (
-  public.is_admin()
-);
-
--- Политики серверов (vpn_servers)
-create policy "Users can select active servers" on public.vpn_servers for select using (is_active = true);
-create policy "Admins can manage servers" on public.vpn_servers for all using (
-  public.is_admin()
-);
-
--- Политики подписок (subscriptions)
-create policy "Users can view own subscriptions" on public.subscriptions for select using (auth.uid() = user_id);
-create policy "Admins can manage subscriptions" on public.subscriptions for all using (
-  public.is_admin()
-);
-
--- Политики устройств (devices)
-create policy "Users can manage own devices" on public.devices for all using (auth.uid() = user_id);
-create policy "Admins can manage devices" on public.devices for all using (
-  public.is_admin()
-);
-
--- Политики тикетов поддержки (support_tickets)
-create policy "Users can view own tickets" on public.support_tickets for select using (auth.uid() = user_id);
-create policy "Users can insert own tickets" on public.support_tickets for insert with check (auth.uid() = user_id);
-create policy "Admins can manage tickets" on public.support_tickets for all using (
-  public.is_admin()
-);
-
--- Политики сообщений тикетов (support_messages)
-create policy "Users can view messages of their tickets" on public.support_messages for select using (
-  exists (select 1 from public.support_tickets where id = ticket_id and user_id = auth.uid())
-);
-create policy "Users can send messages to their tickets" on public.support_messages for insert with check (
-  sender = 'user' and exists (select 1 from public.support_tickets where id = ticket_id and user_id = auth.uid())
-);
-create policy "Admins can manage support messages" on public.support_messages for all using (
-  public.is_admin()
-);
-
--- Политики счетов пополнений (payments)
-create policy "Users can view own payments" on public.payments for select using (auth.uid() = user_id);
-create policy "Users can insert own payments" on public.payments for insert with check (auth.uid() = user_id);
-create policy "Admins can manage payments" on public.payments for all using (
-  public.is_admin()
-);
-
--- Политики транзакций (transactions)
-create policy "Users can view own transactions" on public.transactions for select using (auth.uid() = user_id);
-create policy "Admins can manage transactions" on public.transactions for all using (
-  public.is_admin()
-);
-
--- Политики глобальных настроек (settings)
-create policy "Admins can manage settings" on public.settings for all using (
-  public.is_admin()
-);
-
--- Политики правил маршрутизации (vpn_routing_rules)
-create policy "Admins can manage routing rules" on public.vpn_routing_rules for all using (
-  public.is_admin()
-);
-create policy "Users can view active routing rules" on public.vpn_routing_rules for select using (is_active = true);
-
--- Политики токенов авторизации Telegram
-create policy "Public access to telegram tokens" on public.telegram_linking_tokens for all using (true);
-
-
--- 3. АВТОПРИВЯЗКА ПРИ РЕГИСТРАЦИИ (ТРИГГЕРЫ ПЛАТФОРМЫ)
-
--- Автоматическое создание профиля 'users' и баланса при регистрации в Supabase Auth
-create or replace function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.users (id, email, referral_code)
-  values (new.id, new.email, substring(md5(random()::text) from 1 for 8));
-  
-  insert into public.balances (user_id, amount)
-  values (new.id, 0.00);
-  
-  return new;
-end;
-$$ language plpgsql security definer;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
-
-
--- 4. REALTIME СИНХРОНИЗАЦИЯ (КАНАЛЫ)
-
-begin;
-  drop publication if exists supabase_realtime;
-  create publication supabase_realtime;
-commit;
-
-alter publication supabase_realtime add table public.subscriptions;
-alter publication supabase_realtime add table public.balances;
-alter publication supabase_realtime add table public.vpn_servers;
-alter publication supabase_realtime add table public.support_messages;
-alter publication supabase_realtime add table public.support_tickets;
-
-
--- 5. ИНИЦИАЛИЗАЦИЯ НАСТРОЕК & НАЗНАЧЕНИЕ АДМИНИСТРАТОРА
-
--- Заполняем дефолтные пустые строки настроек, чтобы их можно было легко редактировать в Админ-панели
-insert into public.settings (key, value) values 
-  ('CLOUDFLARE_EMAIL', ''),
-  ('CLOUDFLARE_API_KEY', ''),
-  ('CLOUDFLARE_API_TOKEN', ''),
-  ('ENOT_MERCHANT_ID', ''),
-  ('ENOT_SECRET_KEY', ''),
-  ('ENOT_SECRET_KEY2', '')
-on conflict (key) do nothing;
-
--- 💡 Сделайте пользователя суперадминистратором, указав его email (например, enverphoto@gmail.com)
-update public.users set role = 'superadmin' where email = 'enverphoto@gmail.com';
-
-
--- 6. RPC ФУНКЦИИ (АТОМАРНЫЕ ОПЕРАЦИИ)
-
--- CORE-004: Атомарное списание баланса с проверкой достаточности
-create or replace function public.deduct_user_balance(p_user_id uuid, p_amount numeric)
-returns boolean as $$
-declare
+-- Атомарное списание баланса
+CREATE OR REPLACE FUNCTION deduct_user_balance(p_user_id uuid, p_amount numeric)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+DECLARE
   current_amount numeric;
-begin
-  -- Блокируем строку для предотвращения race condition
-  select amount into current_amount
-  from public.balances
-  where user_id = p_user_id
-  for update;
-
-  if not found or current_amount < p_amount then
-    return false;
-  end if;
-
-  update public.balances
-  set amount = amount - p_amount,
-      updated_at = timezone('utc'::text, now())
-  where user_id = p_user_id;
-
-  return true;
-end;
-$$ language plpgsql security definer;
-
--- Атомарный возврат средств на баланс
-create or replace function public.refund_user_balance(p_user_id uuid, p_amount numeric)
-returns boolean as $$
-begin
-  update public.balances
-  set amount = amount + p_amount,
-      updated_at = timezone('utc'::text, now())
-  where user_id = p_user_id;
-
-  return found;
-end;
-$$ language plpgsql security definer;
-
--- CORE-004: Атомарное добавление устройства в подписку (предотвращает race condition)
-create or replace function public.append_vpn_device(p_sub_id uuid, p_device_data jsonb)
-returns boolean as $$
-declare
-  current_config jsonb;
-begin
-  -- Блокируем строку подписки
-  select v2ray_config into current_config
-  from public.subscriptions
-  where id = p_sub_id
-  for update;
-
-  if not found then
-    return false;
-  end if;
-
-  -- Инициализируем массив если null
-  if current_config is null then
-    current_config := '[]'::jsonb;
-  end if;
-
-  -- Добавляем устройство в массив (jsonb_array_append)
-  update public.subscriptions
-  set v2ray_config = jsonb_array_append(current_config, p_device_data),
-      updated_at = timezone('utc'::text, now())
-  where id = p_sub_id;
-
-  return true;
-end;
-$$ language plpgsql security definer;
-
-
--- 7. МИГРАЦИИ (для существующих баз)
-
--- Добавить колонку is_pro если её нет (ADMIN-001)
-DO $$ 
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_pro') THEN
-    ALTER TABLE public.users ADD COLUMN is_pro boolean DEFAULT false;
-    RAISE NOTICE 'Added is_pro column to users table';
-  ELSE
-    RAISE NOTICE 'is_pro column already exists';
+  SELECT amount INTO current_amount FROM balances WHERE user_id = p_user_id FOR UPDATE;
+  IF current_amount IS NULL THEN
+    RAISE EXCEPTION 'Balance not found for user %', p_user_id;
   END IF;
-END $$;
+  IF current_amount < p_amount THEN
+    RETURN false;
+  END IF;
+  UPDATE balances SET amount = amount - p_amount, updated_at = now() WHERE user_id = p_user_id;
+  RETURN true;
+END;
+$$;
 
--- Добавить колонку v2ray_config если её нет (ADMIN-004)
-DO $$ 
+-- Возврат баланса
+CREATE OR REPLACE FUNCTION refund_user_balance(p_user_id uuid, p_amount numeric)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscriptions' AND column_name = 'v2ray_config') THEN
-    ALTER TABLE public.subscriptions ADD COLUMN v2ray_config jsonb DEFAULT '[]'::jsonb;
-    RAISE NOTICE 'Added v2ray_config column to subscriptions table';
+  INSERT INTO balances (user_id, amount, currency, updated_at)
+  VALUES (p_user_id, p_amount, 'RUB', now())
+  ON CONFLICT (user_id) DO UPDATE SET amount = balances.amount + p_amount, updated_at = now();
+END;
+$$;
+
+-- Атомарное добавление устройства в подписку
+CREATE OR REPLACE FUNCTION append_vpn_device(p_sub_id uuid, p_device_data jsonb)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  current_config text;
+  devices jsonb;
+BEGIN
+  SELECT v2ray_config INTO current_config FROM subscriptions WHERE id = p_sub_id FOR UPDATE;
+  IF current_config IS NULL OR current_config = '' THEN
+    devices := jsonb_build_array(p_device_data);
+  ELSIF current_config LIKE '[%]' THEN
+    devices := current_config::jsonb || jsonb_build_array(p_device_data);
   ELSE
-    RAISE NOTICE 'v2ray_config column already exists';
+    devices := jsonb_build_array(p_device_data);
   END IF;
-END $$;
+  UPDATE subscriptions SET v2ray_config = devices::text, updated_at = now() WHERE id = p_sub_id;
+END;
+$$;
+
+-- =============================================
+-- 3. НАЧАЛЬНЫЕ НАСТРОЙКИ
+-- =============================================
+
+-- Default settings
+INSERT INTO settings (key, value) VALUES
+  ('MONTHLY_PRICE', '100'),
+  ('DEVICE_LIMIT', '2'),
+  ('PUBLIC_URL', 'https://izinet.online')
+ON CONFLICT (key) DO NOTHING;
+
+-- Default admin profile (замени UUID на свой из auth.users)
+-- INSERT INTO profiles (id, is_admin) VALUES ('YOUR-USER-UUID-HERE', true) ON CONFLICT (id) DO NOTHING;
+
+-- =============================================
+-- 4. ROW LEVEL SECURITY (RLS)
+-- =============================================
+
+-- Включить RLS на всех таблицах
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vpn_servers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE balances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vpn_routing_rules ENABLE ROW LEVEL SECURITY;
+
+-- Политики для service_role (backend использует service_role key, обходит RLS)
+-- Service role automatically bypasses RLS, so no policies needed for backend.
+
+-- Политики для anon/authenticated (если фронтенд обращается напрямую)
+-- Разрешить чтение settings всем
+CREATE POLICY "Settings readable by all" ON settings FOR SELECT USING (true);
+
+-- Разрешить пользователям видеть только свои данные
+CREATE POLICY "Users see own profile" ON users FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users see own subscriptions" ON subscriptions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users see own balance" ON balances FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users see own transactions" ON transactions FOR SELECT USING (auth.uid() = user_id);
+
+-- Админы видят всё (через profiles.is_admin)
+CREATE POLICY "Admins full access users" ON users FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access subscriptions" ON subscriptions FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access vpn_servers" ON vpn_servers FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access balances" ON balances FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access transactions" ON transactions FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access payments" ON payments FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access settings" ON settings FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+CREATE POLICY "Admins full access vpn_routing_rules" ON vpn_routing_rules FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+);
+
+-- =============================================
+-- 5. ИНДЕКСЫ
+-- =============================================
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_vpn_servers_is_active ON vpn_servers(is_active);
+CREATE INDEX IF NOT EXISTS idx_vpn_servers_health ON vpn_servers(health_status);
+
+-- =============================================
+-- ГОТОВО!
+-- =============================================
+```

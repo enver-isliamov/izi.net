@@ -1038,10 +1038,25 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
         }
 
         try {
-          const host = (server.domain || '').replace(/^https?:\/\//, '').split(':')[0] || (server.ip || '').replace(/^https?:\/\//, '').split(':')[0];
-          const port = 443;
+          const host = (server.public_host || server.domain || server.ip || '').replace(/^https?:\/\//, '').split(':')[0];
+          const port = server.vpn_port || 443;
           checks.public_host = host;
           checks.vpn_port = port;
+          
+          // Check DNS resolution for Cloudflare detection
+          try {
+            const dns = await import('dns');
+            const addresses = await new Promise<string[]>((resolve, reject) => {
+              dns.resolve4(host, (err, addrs) => err ? reject(err) : resolve(addrs || []));
+            });
+            // Cloudflare IP ranges (common ones)
+            const cfRanges = ['104.16.', '104.17.', '104.18.', '104.19.', '104.20.', '104.21.', '104.22.', '104.23.', '104.24.', '104.25.', '104.26.', '104.27.', '172.64.', '172.65.', '172.66.', '172.67.', '103.21.244.', '103.22.220.', '103.22.221.', '141.101.', '108.162.', '190.93.', '188.114.', '197.234.', '198.41.'];
+            const isCloudflare = addresses.some(addr => cfRanges.some(range => addr.startsWith(range)));
+            if (isCloudflare) {
+              checks.issues.push('CLOUDFLARE_PROXIED: public_host resolves to Cloudflare IP — VPN Reality will NOT work through CF proxy. Use DNS Only mode.');
+            }
+          } catch (e) {}
+          
           const sock = new net.Socket();
           await new Promise<void>((resolve, reject) => {
             sock.setTimeout(5000);
@@ -1051,7 +1066,7 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
           });
         } catch (e: any) {
           checks.tcp_reachable = false;
-          checks.issues.push(`TCP_TIMEOUT: ${e.message}`);
+          checks.issues.push(`PUBLIC_PORT_TIMEOUT: ${e.message}`);
         }
       }
     } catch (e: any) {
@@ -1075,7 +1090,7 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
 router.post('/subscriptions/:id/regenerate', adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
-    const { data: sub, error: subErr } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    const { data: sub, error: subErr } = await supabase.from('subscriptions').select('*').eq('id', id).in('status', ['active', 'limited']).maybeSingle();
     if (subErr) throw subErr;
     if (!sub) return res.status(404).json({ ok: false, error: 'Subscription not found' });
 
