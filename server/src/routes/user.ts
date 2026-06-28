@@ -140,8 +140,8 @@ async function handleSubscriptionBuy(req: any, res: any) {
     }
 
     try {
-      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-      if (!activeServers || activeServers.length === 0) throw new Error('Нет активных серверов для подключения');
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true).eq('health_status', 'ok');
+      if (!activeServers || activeServers.length === 0) throw new Error('Нет здоровых серверов для подключения. Попробуйте позже.');
 
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + plan.days);
@@ -314,7 +314,7 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
       .from('subscriptions')
       .select('*')
       .eq('user_id', userId)
-      .eq('status', 'active')
+      .in('status', ['active', 'limited'])
       .maybeSingle();
 
     if (!sub) return res.status(404).json({ error: 'Активная подписка не найдена' });
@@ -341,14 +341,15 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
         if (!effectiveInboundId || effectiveInboundId <= 0) {
           try {
             const inbounds = await instance.getInbounds();
-          const realityInbound = inbounds.find((ib: any) => {
-            try {
-              const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-              return ss.security === 'reality' && ib.port === 443;
-            } catch { return false; }
-          });
-          if (realityInbound) effectiveInboundId = realityInbound.id;
-        } catch (e) {}
+            const realityInbound = inbounds.find((ib: any) => {
+              try {
+                const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                return ss.security === 'reality' && ib.port === 443;
+              } catch { return false; }
+            });
+            if (realityInbound) effectiveInboundId = realityInbound.id;
+          } catch (e) {}
+        }
 
         if (target.uuid && target.email) await instance.deleteClient(target.uuid, target.email).catch(() => {});
         const rawConfig = await instance.addClient(newEmail, newUuid, effectiveInboundId, expiresAtMs, limitBytes);

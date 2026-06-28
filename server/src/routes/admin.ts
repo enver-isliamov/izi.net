@@ -569,7 +569,7 @@ router.put('/users/:userId', adminOnly, async (req, res) => {
 router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req, res) => {
   const { userId, deviceId } = req.params;
   try {
-    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).in('status', ['active', 'limited']).maybeSingle();
     if (!sub) return res.status(404).json({ error: 'Subscription not found' });
     const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
     const targetIdx = devices.findIndex((d) => d.id === deviceId);
@@ -763,7 +763,7 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
     const { data: subs, error: subErr } = await supabase
       .from('subscriptions')
       .select('*')
-      .eq('status', 'active');
+      .in('status', ['active', 'limited']);
     if (subErr) throw subErr;
     if (!subs || subs.length === 0) return res.json({ success: true, updated: 0, message: 'Нет активных подписок' });
 
@@ -1059,7 +1059,15 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
     }
 
     const ok = checks.panel_ok && checks.reality && checks.tcp_reachable && checks.issues.length === 0;
-    res.json({ ok, server: { id: server.id, name: server.name, ip: server.ip, domain: server.domain }, ...checks });
+    
+    // Update health_status in database
+    const healthStatus = ok ? 'ok' : (checks.panel_ok ? 'degraded' : 'down');
+    await supabase.from('vpn_servers').update({
+      health_status: healthStatus,
+      last_health_check_at: new Date().toISOString()
+    }).eq('id', server.id);
+
+    res.json({ ok, server: { id: server.id, name: server.name, ip: server.ip, domain: server.domain }, health_status: healthStatus, ...checks });
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -1114,7 +1122,7 @@ router.post('/subscriptions/:id/regenerate', adminOnly, async (req, res) => {
 // === BUG-VPN-02: Batch регенерация всех активных подписок ===
 router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
   try {
-    const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').eq('status', 'active');
+    const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
     if (subErr) throw subErr;
     if (!subs || subs.length === 0) return res.json({ ok: true, updated: 0, total: 0 });
 
@@ -1123,6 +1131,7 @@ router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
 
     let totalUpdated = 0;
     let totalErrors = 0;
+    const report: { subId: string; status: string; updated: boolean; error?: string }[] = [];
     const BATCH = 20;
 
     for (let i = 0; i < subs.length; i += BATCH) {
@@ -1157,11 +1166,17 @@ router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
           if (changed) {
             await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
             totalUpdated++;
+            report.push({ subId: sub.id, status: 'updated', updated: true });
+          } else {
+            report.push({ subId: sub.id, status: 'unchanged', updated: false });
           }
-        } catch (e) { totalErrors++; }
+        } catch (e: any) {
+          totalErrors++;
+          report.push({ subId: sub.id, status: 'error', updated: false, error: e.message });
+        }
       }
     }
-    res.json({ ok: true, updated: totalUpdated, errors: totalErrors, total: subs.length });
+    res.json({ ok: true, updated: totalUpdated, errors: totalErrors, total: subs.length, report });
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

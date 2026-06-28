@@ -63,11 +63,12 @@ router.get('/sub/:id', async (req, res) => {
         let devices = JSON.parse(configText);
         if (deviceId) devices = devices.filter((d: any) => d.id === deviceId);
 
-        // Get active server names for filtering
+        // Get active server names for filtering (only healthy servers)
         const { data: activeServers } = await supabase
           .from('vpn_servers')
           .select('name')
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .eq('health_status', 'ok');
         const activeNames = (activeServers || []).map((s: any) => s.name.replace(/\s+/g, '_'));
 
         // Join device configs with real newline
@@ -91,7 +92,7 @@ router.get('/sub/:id', async (req, res) => {
       console.log(`🔄 [SUB] Lazy heal for ${id} — v2ray_config empty or no valid links`);
       try {
         const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-        const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+        const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true).eq('health_status', 'ok');
         if (devices.length > 0 && activeServers && activeServers.length > 0) {
           let changed = false;
           for (const device of devices) {

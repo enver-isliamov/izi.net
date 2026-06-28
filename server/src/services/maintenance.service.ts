@@ -26,6 +26,7 @@ export class MaintenanceService {
       console.log('🔄 [Maintenance] Starting full maintenance cycle...');
       
       // DATA-005: Use catch on each step to prevent full crash
+      await this.healthCheckAllServers().catch(e => console.error('❌ [Maintenance] healthCheck failed:', e.message));
       await this.cleanupExpiredSubscriptions().catch(e => console.error('❌ [Maintenance] cleanupExpired failed:', e.message));
       await this.syncTraffic().catch(e => console.error('❌ [Maintenance] syncTraffic failed:', e.message));
       await this.syncAllServers().catch(e => console.error('❌ [Maintenance] syncAllServers failed:', e.message));
@@ -34,6 +35,58 @@ export class MaintenanceService {
       console.log('✅ [Maintenance] Full maintenance cycle complete.');
     } catch (err: any) {
       console.error('🔥 [Maintenance] Critical error in runFullMaintenance:', err.message);
+    }
+  }
+
+  // BUG-VPN-10: Health check all servers
+  static async healthCheckAllServers() {
+    console.log('🏥 [Maintenance] Running health check on all servers...');
+    try {
+      const { data: servers, error } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      if (error || !servers || servers.length === 0) return;
+
+      const net = await import('net');
+      
+      for (const server of servers) {
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          const panelOk = await instance.checkHealth();
+          
+          let tcpReachable = false;
+          if (panelOk) {
+            try {
+              const host = (server.public_host || server.domain || server.ip || '').replace(/^https?:\/\//, '').split(':')[0];
+              const port = server.vpn_port || 443;
+              if (host) {
+                const sock = new net.Socket();
+                await new Promise<void>((resolve, reject) => {
+                  sock.setTimeout(5000);
+                  sock.connect(port, host, () => { tcpReachable = true; sock.destroy(); resolve(); });
+                  sock.on('timeout', () => { sock.destroy(); reject(new Error('timeout')); });
+                  sock.on('error', (e) => { reject(e); });
+                });
+              }
+            } catch (e) {}
+          }
+
+          const healthStatus = panelOk && tcpReachable ? 'ok' : (panelOk ? 'degraded' : 'down');
+          
+          await supabase.from('vpn_servers').update({
+            health_status: healthStatus,
+            last_health_check_at: new Date().toISOString()
+          }).eq('id', server.id);
+
+          console.log(`🏥 [Health] ${server.name}: ${healthStatus} (panel=${panelOk}, tcp=${tcpReachable})`);
+        } catch (e: any) {
+          console.error(`❌ [Health] ${server.name} check failed: ${e.message}`);
+          await supabase.from('vpn_servers').update({
+            health_status: 'down',
+            last_health_check_at: new Date().toISOString()
+          }).eq('id', server.id);
+        }
+      }
+    } catch (err: any) {
+      console.error('❌ [Health] healthCheckAllServers failed:', err.message);
     }
   }
 
@@ -101,7 +154,7 @@ export class MaintenanceService {
     console.log('🔄 [Maintenance] Syncing all users to all active servers...');
     try {
       const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-      const { data: activeSubs } = await supabase.from('subscriptions').select('*').eq('status', 'active');
+      const { data: activeSubs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
 
       if (!activeServers || !activeSubs) return;
 
@@ -157,7 +210,7 @@ export class MaintenanceService {
       const { data: subs, error } = await supabase
         .from('subscriptions')
         .select('*')
-        .eq('status', 'active');
+        .in('status', ['active', 'limited']);
 
       if (error || !subs) throw error || new Error('No active subs');
 
