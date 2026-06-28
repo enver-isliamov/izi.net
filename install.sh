@@ -96,6 +96,14 @@ else
     echo "Run manually: python3 xui_bootstrap.py --wait-db 10"
 fi
 
+# ── 7b. Fix Reality inbound (serverNames, dest, fingerprint) ──
+echo "Fixing Reality inbound (serverNames, dest, fingerprint)..."
+python3 server/src/scripts/fix_reality_inbound.py || echo "⚠️ Reality fix skipped"
+
+# ── 7c. Setup Supabase (tables, vpn_servers, settings) ──
+echo "Setting up Supabase..."
+python3 server/src/scripts/setup_supabase.py || echo "⚠️ Supabase setup skipped (run manually after SQL setup)"
+
 # ── 9. SSL certificate ──
 echo "Obtaining SSL certificate..."
 if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
