@@ -49,7 +49,7 @@ def fix():
     reality = stream.get("realitySettings", {})
     changed = False
 
-    # Fix serverNames — check for empty, invalid chars (spaces, quotes)
+    # Fix serverNames — check for empty, invalid chars, or microsoft.com (blocked by ТСПУ)
     names = reality.get("serverNames")
     needs_fix = False
     if not isinstance(names, list) or len(names) == 0:
@@ -57,6 +57,9 @@ def fix():
     else:
         for n in names:
             if not isinstance(n, str) or ' ' in n or "'" in n or '"' in n or n.strip() != n:
+                needs_fix = True
+                break
+            if "microsoft" in n.lower() or "google" in n.lower():
                 needs_fix = True
                 break
     if needs_fix:
