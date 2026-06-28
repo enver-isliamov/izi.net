@@ -1,1 +1,93 @@
---
+root@VM-846997:/opt/izinet# cd /opt/izinet && bash diagnose_vpn.sh
+══════════════════════════════════════════════════
+  IZINET VPN — ПОЛНАЯ ДИАГНОСТИКА
+  Sun Jun 28 12:09:51 UTC 2026
+══════════════════════════════════════════════════
+
+══ 1. DOCKER ══
+NAMES        STATUS                   PORTS
+izinet-app   Up 5 minutes             0.0.0.0:3005->3005/tcp, [::]:3005->3005/tcp
+x3-ui        Up 5 minutes (healthy)   0.0.0.0:443->443/tcp, [::]:443->443/tcp, 0.0.0.0:2053->2053/tcp, [::]:2053->2053/tcp, 0.0.0.0:8443->8443/tcp, [::]:8443->8443/tcp
+
+══ 2. UFW ══
+Status: inactive
+
+══ 3. NGINX ══
+LISTEN 0      511          0.0.0.0:3443      0.0.0.0:*    users:(("nginx",pid=29837,fd=7),("nginx",pid=29836,fd=7),("nginx",pid=29835,fd=7))
+OK: Nginx слушает 3443
+OK: Сайт доступен
+
+══ 4. VLESS ССЫЛКА ДЛЯ ХАДИФАЙ ══
+Тестирую subscription endpoint...
+  Сервер: vpn.izinet.online
+  Имя: OneD
+  UUID: be5e558e-f35b-470c-ab9a-5eb708479ecc
+  pbk: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
+  sid: 79b27cf7799d5b4c
+  sni: www.microsoft.com
+  fp:  randomized
+  flow:xtls-rprx-vision
+
+
+══ 5. КЛЮЧИ В ПАНЕЛИ X3-UI ══
+Inbound ID: 39
+Port: 443  Security: reality
+Public Key: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
+Fingerprint: randomized
+ServerNames: 
+ShortIDs: ['79b27cf7799d5b4c', '0248', '36b963e7713fa1', '34d587', 'ff', 'd522af961e', '7f82dc32', '63e6a9c2ccd3']
+Target (dest): host.docker.internal:3443
+SpiderX: /
+Clients: 36
+  email=Oja uuid=1068ae60-ce58-45dd-8b5f-3159dd7e3452 flow=xtls-rprx-vision
+  email=Lenika uuid=04b8bed9-61aa-4d24-adf7-8475ccaca1af flow=?
+  email=Madre uuid=a5ff39c8-9bc9-4d89-827b-d5ba0ff10865 flow=xtls-rprx-vision
+  email=Bob uuid=971dca12-af60-4f9e-8323-6bcdb53169eb flow=?
+  email=Dom46 uuid=1f6c9a4d-9d0b-43d0-8f7d-13c4fea0503d flow=xtls-rprx-vision
+  ... и ещё 31
+
+══ 6. СРАВНЕНИЕ pbk ИЗ ССЫЛКИ С ПАНЕЛЬЮ ══
+VLESS pbk: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
+PANEL pbk: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
+✅ pbk СОВПАДАЮТ
+
+══ 7. UUID ЕСТЬ В ПАНЕЛИ? ══
+UUID из ссылки: be5e558e-f35b-470c-ab9a-5eb708479ecc
+✅ UUID найден в inbound 39 (port 443) email=user_ee886_3ss_reg
+
+══ 8. XRAY RUNTIME CONFIG ══
+DNS: ['localhost', 'https://dns.adguard-dns.com/dns-query', 'https://dns.yandex.ru/dns-query', '94.140.14.14', '77.88.8.8', '9.9.9.9']
+Outbounds (2):
+  tag=direct protocol=freedom
+  tag=blocked protocol=blackhole
+Routing rules (1):
+  inboundTag=['api'] outboundTag=api domain=
+
+══ 9. XRAY ОШИБКИ ══
+syslog backend disabled: Unix syslog delivery error
+WARNING - Obtain Failed:  record not found
+syslog backend disabled: Unix syslog delivery error
+
+══ 10. СТАРЫЕ СЕРВЕРЫ В ЛОГАХ ══
+   📍 [DB] Amster: https://185.72.11.57:33718/65YobL3oIf6IRQ9nLO/ (Active: false)
+
+══ 11. ПОСЛЕДНИЕ 15 СТРОК IZINET-APP ══
+🔄 [XUI] Client user_01e1d83d_rv4s_0 already exists in inbound 39 (uuid=e13e6db2-7da2-470a-a82c-d500f9eeddf2) — updating instead
+✅ [XUI] Client user_01e1d83d_rv4s_0 updated on http://x3-ui:2053
+✅ [XUI] Reality link for user_01e1d83d_rv4s_0: transport=tcp, SNI=www.microsoft.com, SID=79b27cf779...
+🔄 [XUI] Client user_19368730_trial_lir3_0 already exists in inbound 39 (uuid=5cd36b89-9caa-480c-833a-8109de7c9741) — updating instead
+✅ [XUI] Client user_19368730_trial_lir3_0 updated on http://x3-ui:2053
+✅ [XUI] Reality link for user_19368730_trial_lir3_0: transport=tcp, SNI=www.microsoft.com, SID=79b27cf779...
+🔄 [XUI] Client user_19368730_1red_0 already exists in inbound 39 (uuid=89402c6d-5f54-4991-ae2c-ad1e8bbacb84) — updating instead
+✅ [XUI] Client user_19368730_1red_0 updated on http://x3-ui:2053
+✅ [XUI] Reality link for user_19368730_1red_0: transport=tcp, SNI=www.microsoft.com, SID=79b27cf779...
+✅ [Maintenance] Server sync complete.
+🔄 [Routing] Synchronizing rules to all panels...
+🔍 [Routing] OneD template BEFORE: api=false stats=false policy=false inbounds=0 rules=0
+🔍 [Routing] OneD template AFTER: api=true stats=true policy=true inbounds=1 rules=4
+✅ [Routing] Rules synced to OneD
+✅ [Maintenance] Full maintenance cycle complete.
+
+══════════════════════════════════════════════════
+  Скопируйте ВЕСЬ вывод и скиньте мне
+══════════════════════════════════════════════════

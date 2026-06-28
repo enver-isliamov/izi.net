@@ -16,9 +16,22 @@ if not os.path.exists(DB_PATH):
     if os.path.exists(alt):
         DB_PATH = os.path.abspath(alt)
 
-TARGET_INBOUND_ID = 32
+TARGET_PORT = 443
 CORRECT_SERVER_NAMES = ["www.microsoft.com", "microsoft.com"]
 CORRECT_DEST = "www.microsoft.com:443"
+CORRECT_FINGERPRINT = "chrome"
+
+def find_reality_inbound(cursor):
+    """Find the Reality inbound on port 443."""
+    cursor.execute("SELECT id, port, stream_settings FROM inbounds;")
+    for row in cursor.fetchall():
+        inbound_id, port, stream_raw = row
+        if port != TARGET_PORT:
+            continue
+        stream = json.loads(stream_raw) if stream_raw else {}
+        if stream.get("security") == "reality":
+            return inbound_id, stream
+    return None, None
 
 def fix():
     if not os.path.exists(DB_PATH):
@@ -26,18 +39,13 @@ def fix():
         return False
 
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.execute(
-        "SELECT id, stream_settings FROM inbounds WHERE id = ?", (TARGET_INBOUND_ID,)
-    )
-    row = cursor.fetchone()
-    if not row:
-        print(f"❌ Inbound {TARGET_INBOUND_ID} not found")
+    inbound_id, stream = find_reality_inbound(conn.cursor())
+    if not inbound_id:
+        print(f"❌ Reality inbound on port {TARGET_PORT} not found")
         conn.close()
         return False
 
-    inbound_id, stream_raw = row
-    stream = json.loads(stream_raw) if stream_raw else {}
-
+    print(f"📋 Found Reality inbound ID={inbound_id}")
     reality = stream.get("realitySettings", {})
     changed = False
 
@@ -50,7 +58,7 @@ def fix():
 
     # Fix dest
     dest = reality.get("dest", "")
-    if not dest or "google" in dest.lower():
+    if not dest or "google" in dest.lower() or "docker" in dest.lower():
         reality["dest"] = CORRECT_DEST
         changed = True
         print(f"✅ Fixed dest: {CORRECT_DEST}")
@@ -65,6 +73,15 @@ def fix():
             changed = True
             print(f"✅ Fixed settings.serverName: www.microsoft.com")
 
+    # Fix fingerprint
+    if isinstance(settings, dict):
+        fp = settings.get("fingerprint", "")
+        if fp != CORRECT_FINGERPRINT:
+            settings["fingerprint"] = CORRECT_FINGERPRINT
+            reality["settings"] = settings
+            changed = True
+            print(f"✅ Fixed fingerprint: {fp} → {CORRECT_FINGERPRINT}")
+
     # Ensure fingerprint
     if isinstance(settings, dict) and not settings.get("fingerprint"):
         settings["fingerprint"] = "chrome"
@@ -72,24 +89,24 @@ def fix():
         changed = True
 
     if not changed:
-        print(f"✅ Inbound {TARGET_INBOUND_ID} already correct")
+        print(f"✅ Inbound {inbound_id} already correct")
         conn.close()
         return True
 
     stream["realitySettings"] = reality
     conn.execute(
         "UPDATE inbounds SET stream_settings = ? WHERE id = ?",
-        (json.dumps(stream), TARGET_INBOUND_ID)
+        (json.dumps(stream), inbound_id)
     )
     conn.commit()
     conn.close()
-    print(f"✅ Inbound {TARGET_INBOUND_ID} updated in SQLite")
+    print(f"✅ Inbound {inbound_id} updated in SQLite")
     return True
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  IZINET — Fix Reality inbound 32")
+    print("  IZINET — Fix Reality inbound (auto-detect port 443)")
     print("=" * 50)
     if fix():
         print("\nRestart x3-ui to apply: docker restart x3-ui")

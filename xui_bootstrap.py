@@ -174,9 +174,8 @@ def normalize_reality(stream_settings):
         changed = True
     for key in ("dest", "target"):
         dest_val = str(reality.get(key, "")).lower()
-        if not dest_val or "google" in dest_val:
+        if not dest_val or "google" in dest_val or "docker" in dest_val:
             reality[key] = "www.microsoft.com:443"
-            changed = True
             changed = True
     if not reality.get("privateKey") or not reality.get("publicKey"):
         private_key, public_key = reality_keypair()
@@ -191,7 +190,7 @@ def normalize_reality(stream_settings):
     if not settings.get("publicKey"):
         settings["publicKey"] = reality.get("publicKey", "")
         changed = True
-    if not settings.get("fingerprint"):
+    if settings.get("fingerprint") != "chrome":
         settings["fingerprint"] = "chrome"
         changed = True
     if not settings.get("spiderX"):
