@@ -455,6 +455,7 @@ export default function Dashboard() {
                 onClose={() => {
                   setIsWizardOpen(false);
                   fetchDashboardData();
+                  setTimeout(() => fetchDashboardData(), 3000);
                 }} 
                 forceNew={wizardMode === 'new'}
                 targetDeviceId={targetDevice}

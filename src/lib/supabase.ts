@@ -5,21 +5,29 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 const PROXY_PATHS = ['/rest/v1/', '/auth/v1/'];
 
+let supabaseHost = '';
+try {
+  if (supabaseUrl) supabaseHost = new URL(supabaseUrl).hostname;
+} catch {}
+
 function proxyFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
-  if (supabaseUrl && url.startsWith(supabaseUrl)) {
-    const relativePath = url.slice(supabaseUrl.length + 1);
-    if (PROXY_PATHS.some(p => relativePath.startsWith(p))) {
-      const proxyUrl = '/api/supabase-proxy/' + relativePath;
-      const method = init?.method || 'GET';
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (init?.headers) {
-        const src = init.headers instanceof Headers ? Object.fromEntries(init.headers.entries()) : init.headers as Record<string, string>;
-        Object.assign(headers, src);
+  if (supabaseHost && url.includes(supabaseHost)) {
+    try {
+      const parsed = new URL(url);
+      const relativePath = parsed.pathname + parsed.search;
+      if (PROXY_PATHS.some(p => relativePath.startsWith(p))) {
+        const proxyUrl = '/api/supabase-proxy' + relativePath;
+        const method = init?.method || 'GET';
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (init?.headers) {
+          const src = init.headers instanceof Headers ? Object.fromEntries(init.headers.entries()) : init.headers as Record<string, string>;
+          Object.assign(headers, src);
+        }
+        return fetch(proxyUrl, { ...init, headers });
       }
-      return fetch(proxyUrl, { ...init, headers });
-    }
+    } catch {}
   }
 
   return fetch(input, init);

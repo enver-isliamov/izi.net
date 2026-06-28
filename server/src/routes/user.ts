@@ -166,13 +166,22 @@ async function handleSubscriptionBuy(req: any, res: any) {
           });
           
           // CORE-004: Atomic device append
-          await supabase.rpc('append_vpn_device', { 
+          const { error: rpcError } = await supabase.rpc('append_vpn_device', { 
             p_sub_id: existingSub.id, 
             p_device_data: newDevice 
           });
-          
-          subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
-          devices.push(newDevice);
+          if (rpcError) {
+            console.warn('⚠️ [User] append_vpn_device RPC failed, falling back to direct update:', rpcError.message);
+            devices.push(newDevice);
+            const { error: directError } = await supabase.from('subscriptions').update({
+              v2ray_config: JSON.stringify(devices),
+              updated_at: new Date().toISOString()
+            }).eq('id', existingSub.id);
+            if (directError) throw new Error('Не удалось добавить устройство в подписку');
+          } else {
+            subscriptionExpiresAt = new Date(Math.max(new Date(existingSub.expires_at).getTime() || 0, expiresAt.getTime()));
+            devices.push(newDevice);
+          }
         } else if (targetDeviceId) {
           const targetIdx = devices.findIndex((device) => device.id === targetDeviceId);
           if (targetIdx === -1) throw new Error('Устройство не найдено');
