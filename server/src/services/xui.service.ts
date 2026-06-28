@@ -29,9 +29,9 @@ export class XUIService {
   private readonly SESSION_TTL = 10 * 60 * 1000;
 
   constructor(serverConfigs?: { host?: string, username?: string, password?: string }) {
-    let host = (serverConfigs?.host || process.env.XUI_HOST || '').trim();
-    this.username = (serverConfigs?.username || process.env.XUI_USERNAME || '').trim();
-    this.password = (serverConfigs?.password || process.env.XUI_PASSWORD || '').trim();
+    let host = (serverConfigs?.host || '').trim();
+    this.username = (serverConfigs?.username || '').trim();
+    this.password = (serverConfigs?.password || '').trim();
 
     if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
       host = 'http://' + host;

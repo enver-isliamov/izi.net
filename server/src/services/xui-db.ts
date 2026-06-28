@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 
-const DB_PATH = process.env.XUI_DB_PATH || '/etc/x-ui/x-ui.db';
+const DB_PATH = '/etc/x-ui/x-ui.db';
 
 let db: Database.Database | null = null;
 
