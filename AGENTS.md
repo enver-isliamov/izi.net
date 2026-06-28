@@ -71,6 +71,10 @@ server.ts getInboundLink() ← GET /panel/api/inbounds/get/{id} ← 3x-ui API
 
 4. **Docker rebuild ОБЯЗАТЕЛЕН**: `git pull` обновляет файлы на хосте, но контейнер работает со СТАРЫМ image. Всегда `docker compose up -d --build`.
 
+5. **НИКОГДА не монтировать volume на /app/bin/**: Директория `/app/bin/` содержит Xray binary. Volume mount `./xray-assets:/app/bin` **ПЕРЕЗАПИСЫВАЕТ** её, удаляя Xray → VPN не работает. Ошибка: `fork/exec bin/xray-linux-amd64: no such file or directory`.
+
+6. **serverNames**: Должны быть чистыми строками БЕЗ пробелов и кавычек. `" microsoft.com'"` → `microsoft.com`. fix_reality_inbound.py проверяет это.
+
 ### Никогда не делайте:
 - Хранить Reality ключи в `.env`
 - Использовать хардкод ключи

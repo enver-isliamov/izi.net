@@ -5,6 +5,16 @@
 
 ---
 
+## BUG-0: xray-assets volume mount убивал Xray binary ✅ ИСПРАВЛЕНО
+
+**Проблема:** Volume mount `./xray-assets:/app/bin` в docker-compose.yml **ПЕРЕЗАПИСЫВАЛ** директорию `/app/bin/`, удаляя Xray binary. VPN не работал: `fork/exec bin/xray-linux-amd64: no such file or directory`.
+
+**Решение:** Убран volume mount `./xray-assets:/app/bin` из docker-compose.yml.
+
+**Правило:** НИКОГДА не монтировать volume на `/app/bin/` — там лежит Xray binary.
+
+---
+
 ## BUG-1: 4 призрачных VLESS-ссылки ✅ ИСПРАВЛЕНО
 
 **Проблема:** regenerateAllVlessLinks() генерировал ссылки для ВСЕХ Reality inbound'ов (4 штуки), а не только для порта 443.

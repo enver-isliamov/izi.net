@@ -41,7 +41,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./xui-db:/etc/x-ui
-      - ./xray-assets:/app/bin
       - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - izinet-net

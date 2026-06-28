@@ -81,6 +81,34 @@ cd /opt/izinet && git pull origin main && sed -i 's/\r//' .env && docker compose
 - [x] **VPN-FINGERPRINT**: `fingerprint=randomized` → изменён на `chrome`.
 - [x] **VPN-SERVERNAMES**: Пустые serverNames → установлены `['www.microsoft.com', 'microsoft.com']`.
 - [x] **VPN-INBOUND-ID**: Хардкод ID=32 → автодетект по порту 443.
+- [x] **VPN-SERVERNAMES-INVALID**: `" microsoft.com'"` (пробел + кавычка) → `microsoft.com`.
+- [x] **VPN-XRAY-BINARY-DELETED**: Volume mount `./xray-assets:/app/bin` перезаписывал `/app/bin/`, удаляя Xray binary. Убран из docker-compose.yml.
+- [x] **VPN-PYTHON-CONTAINER**: Python fallback в контейнере → убран (контейнер Node.js не имеет Python).
+- [x] **VPN-MOZILLACOOKIE**: Импорт `MozillaCookiejar` → исправлен для Python 3.12.
+- [x] **VPN-AUTO-SYNC**: `maintenance.service.ts` автоматически проверяет pbk каждые 30 мин и перегенерирует ссылки при изменении ключей.
+- [x] **VPN-OUT-OF-BOX**: `install.sh` теперь запускает fix_reality_inbound.py + setup_supabase.py.
+
+### Рабочая конфигурация:
+```
+publicKey: 5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
+fingerprint: chrome
+serverNames: ['www.microsoft.com', 'microsoft.com']
+target: host.docker.internal:3443
+flow: xtls-rprx-vision
+```
+
+### ⚠️ КРИТИЧЕСКОЕ ПРАВИЛО:
+НИКОГДА не монтировать volume на `/app/bin/` — там лежит Xray binary. Volume mount перезаписывает директорию и удаляет binary → VPN не работает.
+
+## 🎯 VPN ПОЛНОСТЬЮ РАБОТАЕТ (28 июня 2026)
+
+### Критические исправления:
+
+- [x] **VPN-KEY-MISMATCH**: `xui.service.ts:329` — читал устаревший publicKey из `realitySettings.settings.publicKey` вместо текущего `realitySettings.publicKey`. VLESS ссылки содержали неправильный pbk → Reality handshake не проходил → таймаут.
+- [x] **VPN-TARGET**: Reality `target` был `www.microsoft.com:443` → браузер получал сертификат Microsoft. Изменён на `host.docker.internal:3443` (Nginx).
+- [x] **VPN-FINGERPRINT**: `fingerprint=randomized` → изменён на `chrome`.
+- [x] **VPN-SERVERNAMES**: Пустые serverNames → установлены `['www.microsoft.com', 'microsoft.com']`.
+- [x] **VPN-INBOUND-ID**: Хардкод ID=32 → автодетект по порту 443.
 - [x] **VPN-PYTHON-CONTAINER**: Python fallback в контейнере → убран (контейнер Node.js не имеет Python).
 - [x] **VPN-MOZILLACOOKIE**: Импорт `MozillaCookiejar` → исправлен для Python 3.12.
 - [x] **VPN-AUTO-SYNC**: `maintenance.service.ts` автоматически проверяет pbk каждые 30 мин и перегенерирует ссылки при изменении ключей.

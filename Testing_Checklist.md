@@ -2,6 +2,10 @@
 
 Дата актуализации: 2026-06-28
 
+## ⚠️ КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ
+
+**НИКОГДА не монтировать volume на `/app/bin/`** — там лежит Xray binary. Volume mount перезаписывает директорию → VPN не работает (`fork/exec bin/xray-linux-amd64: no such file or directory`).
+
 ## VPN (Reality VLESS) — КРИТИЧЕСКИЙ
 
 - [x] `realitySettings.publicKey` читается правильно (НЕ settings.publicKey)

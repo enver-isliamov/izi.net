@@ -1,8 +1,8 @@
 # izinet
 
-React + Vite личный кабинет для VPN-подписок с backend на Express, Supabase, 3x-ui, Telegram bot и Enot.io.
+React + Vite личный кабинет для VPN-подписок с backend на Express, Supabase, 3x-ui и Enot.io.
 
-**Статус:** VPN работает (Reality VLESS), сайт работает, платежи работают.
+**Статус:** VPN работает ✅, сайт работает ✅, платежи работают ✅
 
 ## Быстрый старт
 
@@ -58,6 +58,7 @@ izi.net/
 │   └── scripts/
 │       ├── fix_reality_inbound.py — Исправление Reality настроек
 │       ├── patch_xray_routing.py  — Патчинг routing в SQLite
+│       ├── patch_xray_config.py   — Патчинг config.json (обход 3x-ui)
 │       └── setup_supabase.py      — Авто-настройка Supabase
 ├── src/                      — React frontend
 ├── xui_bootstrap.py          — Генерация Reality ключей
@@ -86,7 +87,10 @@ flow: xtls-rprx-vision
 1. **publicKey**: читать `realitySettings.publicKey`, НЕ `realitySettings.settings.publicKey`
 2. **target**: ДОЛЖЕН быть `host.docker.internal:3443`, НЕ `www.microsoft.com:443`
 3. **fingerprint**: только `chrome`/`firefox` (НЕ `randomized`)
-4. **serverNames**: должны совпадать с SNI клиентов
+4. **serverNames**: должны совпадать с SNI клиентов, БЕЗ пробелов и кавычек
+
+### ⚠️ НИКОГДА не монтировать volume на /app/bin/
+Директория `/app/bin/` содержит Xray binary. Volume mount **ПЕРЕЗАПИСЫВАЕТ** её, удаляя Xray → VPN не работает.
 
 ## Деплой
 
