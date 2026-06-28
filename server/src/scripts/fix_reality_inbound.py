@@ -17,8 +17,8 @@ if not os.path.exists(DB_PATH):
         DB_PATH = os.path.abspath(alt)
 
 TARGET_PORT = 443
-CORRECT_SERVER_NAMES = ["www.microsoft.com", "microsoft.com"]
-CORRECT_TARGET = "host.docker.internal:3443"
+CORRECT_SERVER_NAMES = ["www.cloudflare.com"]
+CORRECT_TARGET = "www.cloudflare.com:443"
 CORRECT_FINGERPRINT = "chrome"
 
 def find_reality_inbound(cursor):
@@ -64,10 +64,10 @@ def fix():
         changed = True
         print(f"✅ Fixed serverNames: {names} → {CORRECT_SERVER_NAMES}")
 
-    # Fix dest/target — must point to Nginx for website fallback
+    # Fix dest/target — must use cloudflare.com for Reality handshake
     for key in ("dest", "target"):
         current = reality.get(key, "")
-        if not current or "microsoft" in current.lower() or "google" in current.lower():
+        if not current or "microsoft" in current.lower() or "google" in current.lower() or "docker" in current.lower():
             reality[key] = CORRECT_TARGET
             changed = True
             print(f"✅ Fixed {key}: {current} → {CORRECT_TARGET}")

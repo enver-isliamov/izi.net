@@ -8,7 +8,7 @@ import sqlite3
 import time
 
 DB_PATH = os.environ.get("XUI_DB_PATH", "/opt/izinet/xui-db/x-ui.db")
-SAFE_SERVER_NAMES = ["www.microsoft.com", "microsoft.com"]
+SAFE_SERVER_NAMES = ["www.cloudflare.com"]
 SAFE_DNS_SERVERS = [
     "localhost",
     "https://dns.adguard-dns.com/dns-query",
@@ -125,7 +125,7 @@ def default_stream_settings(private_key, public_key):
         "realitySettings": {
             "show": False,
             "xver": 0,
-            "dest": "host.docker.internal:3443",
+            "dest": "www.cloudflare.com:443",
             "serverNames": SAFE_SERVER_NAMES,
             "privateKey": private_key,
             "publicKey": public_key,
@@ -174,8 +174,8 @@ def normalize_reality(stream_settings):
         changed = True
     for key in ("dest", "target"):
         dest_val = str(reality.get(key, "")).lower()
-        if not dest_val or "google" in dest_val or "microsoft" in dest_val:
-            reality[key] = "host.docker.internal:3443"
+        if not dest_val or "google" in dest_val or "microsoft" in dest_val or "docker" in dest_val:
+            reality[key] = "www.cloudflare.com:443"
             changed = True
     if not reality.get("privateKey") or not reality.get("publicKey"):
         private_key, public_key = reality_keypair()
