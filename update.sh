@@ -34,6 +34,10 @@ echo "🔧 Запускаю xui_bootstrap.py..."
 sleep 3
 python3 xui_bootstrap.py || echo "⚠️ Bootstrap failed, continuing..."
 
+# 4a. Патчинг routing rules в xrayTemplateConfig (напрямую в SQLite)
+echo "🔧 Патчинг routing rules..."
+python3 server/src/scripts/patch_xray_routing.py || echo "⚠️ Routing patch skipped"
+
 # 4b. Создание Reality+WebSocket inbound (если ещё нет)
 echo "🔌 Проверяю Reality+WebSocket inbound..."
 bash add_reality_ws.sh || echo "⚠️ Reality+WS setup skipped"

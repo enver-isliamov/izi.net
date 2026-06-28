@@ -117,10 +117,27 @@ export class RoutingService {
           // DEBUG: Log what we're about to save
           console.log(`🔍 [Routing] ${server.name} template AFTER: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
 
-          // 1. Update via HTTP API (JSON format — X-UI v26.4.25 requires JSON, not form-urlencoded)
+          // 1. Update via HTTP API (form-urlencoded — 3x-ui requires this format)
           await instance.updateSettings(settings);
 
-          // 2. Restart panel to apply changes to xray core
+          // 2. Verify template was persisted
+          try {
+            const verify = await instance.getSettings();
+            const verifyConfig = JSON.parse(verify.xrayTemplateConfig || '{}');
+            const verifyRules = verifyConfig.routing?.rules?.length || 0;
+            if (verifyRules >= 3) {
+              console.log(`✅ [Routing] xrayTemplateConfig persisted: ${verifyRules} routing rules`);
+            } else {
+              console.warn(`⚠️ [Routing] xrayTemplateConfig may not have persisted (rules=${verifyRules}). Using SQLite fallback.`);
+              // Direct SQLite write as fallback
+              const { spawn } = await import('child_process');
+              spawn('python3', ['/app/server/src/scripts/patch_xray_routing.py'], { stdio: 'inherit' });
+            }
+          } catch (e: any) {
+            console.warn(`⚠️ [Routing] Verification failed: ${e.message}`);
+          }
+
+          // 3. Restart panel to apply changes to xray core
           await instance.restartPanel();
 
           console.log(`✅ [Routing] Rules synced to ${server.name}`);
@@ -128,9 +145,6 @@ export class RoutingService {
           console.error(`❌ [Routing] Failed on ${server.name}:`, e.message);
         }
       }
-
-      console.log('🔄 [Routing] Restarting x3-ui to apply xrayTemplateConfig...');
-      restartContainer('x3-ui').catch(e => console.warn(`⚠️ [Routing] x3-ui restart failed: ${e.message}`));
 
     } catch (err: any) {
       console.error('❌ [Routing] Sync failed:', err.message);

@@ -529,7 +529,16 @@ export class XUIService {
     if (!this.sessionCookie) await this.login();
     try {
       const url = `${this.host}${this.basePath}/panel/setting/update`;
-      await axios.post(url, settings, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      const encodedData = new URLSearchParams();
+      for (const key in settings) {
+        const value = (settings as any)[key];
+        if (typeof value === 'object') {
+          encodedData.append(key, JSON.stringify(value));
+        } else {
+          encodedData.append(key, String(value));
+        }
+      }
+      await axios.post(url, encodedData.toString(), getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' })));
     } catch (e: any) {
       if (e.response?.status === 401) {
         this.sessionCookie = null;
