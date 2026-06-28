@@ -34,7 +34,11 @@ echo "🔧 Запускаю xui_bootstrap.py..."
 sleep 3
 python3 xui_bootstrap.py || echo "⚠️ Bootstrap failed, continuing..."
 
-# 4a. Патчинг routing rules в xrayTemplateConfig (напрямую в SQLite)
+# 4a. Исправление Reality inbound — serverNames + dest
+echo "🔧 Исправляю Reality inbound (serverNames, dest)..."
+python3 server/src/scripts/fix_reality_inbound.py || echo "⚠️ Reality fix skipped"
+
+# 4b. Патчинг routing rules в xrayTemplateConfig (напрямую в SQLite)
 echo "🔧 Патчинг routing rules..."
 python3 server/src/scripts/patch_xray_routing.py || echo "⚠️ Routing patch skipped"
 

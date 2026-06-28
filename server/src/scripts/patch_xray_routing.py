@@ -147,9 +147,9 @@ def restart_xray_via_api():
     """Перезапускает xray через API панели."""
     try:
         import urllib.request
-        import http.cookiejar
+        from http.cookiejar import MozillaCookiejar
 
-        cj = http.cookiejar.MozillaCookiejar('/tmp/xui_cookies')
+        cj = MozillaCookiejar('/tmp/xui_cookies')
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
 
         # Login

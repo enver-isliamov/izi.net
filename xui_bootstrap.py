@@ -173,8 +173,10 @@ def normalize_reality(stream_settings):
         reality["serverNames"] = SAFE_SERVER_NAMES
         changed = True
     for key in ("dest", "target"):
-        if "google" in str(reality.get(key, "")).lower():
+        dest_val = str(reality.get(key, "")).lower()
+        if not dest_val or "google" in dest_val:
             reality[key] = "www.microsoft.com:443"
+            changed = True
             changed = True
     if not reality.get("privateKey") or not reality.get("publicKey"):
         private_key, public_key = reality_keypair()
