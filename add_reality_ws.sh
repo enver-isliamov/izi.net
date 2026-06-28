@@ -118,7 +118,7 @@ body = json.dumps({
 
 cookie_str = ""
 for line in open("/tmp/xc_ws"):
-    parts = line.strip().split("\\t")
+    parts = line.strip().split("\t")
     if len(parts) >= 7 and parts[0] and not parts[0].startswith("#"):
         cookie_str += f"{parts[5]}={parts[6]}; "
 

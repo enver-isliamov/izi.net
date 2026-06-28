@@ -73,16 +73,9 @@ else
     echo "⚠️ UFW не установлен, пропускаю."
 fi
 
-# 8. Перегенерация VPN-ссылок (чтобы VLESS ссылки в Supabase совпадали с текущими Reality ключами)
-echo "🔗 Перегенерирую VPN-ссылки..."
-sleep 10
-REGEN_RESULT=$(curl -s -X POST http://localhost:3005/api/admin/system/regenerate-all-links \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(curl -s -X POST http://localhost:3005/api/supabase-proxy/auth/v1/token?grant_type=password \
-    -H "Content-Type: application/json" \
-    -H "apikey: ${VITE_SUPABASE_ANON_KEY}" \
-    -d "{\"email\":\"${ADMIN_EMAIL:-admin@izinet.online}\",\"password\":\"${ADMIN_PASSWORD:-admin}\"}" 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)" 2>/dev/null)
-echo "Результат: $REGEN_RESULT"
+# 8. Перегенерация VPN-ссылок — НЕ НУЖНА, backend делает это автоматически при старте
+# regenerateAllVlessLinks() вызывается в index.ts через 15 сек после boot
+echo "🔗 VPN-ссылки будут перегенерированы автоматически при старте backend..."
 
 # 9. Проверка логов
 echo -e "${GREEN}⏳ Жду 5 секунд для финализации...${NC}"
