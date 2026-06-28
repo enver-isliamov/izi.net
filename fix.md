@@ -1,4 +1,4 @@
-﻿# FIX.MD — ПОЛНОЕ ВОССТАНОВЛЕНИЕ IZINET
+# FIX.MD — ПОЛНОЕ ВОССТАНОВЛЕНИЕ IZINET
 
 **Дата:** 12 июня 2026
 **Статус:** Завершено (Тестирование пройдено)
@@ -69,3 +69,28 @@ cd /opt/izinet && git pull origin main && sed -i 's/\r//' .env && docker compose
 - [x] [2026-06-12 14:31] **CORE-003**: Восстановлены методы XUIService для maintenance/routing (в `server/src/services/maintenance.service.ts` и `server/src/services/routing.service.ts` вызывались отсутствующие `checkConfig`, `getClientTraffic`, `syncRealityKeys`, `getSettings`, `updateSettings`, `restartPanel` -> реализованы совместимые методы в `server/src/services/xui.service.ts`).
 - [x] [2026-06-12 14:31] **SEC-001**: Усилена защита поиска пользователей в admin API (в `server/src/routes/admin.ts` произвольная строка попадала в PostgREST `.or()` -> поиск id разрешен только для UUID, email-поиск экранирует `%`, `_` и `\\`).
 - [x] [2026-06-12 14:31] **CACHE-001**: Отключено кэширование subscription-конфигов (эндпоинт `server/src/routes/config.ts#/sub/:id` мог отдавать устаревшие VPN-конфиги через прокси/клиентский 304 -> добавлены `Cache-Control`, `Pragma`, `Expires` для no-store/no-cache).
+
+---
+
+## 🎯 VPN ПОЛНОСТЬЮ РАБОТАЕТ (28 июня 2026)
+
+### Критические исправления:
+
+- [x] **VPN-KEY-MISMATCH**: `xui.service.ts:329` — читал устаревший publicKey из `realitySettings.settings.publicKey` вместо текущего `realitySettings.publicKey`. VLESS ссылки содержали неправильный pbk → Reality handshake не проходил → таймаут.
+- [x] **VPN-TARGET**: Reality `target` был `www.microsoft.com:443` → браузер получал сертификат Microsoft. Изменён на `host.docker.internal:3443` (Nginx).
+- [x] **VPN-FINGERPRINT**: `fingerprint=randomized` → изменён на `chrome`.
+- [x] **VPN-SERVERNAMES**: Пустые serverNames → установлены `['www.microsoft.com', 'microsoft.com']`.
+- [x] **VPN-INBOUND-ID**: Хардкод ID=32 → автодетект по порту 443.
+- [x] **VPN-PYTHON-CONTAINER**: Python fallback в контейнере → убран (контейнер Node.js не имеет Python).
+- [x] **VPN-MOZILLACOOKIE**: Импорт `MozillaCookiejar` → исправлен для Python 3.12.
+- [x] **VPN-AUTO-SYNC**: `maintenance.service.ts` автоматически проверяет pbk каждые 30 мин и перегенерирует ссылки при изменении ключей.
+- [x] **VPN-OUT-OF-BOX**: `install.sh` теперь запускает fix_reality_inbound.py + setup_supabase.py.
+
+### Рабочая конфигурация:
+```
+publicKey: 5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
+fingerprint: chrome
+serverNames: ['www.microsoft.com', 'microsoft.com']
+target: host.docker.internal:3443
+flow: xtls-rprx-vision
+```
