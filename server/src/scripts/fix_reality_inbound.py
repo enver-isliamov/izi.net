@@ -49,12 +49,20 @@ def fix():
     reality = stream.get("realitySettings", {})
     changed = False
 
-    # Fix serverNames
+    # Fix serverNames — check for empty, invalid chars (spaces, quotes)
     names = reality.get("serverNames")
+    needs_fix = False
     if not isinstance(names, list) or len(names) == 0:
+        needs_fix = True
+    else:
+        for n in names:
+            if not isinstance(n, str) or ' ' in n or "'" in n or '"' in n or n.strip() != n:
+                needs_fix = True
+                break
+    if needs_fix:
         reality["serverNames"] = CORRECT_SERVER_NAMES
         changed = True
-        print(f"✅ Fixed serverNames: {CORRECT_SERVER_NAMES}")
+        print(f"✅ Fixed serverNames: {names} → {CORRECT_SERVER_NAMES}")
 
     # Fix dest/target — must point to Nginx for website fallback
     for key in ("dest", "target"):
