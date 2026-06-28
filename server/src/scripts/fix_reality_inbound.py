@@ -18,7 +18,7 @@ if not os.path.exists(DB_PATH):
 
 TARGET_PORT = 443
 CORRECT_SERVER_NAMES = ["www.microsoft.com", "microsoft.com"]
-CORRECT_DEST = "www.microsoft.com:443"
+CORRECT_TARGET = "host.docker.internal:3443"
 CORRECT_FINGERPRINT = "chrome"
 
 def find_reality_inbound(cursor):
@@ -56,12 +56,13 @@ def fix():
         changed = True
         print(f"✅ Fixed serverNames: {CORRECT_SERVER_NAMES}")
 
-    # Fix dest
-    dest = reality.get("dest", "")
-    if not dest or "google" in dest.lower() or "docker" in dest.lower():
-        reality["dest"] = CORRECT_DEST
-        changed = True
-        print(f"✅ Fixed dest: {CORRECT_DEST}")
+    # Fix dest/target — must point to Nginx for website fallback
+    for key in ("dest", "target"):
+        current = reality.get(key, "")
+        if not current or "microsoft" in current.lower() or "google" in current.lower():
+            reality[key] = CORRECT_TARGET
+            changed = True
+            print(f"✅ Fixed {key}: {current} → {CORRECT_TARGET}")
 
     # Fix inner settings.serverName
     settings = reality.get("settings", {})
