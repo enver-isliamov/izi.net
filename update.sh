@@ -53,6 +53,16 @@ bash download_geo.sh || echo "⚠️ Geo download skipped"
 # 5. Перезапуск x3-ui чтобы перечитать SQLite и geo файлы
 echo "🔄 Перезапускаю x3-ui..."
 docker restart x3-ui
+sleep 10
+
+# 5a. Патчинг routing rules напрямую в config.json (обход бага 3x-ui)
+echo "🔧 Патчинг routing rules в xray config..."
+docker exec x3-ui python3 /opt/izinet/server/src/scripts/patch_xray_config.py 2>/dev/null || \
+  echo "⚠️ Routing patch skipped (run manually: docker exec x3-ui python3 /app/server/src/scripts/patch_xray_config.py)"
+
+# 5b. Перезапуск x3-ui чтобы применить patched config
+echo "🔄 Финальный перезапуск x3-ui..."
+docker restart x3-ui
 sleep 5
 
 # 6. Запуск Nginx (fallback для сайта)
