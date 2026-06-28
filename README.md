@@ -2,99 +2,138 @@
 
 React + Vite личный кабинет для VPN-подписок с backend на Express, Supabase, 3x-ui, Telegram bot и Enot.io.
 
-## ⚡️ Быстрый старт (One-line Installation)
+**Статус:** VPN работает (Reality VLESS), сайт работает, платежи работают.
 
-Если у вас чистый VPS (Ubuntu/Debian), вы можете развернуть весь стэк (izinet + 3x-ui панель) одной командой:
+## Быстрый старт
 
+### Новый сервер:
 ```bash
-curl -sSL https://raw.githubusercontent.com/enverphoto/izinet/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/enver-isliamov/izi.net/main/install.sh | bash
 ```
-*Скрипт установит Docker, клонирует репозиторий и попросит ввести ключи Supabase.*
 
-## Текущая архитектура
+### Обновление текущего сервера:
+```bash
+ssh root@194.50.94.28
+cd /opt/izinet && bash update.sh
+```
 
-- Frontend: React 19, Vite, Tailwind, shadcn/base-ui style components.
-- Backend: `server.ts` Express monolith.
-- Auth/database: Supabase.
-- VPN provisioning: 3x-ui API, multi-server table `vpn_servers`.
-- Payments: Enot.io new invoice API.
-- Deploy: Vercel frontend with `/api/*` proxy to backend `http://YOUR_VPS_IP:3005/api/*`.
+**ВАЖНО:** Не запускать update.sh через SSH из удалённой сессии — сервер имеет 2GB RAM, Docker rebuild вызывает OOM. Использовать Proxmox console.
 
-## Основные пользовательские потоки
+## Архитектура
 
-### Пополнение кошелька
+```
+Порт 443 → Xray (VLESS+Reality) — VPN
+  ├─ VPN-клиенты → туннель → интернет
+  └─ Браузеры → fallback → host.docker.internal:3443
+       → Nginx (SSL Let's Encrypt) → порт 3005 (сайт)
 
-1. `/wallet` вызывает `POST /api/pay/create`.
-2. Backend создает row в `payments` со статусом `pending`.
-3. Backend вызывает `POST https://api.enot.io/invoice/create` с `x-api-key`.
-4. Пользователь оплачивает invoice URL от ENOT.
-5. ENOT отправляет webhook на `/api/pay/webhook/enot`.
-6. Backend проверяет `x-api-sha256-signature`.
-7. При `status = success` backend:
-   - пополняет `balances`;
-   - переводит `payments.status` в `completed`;
-   - пишет `transactions` с `type = deposit`.
+Порт 2053 → 3x-ui Panel (управление)
+Порт 3005 → Express backend (API)
+Порт 3443 → Nginx (сайт, fallback для Reality)
+```
 
-### Покупка подписки с баланса
+### Стек:
+- Frontend: React 19, Vite, Tailwind
+- Backend: Express (TypeScript)
+- База данных: Supabase (PostgreSQL)
+- VPN: 3x-ui + Xray (Reality VLESS)
+- Платежи: Enot.io
+- Деплой: Docker Compose
 
-1. `/subscription` открывает `SubscriptionWizard`.
-2. Wizard читает `balances.amount`.
-3. `POST /api/subscription/buy` проверяет JWT и достаточность средств.
-4. Backend создает или продлевает клиента в 3x-ui.
-5. Backend обновляет `subscriptions.v2ray_config` в JSON-формате.
-6. Backend списывает баланс.
+## Структура проекта
 
-## Важные env/settings
+```
+izi.net/
+├── server/src/
+│   ├── index.ts              — Express сервер, boot
+│   ├── routes/
+│   │   ├── admin.ts          — Админ API
+│   │   ├── user.ts           — User API (покупка, устройства)
+│   │   └── config.ts         — /api/sub/:id (VLESS ссылки)
+│   ├── services/
+│   │   ├── xui.service.ts    — X-UI API клиент
+│   │   ├── maintenance.service.ts — Фоновые задачи
+│   │   ├── routing.service.ts — Routing sync
+│   │   └── supabase.ts       — Supabase клиент
+│   └── scripts/
+│       ├── fix_reality_inbound.py — Исправление Reality настроек
+│       ├── patch_xray_routing.py  — Патчинг routing в SQLite
+│       └── setup_supabase.py      — Авто-настройка Supabase
+├── src/                      — React frontend
+├── xui_bootstrap.py          — Генерация Reality ключей
+├── install.sh                — Установка на новый сервер
+├── update.sh                 — Обновление на текущем сервере
+├── add_reality_ws.sh         — Создание Reality+WS inbound
+├── docker-compose.yml        — Docker конфигурация
+├── Supabase.md               — SQL для новой базы
+├── BUGS_FIX_PLAN.md          — Исправленные баги
+└── fix.md                    — История исправлений
+```
 
-Supabase:
+## Reality VPN конфигурация
 
+### Ключевые параметры (рабочие):
+```
+publicKey: 5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
+privateKey: kJ2F0HSQBw2hNydpwjCcmYoX5wgxbk0-zW2zr5PP630
+serverNames: ['www.microsoft.com', 'microsoft.com']
+fingerprint: chrome
+target: host.docker.internal:3443
+flow: xtls-rprx-vision
+```
+
+### Критические правила:
+1. **publicKey**: читать `realitySettings.publicKey`, НЕ `realitySettings.settings.publicKey`
+2. **target**: ДОЛЖЕН быть `host.docker.internal:3443`, НЕ `www.microsoft.com:443`
+3. **fingerprint**: только `chrome`/`firefox` (НЕ `randomized`)
+4. **serverNames**: должны совпадать с SNI клиентов
+
+## Деплой
+
+### update.sh (текущий сервер):
+```bash
+cd /opt/izinet && bash update.sh
+```
+Делает: git pull → docker rebuild → xui_bootstrap.py → fix_reality_inbound.py → patch_xray_routing.py → restart
+
+### install.sh (новый сервер):
+```bash
+bash install.sh
+```
+Делает: Docker → Nginx → SSL → xui_bootstrap.py → fix_reality_inbound.py → setup_supabase.py
+
+## Окружение
+
+### .env (минимальный набор):
 ```env
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_ID=
+ENOT_MERCHANT_ID=
+ENOT_SECRET_KEY=
+PUBLIC_URL=https://izinet.online
 ```
 
-Enot.io:
+**ВАЖНО:** XUI_HOST, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID — НЕ используются. Все настройки берутся из Supabase `vpn_servers`.
 
-```env
-ENOT_MERCHANT_ID=shop_id_or_uuid
-ENOT_SECRET_KEY=api_key_for_x-api-key
-ENOT_SECRET_KEY2=webhook_hmac_key
-```
+## Диагностика
 
-Backend/public:
+```bash
+# На сервере:
+cd /opt/izinet && bash diagnose_vpn.sh   # Полная диагностика VPN
+cd /opt/izinet && bash diagnose.sh       # Общая диагностика
 
-```env
-PUBLIC_URL=https://dev-izinet.vercel.app
-PORT=3005
-```
-
-3x-ui fallback is optional when `vpn_servers` contains active server credentials:
-
-```env
-XUI_HOST=
-XUI_USERNAME=
-XUI_PASSWORD=
-XUI_INBOUND_ID=4
+# Проверка VLESS ссылки:
+curl -s http://localhost:3005/api/sub/SUBSCRIPTION_ID | base64 -d
 ```
 
 ## Development
 
 ```bash
 npm install
-npm run dev
+npm run dev      # Dev server
+npm run build    # Production build
+npm run lint     # TypeScript check (tsc --noEmit)
 ```
-
-Checks:
-
-```bash
-npm run lint
-npm run build
-```
-
-## Operational notes
-
-- Vercel does not run the API directly. It proxies `/api/*` to the VPS backend from `vercel.json`.
-- After backend code changes, deploy and restart the process on `YOUR_VPS_IP:3005`.
-- `fix.md` contains only currently open issues.
-- `PAYMENT_SETUP.md` contains the current payment/database setup.

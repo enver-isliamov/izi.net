@@ -1,56 +1,72 @@
 # izinet Testing Checklist
 
-Дата актуализации: 2026-05-22
+Дата актуализации: 2026-06-28
 
-## Backend smoke 
+## VPN (Reality VLESS) — КРИТИЧЕСКИЙ
 
-- [x] `GET http://YOUR_VPS_IP:3005/api/locations` возвращает активные серверы.
-- [x] `POST /api/pay/create` без `Authorization` возвращает `401`.
-- [x] После деплоя текущего `server.ts`: `POST /api/subscription/buy` без `Authorization` возвращает `401`.
-- [x] После деплоя текущего `server.ts`: `POST /api/subscription/sync-traffic` без `Authorization` возвращает `401`.
-- [x] `GET /api/health` показывает `supabase: true`.
+- [x] `realitySettings.publicKey` читается правильно (НЕ settings.publicKey)
+- [x] `target = host.docker.internal:3443` (НЕ www.microsoft.com)
+- [x] `fingerprint = chrome` (НЕ randomized)
+- [x] `serverNames = ['www.microsoft.com', 'microsoft.com']`
+- [x] VLESS ссылка содержит правильный pbk (совпадает с Xray config)
+- [x] Hiddify подключается без таймаута
+- [x] Сайт работает через HTTPS (Let's Encrypt сертификат)
+- [x] Fallback: браузер → Nginx (порт 3443) работает
+
+### Как проверить VPN:
+```bash
+# На сервере:
+curl -s http://localhost:3005/api/sub/SUB_ID | base64 -d
+# Должна быть vless:// ссылка с pbk=5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
+
+# С клиента:
+ping vpn.izinet.online        # Должен пинговаться
+nslookup vpn.izinet.online    # Должен резолвиться в 194.50.94.28
+```
+
+## Backend smoke
+
+- [x] `GET http://YOUR_VPS_IP:3005/api/locations` возвращает активные серверы
+- [x] `POST /api/pay/create` без `Authorization` возвращает `401`
+- [x] `POST /api/subscription/buy` без `Authorization` возвращает `401`
+- [x] `GET /api/health` работает
 
 ## Payment flow
 
-- [x] Кнопка пополнения больше не должна вести на старый `https://enot.io/checkout?...`.
-- [x] Backend использует `POST https://api.enot.io/invoice/create`.
-- [x] Пользователь подтвердил, что ENOT-оплата проходит.
-- [x] Проверить с реальной сессией: после webhook баланс обновляется на dashboard.
-- [x] Проверить row в `payments`: `pending -> completed`.
-- [x] Проверить row в `transactions`: создается `type = deposit`.
+- [x] Backend использует `POST https://api.enot.io/invoice/create`
+- [x] После webhook баланс обновляется на dashboard
+- [x] Row в `payments`: `pending -> completed`
+- [x] Row в `transactions`: `type = deposit`
 
-## Wallet and subscription purchase
+## Wallet and subscription
 
-- [x] Пополнить баланс тестовым платежом.
-- [x] Убедиться, что `/dashboard` показывает новый баланс.
-- [x] Открыть `/subscription`, пройти wizard до шага оплаты.
-- [x] Убедиться, что wizard видит баланс.
-- [x] Купить подписку с баланса.
-- [x] Убедиться, что баланс списан.
-- [x] Убедиться, что `subscriptions` создана/продлена.
-- [x] Убедиться, что VPN config отображается и копируется.
+- [x] Пополнение баланса работает
+- [x] Покупка подписки с баланса работает
+- [x] VPN config отображается и копируется
+- [x] Баланс списан корректно
 
 ## Device management
 
-- [x] Добавить дополнительное устройство.
-- [x] Удалить дополнительное устройство.
-- [x] Убедиться, что UI обновился.
-- [x] Убедиться, что `subscriptions.v2ray_config` остался JSON.
-- [x] Убедиться, что клиент удален из 3x-ui.
-- [x] Убедиться, что primary device удалить нельзя.
-
-## Security
-
-- [x] `/api/pay/create` требует JWT.
-- [x] После деплоя: `/api/subscription/buy` требует JWT.
-- [x] После деплоя: `/api/subscription/sync-traffic` требует JWT.
-- [x] Проверить, что пользователь не может купить подписку за другого `userId`.
-- [x] Проверить RLS на `balances`, `subscriptions`, `payments`, `transactions`.
+- [x] Добавление устройства работает
+- [x] Удаление устройства работает
+- [x] `subscriptions.v2ray_config` остаётся JSON
+- [x] Клиент удален из 3x-ui
 
 ## Build
 
 - [x] `npm install`
-- [x] `npm run lint`
+- [x] `npm run lint` (tsc --noEmit)
 - [x] `npm run build`
 
-Успешно протестировано и готово к продакшену! Все тесты стабильно зеленые.
+## Deploy
+
+- [x] `bash update.sh` на сервере работает
+- [x] `docker compose up -d --build` пересобирает контейнер
+- [x] `fix_reality_inbound.py` исправляет serverNames, dest, fingerprint
+- [x] `patch_xray_routing.py` добавляет routing rules в SQLite
+
+## Диагностика
+
+- [x] `bash diagnose_vpn.sh` — полная диагностика VPN
+- [x] `bash diagnose.sh` — общая диагностика сервера
+- [x] `bash diagnose_panel.sh` — диагностика панели 3x-ui

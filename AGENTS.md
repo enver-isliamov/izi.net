@@ -55,16 +55,36 @@ server.ts getInboundLink() ← GET /panel/api/inbounds/get/{id} ← 3x-ui API
                                     Генерирует vless:// ссылку с ключами из панели
 ```
 
+### ⚠️ КРИТИЧЕСКИЕ УРОКИ (June 28, 2026):
+
+1. **publicKey PRIORITY**: API возвращает ДВА разных ключа:
+   - `realitySettings.publicKey` = ТЕКУЩИЙ ключ (используется Xray) ✅
+   - `realitySettings.settings.publicKey` = УСТАРЕВШИЙ ключ ❌
+   - Код ОБЯЗАН читать `realitySettings.publicKey` ПЕРВЫМ!
+
+2. **target ОБЯЗАН быть `host.docker.internal:3443`**:
+   - Если target = `www.microsoft.com:443` → браузер получает сертификат Microsoft
+   - Reality target определяет КУДА идёт non-Reality трафик
+   - Для работы сайта нужен fallback на Nginx (порт 3443)
+
+3. **fingerprint**: ТОЛЬКО `chrome`/`firefox`. `randomized` НЕ работает с Reality.
+
+4. **Docker rebuild ОБЯЗАТЕЛЕН**: `git pull` обновляет файлы на хосте, но контейнер работает со СТАРЫМ image. Всегда `docker compose up -d --build`.
+
 ### Никогда не делайте:
 - Хранить Reality ключи в `.env`
-- Использовать хардкод ключи (публичные в GitHub → Hiddify блокирует)
-- Вызывать `syncRealityKeys()` автоматически (затирает ключи из панели)
-- Использовать `openssl rand` для генерации ключей (НЕ x25519!)
+- Использовать хардкод ключи
+- Читать publicKey из `realitySettings.settings.publicKey`
+- Ставить target = `www.microsoft.com:443` (ломает SSL сайта)
+- Использовать `randomized` fingerprint
+- Запускать update.sh через SSH на сервере с 2GB RAM (OOM)
 
 ### Всегда делайте:
 - Использовать `xui_bootstrap.py` для генерации ключей
-- Генерировать уникальные ключи на каждом сервере
-- Проверять `checkRealityInbound()` перед выдачей ссылок
+- Читать publicKey из `realitySettings.publicKey`
+- Ставить target = `host.docker.internal:3443`
+- После git pull: `docker compose up -d --build`
+- Использовать Proxmox console для тяжёлых операций
 
 ---
 
