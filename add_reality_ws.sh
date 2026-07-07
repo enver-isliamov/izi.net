@@ -4,20 +4,25 @@
 # Идемпотентный — пропускает если inbound уже существует
 
 set -e
-rm -f /tmp/xc_ws 2>/dev/null
+
+XUI_API_TOKEN="${XUI_API_TOKEN:-5Nh0BAkKFNhGtKLRT8E5UVDtvrQHKV71UqnTEfH0fFetbz5e}"
+XUI_AUTH="Cookie: 3x-ui=$XUI_API_TOKEN"
+XUI_BASE="http://localhost:2053"
 
 echo "=== IZINET: Reality+WebSocket Setup ==="
 
-# 1. Логин
-echo "[1/5] Логин в панель..."
-curl -s -c /tmp/xc_ws http://localhost:2053/ >/dev/null 2>&1
-CSRF=$(curl -s -b /tmp/xc_ws http://localhost:2053/csrf-token 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('obj',''))" 2>/dev/null)
-curl -s -c /tmp/xc_ws -b /tmp/xc_ws -H "X-CSRF-Token: $CSRF" -X POST http://localhost:2053/login -H "Content-Type: application/x-www-form-urlencoded" -d 'username=oja&password=sireyra' >/dev/null 2>&1
+# 1. Проверяем авторизацию
+echo "[1/5] Проверка API токена..."
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "$XUI_AUTH" "$XUI_BASE/panel/api/inbounds/list" 2>/dev/null)
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "  ОШИБКА: API токен недействителен (HTTP $HTTP_CODE)"
+  exit 1
+fi
 echo "  OK"
 
 # 2. Проверяем есть ли уже inbound на 2087
 echo "[2/5] Проверка существующих inbound'ов..."
-EXISTING=$(curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null | python3 -c "
+EXISTING=$(curl -s -H "$XUI_AUTH" "$XUI_BASE/panel/api/inbounds/list" 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for ib in d.get('obj',[]):
@@ -57,7 +62,7 @@ if [ -z "$INBOUND_ID" ]; then
 fi
 echo "  Найден inbound ID=$INBOUND_ID"
 
-KEYS=$(curl -s -b /tmp/xc_ws "http://localhost:2053/panel/api/inbounds/get/$INBOUND_ID" 2>/dev/null | python3 -c "
+KEYS=$(curl -s -H "$XUI_AUTH" "$XUI_BASE/panel/api/inbounds/get/$INBOUND_ID" 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 ib=d.get('obj',{})
@@ -133,18 +138,12 @@ body = json.dumps({
     "sniffing": json.dumps(sniffing)
 }).encode()
 
-cookie_str = ""
-for line in open("/tmp/xc_ws"):
-    parts = line.strip().split("\t")
-    if len(parts) >= 7 and parts[0] and not parts[0].startswith("#"):
-        cookie_str += f"{parts[5]}={parts[6]}; "
-
 req = urllib.request.Request(
     "http://localhost:2053/panel/api/inbounds/add",
     data=body,
     headers={
         "Content-Type": "application/json",
-        "Cookie": cookie_str.rstrip("; ")
+        "Cookie": "3x-ui=$XUI_API_TOKEN"
     },
     method="POST"
 )
@@ -176,7 +175,7 @@ sleep 3
 # 6. Проверка
 echo ""
 echo "=== ПРОВЕРКА ==="
-curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null | python3 -c "
+curl -s -H "$XUI_AUTH" "$XUI_BASE/panel/api/inbounds/list" 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for ib in d.get('obj',[]):
