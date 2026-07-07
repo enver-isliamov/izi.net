@@ -12,14 +12,80 @@ export class BotService {
   }
 
   public init() {
-    this.bot.command('start', (ctx) => this.showMainMenu(ctx));
-    
+    this.bot.start((ctx) => this.handleStart(ctx));
+
     this.bot.action('action_status', (ctx) => this.handleStatus(ctx));
     this.bot.action('action_help', (ctx) => ctx.reply('❓ Инструкция:\n1. Скачайте приложение Hiddify или V2Ray.\n2. В личном кабинете на сайте скопируйте ссылку подписки.\n3. Вставьте ссылку в приложение.'));
-    
-    // ... rest of bot logic ...
 
     this.bot.launch().catch(err => console.error('Bot launch failed:', err));
+  }
+
+  private async handleStart(ctx: Context) {
+    const payload = (ctx.message as any)?.text?.split(' ')?.[1] || '';
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return this.showMainMenu(ctx);
+
+    if (payload.startsWith('link_')) {
+      const token = payload.replace('link_', '');
+      try {
+        const { data, error } = await supabase
+          .from('telegram_linking_tokens')
+          .select('user_id')
+          .eq('token', token)
+          .maybeSingle();
+
+        if (error || !data) {
+          return ctx.reply('❌ Ссылка для привязки недействительна или уже использована.');
+        }
+
+        const { error: updateErr } = await supabase
+          .from('users')
+          .update({ telegram_id: chatId, telegram_linked: true })
+          .eq('id', data.user_id);
+
+        if (updateErr) {
+          console.error('Telegram link update error:', updateErr);
+          return ctx.reply('❌ Ошибка привязки. Попробуйте позже.');
+        }
+
+        await supabase.from('telegram_linking_tokens').delete().eq('token', token);
+
+        return ctx.reply('✅ Аккаунт успешно привязан! Теперь вы можете использовать бота для управления VPN.');
+      } catch (e) {
+        return ctx.reply('❌ Ошибка привязки. Попробуйте позже.');
+      }
+    }
+
+    if (payload.startsWith('auth_')) {
+      const token = payload.replace('auth_', '');
+      try {
+        const { data, error } = await supabase
+          .from('telegram_linking_tokens')
+          .select('user_id')
+          .eq('token', `auth_${token}`)
+          .maybeSingle();
+
+        if (error || !data) {
+          return ctx.reply('❌ Ссылка для входа недействительна или уже использована.');
+        }
+
+        await supabase
+          .from('telegram_linking_tokens')
+          .update({ user_id: chatId })
+          .eq('token', `auth_${token}`);
+
+        await supabase
+          .from('users')
+          .update({ telegram_id: chatId })
+          .eq('telegram_id', chatId);
+
+        return ctx.reply('✅ Вход выполнен! Вернитесь на сайт.');
+      } catch (e) {
+        return ctx.reply('❌ Ошибка входа. Попробуйте позже.');
+      }
+    }
+
+    return this.showMainMenu(ctx);
   }
 
   private async showMainMenu(ctx: Context) {

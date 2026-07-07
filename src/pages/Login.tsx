@@ -22,8 +22,26 @@ export default function Login() {
   const [isForgotPassword, setIsForgotPassword] = useState(isForgotPage);
   const [isLoading, setIsLoading] = useState(false);
   const [refCode, setRefCode] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string }>({});
   const navigate = useNavigate();
   const { user } = useAuth();
+
+  const validateEmail = (value: string) => {
+    if (!value) return 'Введите email';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Некорректный формат email';
+    return '';
+  };
+
+  const validatePassword = (value: string) => {
+    if (!value) return 'Введите пароль';
+    return '';
+  };
+
+  const validateConfirmPassword = (value: string) => {
+    if (!value) return 'Подтвердите пароль';
+    if (value !== password) return 'Пароли не совпадают';
+    return '';
+  };
 
   useEffect(() => {
     if (user) {
@@ -48,10 +66,9 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isForgotPassword) {
-      if (!email) {
-        toast.error('Пожалуйста, введите ваш Email');
-        return;
-      }
+      const emailErr = validateEmail(email);
+      setErrors({ email: emailErr });
+      if (emailErr) return;
       setIsLoading(true);
       try {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -61,18 +78,23 @@ export default function Login() {
         toast.success('Ссылка для восстановления отправлена на почту!');
         setIsForgotPassword(false);
       } catch (error: any) {
-        toast.error(error.message || 'Ошибка отправки ссылки');
+        const msg = error.message?.includes('For security purposes')
+          ? 'Проверьте почту — письмо уже отправлено'
+          : error.message?.includes('Invalid email')
+          ? 'Некорректный email'
+          : 'Не удалось отправить ссылку. Попробуйте позже';
+        toast.error(msg);
       } finally {
         setIsLoading(false);
       }
       return;
     }
 
-    if (!email || !password) {
-      toast.error('Пожалуйста, заполните все поля');
-      return;
-    }
-    
+    const emailErr = validateEmail(email);
+    const passErr = validatePassword(password);
+    setErrors({ email: emailErr, password: passErr });
+    if (emailErr || passErr) return;
+
     setIsLoading(true);
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -81,11 +103,16 @@ export default function Login() {
       });
 
       if (error) throw error;
-      
+
       toast.success('Успешный вход!');
       navigate('/dashboard');
     } catch (error: any) {
-      toast.error(error.message || 'Ошибка при входе');
+      const msg = error.message?.includes('Invalid login credentials')
+        ? 'Неверный email или пароль'
+        : error.message?.includes('Email not confirmed')
+        ? 'Подтвердите email перед входом. Проверьте почту.'
+        : 'Ошибка входа. Проверьте данные и попробуйте снова';
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -93,16 +120,12 @@ export default function Login() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password || !confirmPassword) {
-      toast.error('Пожалуйста, заполните все поля');
-      return;
-    }
-    
-    if (password !== confirmPassword) {
-      toast.error('Пароли не совпадают');
-      return;
-    }
-    
+    const emailErr = validateEmail(email);
+    const passErr = validatePassword(password);
+    const confirmErr = validateConfirmPassword(confirmPassword);
+    setErrors({ email: emailErr, password: passErr, confirmPassword: confirmErr });
+    if (emailErr || passErr || confirmErr) return;
+
     setIsLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -111,17 +134,22 @@ export default function Login() {
       });
 
       if (error) throw error;
-      
-      // Если подтверждение почты отключено в Supabase, сессия создается сразу
+
       if (data?.session) {
         toast.success('Регистрация успешна!');
         navigate('/dashboard');
       } else {
-        // Если подтверждение включено, просим проверить почту
         toast.success('Регистрация успешна! Проверьте вашу почту (включая папку Спам).');
       }
     } catch (error: any) {
-      toast.error(error.message || 'Ошибка при регистрации');
+      const msg = error.message?.includes('already registered')
+        ? 'Аккаунт с таким email уже существует'
+        : error.message?.includes('valid email')
+        ? 'Введите корректный email'
+        : error.message?.includes('at least')
+        ? 'Пароль слишком короткий'
+        : 'Ошибка регистрации. Попробуйте другой email или пароль';
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -216,27 +244,29 @@ export default function Login() {
                   <div className="space-y-2">
                     <div className="relative">
                       <Mail className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        placeholder="Email" 
+                      <Input
+                        placeholder="Email"
                         type="email"
-                        className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
+                        className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.email ? 'border-red-500' : ''}`}
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => { setEmail(e.target.value); setErrors(prev => ({ ...prev, email: '' })); }}
                       />
                     </div>
+                    {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
                   </div>
                   {!isForgotPassword && (
                     <div className="space-y-2">
                       <div className="relative">
                         <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                        <Input 
-                          type="password" 
-                          placeholder="Пароль" 
-                          className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
+                        <Input
+                          type="password"
+                          placeholder="Пароль"
+                          className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.password ? 'border-red-500' : ''}`}
                           value={password}
-                          onChange={(e) => setPassword(e.target.value)}
+                          onChange={(e) => { setPassword(e.target.value); setErrors(prev => ({ ...prev, password: '' })); }}
                         />
                       </div>
+                      {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
                     </div>
                   )}
                   <div className="flex justify-between items-center text-right">
@@ -297,38 +327,41 @@ export default function Login() {
                   <div className="space-y-2">
                     <div className="relative">
                       <Mail className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input 
+                      <Input
                         type="email"
-                        placeholder="Email" 
-                        className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
+                        placeholder="Email"
+                        className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.email ? 'border-red-500' : ''}`}
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => { setEmail(e.target.value); setErrors(prev => ({ ...prev, email: '' })); }}
                       />
                     </div>
+                    {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
                   </div>
                   <div className="space-y-2">
                     <div className="relative">
                       <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        type="password" 
-                        placeholder="Пароль" 
-                        className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
+                      <Input
+                        type="password"
+                        placeholder="Пароль"
+                        className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.password ? 'border-red-500' : ''}`}
                         value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        onChange={(e) => { setPassword(e.target.value); setErrors(prev => ({ ...prev, password: '' })); }}
                       />
                     </div>
+                    {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
                   </div>
                   <div className="space-y-2">
                     <div className="relative">
                       <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        type="password" 
-                        placeholder="Подтвердите пароль" 
-                        className="pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11"
+                      <Input
+                        type="password"
+                        placeholder="Подтвердите пароль"
+                        className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.confirmPassword ? 'border-red-500' : ''}`}
                         value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        onChange={(e) => { setConfirmPassword(e.target.value); setErrors(prev => ({ ...prev, confirmPassword: '' })); }}
                       />
                     </div>
+                    {errors.confirmPassword && <p className="text-xs text-red-500">{errors.confirmPassword}</p>}
                   </div>
                   <Button type="submit" disabled={isLoading} className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl h-11 neon-glow">
                     {isLoading ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : null}
