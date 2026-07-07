@@ -63,7 +63,8 @@ docker exec x3-ui python3 /tmp/patch_xray_config.py 2>/dev/null || echo "⚠️ 
 # 5b. Перезапуск x3-ui чтобы применить patched config
 echo "🔄 Финальный перезапуск x3-ui..."
 docker restart x3-ui
-sleep 5
+echo "⏳ Жду x3-ui (20 сек)..."
+sleep 20
 
 # 6. Запуск Nginx (fallback для сайта)
 echo "🌐 Проверяю Nginx..."
@@ -84,6 +85,7 @@ if command -v ufw &> /dev/null; then
     ufw allow 2053/tcp 2>/dev/null || true
     ufw allow 3005/tcp 2>/dev/null || true
     ufw allow 3443/tcp 2>/dev/null || true
+    ufw allow 2087/tcp 2>/dev/null || true
     ufw allow from 172.16.0.0/12 to any port 3443 2>/dev/null || true
     ufw reload 2>/dev/null || true
     echo "✅ UFW порты обновлены."

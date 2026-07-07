@@ -15,13 +15,13 @@ CSRF=$(curl -s -b /tmp/xc_ws http://localhost:2053/csrf-token 2>/dev/null | pyth
 curl -s -c /tmp/xc_ws -b /tmp/xc_ws -H "X-CSRF-Token: $CSRF" -X POST http://localhost:2053/login -H "Content-Type: application/x-www-form-urlencoded" -d 'username=oja&password=sireyra' >/dev/null 2>&1
 echo "  OK"
 
-# 2. Проверяем есть ли уже inbound на 8443
+# 2. Проверяем есть ли уже inbound на 2087
 echo "[2/5] Проверка существующих inbound'ов..."
 EXISTING=$(curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for ib in d.get('obj',[]):
-  if ib.get('port')==8443:
+  if ib.get('port')==2087:
     ss=json.loads(ib.get('streamSettings','{}'))
     net=ss.get('network','tcp')
     sec=ss.get('security','none')
@@ -80,7 +80,7 @@ fi
 echo "  Public Key: ${PUB:0:25}..."
 
 # 4. Создаём inbound Reality+WS
-echo "[4/5] Создание inbound Reality+WS на порту 8443..."
+echo "[4/5] Создание inbound Reality+WS на порту 2087..."
 RESULT=$(python3 << PYEOF
 import json, urllib.request
 
@@ -126,7 +126,7 @@ sniffing = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False
 body = json.dumps({
     "enable": True,
     "remark": "izinet-reality-ws",
-    "port": 8443,
+    "port": 2087,
     "protocol": "vless",
     "settings": json.dumps(settings),
     "streamSettings": json.dumps(stream),
@@ -180,7 +180,7 @@ curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null 
 import sys,json
 d=json.load(sys.stdin)
 for ib in d.get('obj',[]):
-  if ib.get('port') in (443, 8443):
+  if ib.get('port') in (443, 2087):
     ss=json.loads(ib.get('streamSettings','{}'))
     net=ss.get('network','tcp')
     sec=ss.get('security','none')
@@ -189,6 +189,6 @@ for ib in d.get('obj',[]):
 
 echo ""
 echo "=== ГОТОВО ==="
-echo "Reality+WS inbound создан на порту 8443"
+echo "Reality+WS inbound создан на порту 2087"
 echo "Ссылка для клиента (пример):"
-echo "vless://UUID@vpn.izinet.online:8443?type=ws&path=%2Fws&host=www.cloudflare.com&encryption=none&security=reality&sni=www.cloudflare.com&pbk=${PUB}&fp=chrome&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#OneD-WS"
+echo "vless://UUID@vpn.izinet.online:2087?type=ws&path=%2Fws&host=www.cloudflare.com&encryption=none&security=reality&sni=www.cloudflare.com&pbk=${PUB}&fp=chrome&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#OneD-WS"
