@@ -247,6 +247,7 @@ export default function Login() {
                       <Input
                         placeholder="Email"
                         type="email"
+                        aria-label="Email"
                         className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.email ? 'border-red-500' : ''}`}
                         value={email}
                         onChange={(e) => { setEmail(e.target.value); setErrors(prev => ({ ...prev, email: '' })); }}
@@ -261,6 +262,7 @@ export default function Login() {
                         <Input
                           type="password"
                           placeholder="Пароль"
+                          aria-label="Пароль"
                           className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.password ? 'border-red-500' : ''}`}
                           value={password}
                           onChange={(e) => { setPassword(e.target.value); setErrors(prev => ({ ...prev, password: '' })); }}
@@ -330,6 +332,7 @@ export default function Login() {
                       <Input
                         type="email"
                         placeholder="Email"
+                        aria-label="Email"
                         className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.email ? 'border-red-500' : ''}`}
                         value={email}
                         onChange={(e) => { setEmail(e.target.value); setErrors(prev => ({ ...prev, email: '' })); }}
@@ -343,6 +346,7 @@ export default function Login() {
                       <Input
                         type="password"
                         placeholder="Пароль"
+                        aria-label="Пароль"
                         className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.password ? 'border-red-500' : ''}`}
                         value={password}
                         onChange={(e) => { setPassword(e.target.value); setErrors(prev => ({ ...prev, password: '' })); }}
@@ -356,6 +360,7 @@ export default function Login() {
                       <Input
                         type="password"
                         placeholder="Подтвердите пароль"
+                        aria-label="Подтвердите пароль"
                         className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 ${errors.confirmPassword ? 'border-red-500' : ''}`}
                         value={confirmPassword}
                         onChange={(e) => { setConfirmPassword(e.target.value); setErrors(prev => ({ ...prev, confirmPassword: '' })); }}
