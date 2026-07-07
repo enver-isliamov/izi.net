@@ -11,14 +11,21 @@ XUI_BASE="http://localhost:2053"
 
 echo "=== IZINET: Reality+WebSocket Setup ==="
 
-# 1. Проверяем авторизацию
+# 1. Проверяем авторизацию (с retry пока x3-ui стартует)
 echo "[1/5] Проверка API токена..."
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "$XUI_AUTH" "$XUI_BASE/panel/api/inbounds/list" 2>/dev/null)
+for i in 1 2 3 4 5; do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "$XUI_AUTH" "$XUI_BASE/panel/api/inbounds/list" 2>/dev/null || echo "000")
+  if [ "$HTTP_CODE" = "200" ]; then
+    echo "  OK (попытка $i)"
+    break
+  fi
+  echo "  Попытка $i: x3-ui не готов (HTTP $HTTP_CODE), жду 5 сек..."
+  sleep 5
+done
 if [ "$HTTP_CODE" != "200" ]; then
-  echo "  ОШИБКА: API токен недействителен (HTTP $HTTP_CODE)"
+  echo "  ОШИБКА: API токен недействителен после 5 попыток"
   exit 1
 fi
-echo "  OK"
 
 # 2. Проверяем есть ли уже inbound на 2087
 echo "[2/5] Проверка существующих inbound'ов..."
