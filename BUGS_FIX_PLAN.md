@@ -98,22 +98,22 @@ const pbk = (realitySettings.publicKey || rs.publicKey || '').trim();
 
 ---
 
-## Рабочая конфигурация (June 28, 2026)
+## Рабочая конфигурация (July 7, 2026)
 
 ### Xray Reality inbound (port 443):
 ```
 publicKey: 5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
 privateKey: kJ2F0HSQBw2hNydpwjCcmYoX5wgxbk0-zW2zr5PP630
-serverNames: ['www.microsoft.com', 'microsoft.com']
+serverNames: ['www.cloudflare.com']
 fingerprint: chrome
-target: host.docker.internal:3443
+target: www.cloudflare.com:443
 flow: xtls-rprx-vision
 ```
 
 ### VLESS ссылка (пример):
 ```
 vless://UUID@vpn.izinet.online:443?type=tcp&encryption=none&security=reality
-&sni=www.microsoft.com&pbk=5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
+&sni=www.cloudflare.com&pbk=5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
 &fp=chrome&sid=5cb64dcd6d60c1&spx=%2F&flow=xtls-rprx-vision#OneD
 ```
 
@@ -179,8 +179,10 @@ vless://UUID@vpn.izinet.online:443?type=tcp&encryption=none&security=reality
 
 ---
 
-### WARN-3: Reality+WebSocket inbound не создан ⚠️
+### WARN-3: Reality+WebSocket inbound не создан ✅ ИСПРАВЛЕНО
 
-**Проблема:** `add_reality_ws.sh` пропустил создание WS inbound — "Reality+WS inbound не найден — создаю" → "Reality+WS setup skipped".
+**Проблема:** `add_reality_ws.sh` читал ключи из hardcoded inbound ID=32 (не существует). Плюс `www.microsoft.com` заблокирован ТСПУ.
 
-**Влияние:** WS-транспорт недоступен. TCP Reality работает нормально.
+**Решение:**
+- Auto-detect inbound по порту 443 + security=reality (вместо хардкода ID=32)
+- `www.microsoft.com` → `www.cloudflare.com` (обход блокировки ТСПУ)
