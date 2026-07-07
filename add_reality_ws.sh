@@ -38,9 +38,26 @@ if echo "$EXISTING" | grep -q "EXISTS.*ws.*reality"; then
 fi
 echo "  Reality+WS inbound не найден — создаю"
 
-# 3. Читаем Reality ключи из inbound 443
+# 3. Читаем Reality ключи из inbound 443 (auto-detect)
 echo "[3/5] Чтение Reality ключей из inbound 443..."
-KEYS=$(curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/get/32 2>/dev/null | python3 -c "
+INBOUND_ID=$(curl -s -b /tmp/xc_ws http://localhost:2053/panel/api/inbounds/list 2>/dev/null | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for ib in d.get('obj',[]):
+  try:
+    ss=json.loads(ib.get('streamSettings','{}'))
+    if ss.get('security')=='reality' and ib.get('port')==443:
+      print(ib['id']); break
+  except: pass
+" 2>/dev/null)
+
+if [ -z "$INBOUND_ID" ]; then
+  echo "  ОШИБКА: Reality inbound (port 443) не найден"
+  exit 1
+fi
+echo "  Найден inbound ID=$INBOUND_ID"
+
+KEYS=$(curl -s -b /tmp/xc_ws "http://localhost:2053/panel/api/inbounds/get/$INBOUND_ID" 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 ib=d.get('obj',{})
@@ -86,21 +103,21 @@ stream = {
     "realitySettings": {
         "show": False,
         "xver": 0,
-        "dest": "www.microsoft.com:443",
-        "serverNames": ["www.microsoft.com"],
+        "dest": "www.cloudflare.com:443",
+        "serverNames": ["www.cloudflare.com"],
         "privateKey": priv,
         "publicKey": pub,
         "shortIds": sids,
         "settings": {
             "publicKey": pub,
             "fingerprint": "chrome",
-            "serverName": "www.microsoft.com",
+            "serverName": "www.cloudflare.com",
             "spiderX": "/"
         }
     },
     "wsSettings": {
         "path": "/ws",
-        "headers": {"Host": "www.microsoft.com"}
+        "headers": {"Host": "www.cloudflare.com"}
     }
 }
 
@@ -174,4 +191,4 @@ echo ""
 echo "=== ГОТОВО ==="
 echo "Reality+WS inbound создан на порту 8443"
 echo "Ссылка для клиента (пример):"
-echo "vless://UUID@vpn.izinet.online:8443?type=ws&path=%2Fws&host=www.microsoft.com&encryption=none&security=reality&sni=www.microsoft.com&pbk=${PUB}&fp=chrome&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#OneD-WS"
+echo "vless://UUID@vpn.izinet.online:8443?type=ws&path=%2Fws&host=www.cloudflare.com&encryption=none&security=reality&sni=www.cloudflare.com&pbk=${PUB}&fp=chrome&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#OneD-WS"
