@@ -273,23 +273,28 @@ export class XUIService {
       } else {
         const msg = response.data?.msg || JSON.stringify(response.data);
         console.error(`❌ [XUI] addClient failed for ${email}: ${msg}`);
-        // If "Duplicate email" — client exists somewhere, use updateClient fallback
-        if (msg.includes('Duplicate email')) {
-          console.log(`🔄 [XUI] Duplicate email detected — searching all inbounds for ${email}`);
+
+        if (msg.includes('Duplicate email') || msg.includes('record not found')) {
+          console.log(`🔄 [XUI] ${msg.includes('Duplicate email') ? 'Duplicate email' : 'Record not found'} — cleaning stale clients for ${email}`);
           const allInbounds = await this.getInbounds();
           for (const ib of allInbounds) {
             try {
               const settings = this.parseJson<any>(ib.settings, {});
               const found = (settings.clients || []).find((c: any) => c.email === email);
               if (found) {
-                console.log(`🔄 [XUI] Found ${email} in inbound ${ib.id} — updating`);
-                const updated = await this.updateClient(email, found.id || found.uuid, ib.id, expiryTime, limitBytes);
-                if (updated) {
-                  return this.getInboundLink(ib.id, found.id || found.uuid, email);
-                }
-                console.warn(`⚠️ [XUI] updateClient failed for ${email} in inbound ${ib.id}`);
+                console.log(`🔄 [XUI] Found stale ${email} in inbound ${ib.id} — deleting`);
+                await this.deleteClient(found.id || found.uuid, email).catch(() => {});
               }
             } catch (e) {}
+          }
+          try {
+            const retryResp = await axios.post(`${this.host}${this.basePath}/panel/api/inbounds/addClient`, clientData, getRequestConfig(`${this.host}${this.basePath}/panel/api/inbounds/addClient`, this.authHeaders({ 'Content-Type': 'application/json' })));
+            if (retryResp.data?.success) {
+              console.log(`✅ [XUI] Client ${email} added after cleanup (inbound ${inboundId})`);
+              return this.getInboundLink(inboundId, uuid, email);
+            }
+          } catch (retryErr: any) {
+            console.error(`❌ [XUI] Retry addClient after cleanup failed: ${retryErr.message}`);
           }
         }
         throw new Error(msg || 'Failed to add client');

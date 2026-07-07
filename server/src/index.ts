@@ -28,6 +28,11 @@ const PORT = parseInt(process.env.PORT || '3005');
 app.use(cors());
 app.use(express.json());
 
+// --- HEALTHCHECK (без auth, без rate limit) ---
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
 // --- МАРШРУТЫ ---
 
 // --- RATE LIMITING (PERF-001) ---

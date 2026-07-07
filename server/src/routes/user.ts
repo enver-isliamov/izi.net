@@ -206,12 +206,21 @@ async function handleSubscriptionBuy(req: any, res: any) {
           subscriptionExpiresAt = new Date(renewalBase);
           subscriptionExpiresAt.setDate(subscriptionExpiresAt.getDate() + plan.days);
           devices = devices.map((device) => ({ ...device, expiresAt: subscriptionExpiresAt.toISOString() }));
-          
-          // DATA-002: Reset traffic on renewal
+
+          // DATA-002: Reset traffic + sync expiry to panel on renewal
+          const renewalMs = subscriptionExpiresAt.getTime();
           for (const server of activeServers) {
-            const { instance } = await getXuiForServer(server.id);
-            for (const dev of devices) {
-              await instance.resetClientTraffic(inboundId, dev.email).catch(() => {});
+            try {
+              const { instance, server: serverData } = await getXuiForServer(server.id);
+              const effectiveInboundId = serverData.inbound_id || inboundId;
+              for (const dev of devices) {
+                await instance.resetClientTraffic(effectiveInboundId, dev.email).catch(() => {});
+                if (dev.uuid && dev.email) {
+                  await instance.updateClient(dev.email, dev.uuid, effectiveInboundId, renewalMs, 0).catch(() => {});
+                }
+              }
+            } catch (e: any) {
+              console.warn(`⚠️ [User] Renewal sync failed for ${server.name}: ${e.message}`);
             }
           }
         }
