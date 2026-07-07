@@ -646,31 +646,6 @@ router.delete('/users/:userId/devices/:deviceId', adminOnly, async (req, res) =>
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.put('/users/:userId/devices/:deviceId/move', adminOnly, async (req, res) => {
-  const { userId, deviceId } = req.params;
-  const { newServerId } = req.body;
-  try {
-    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
-    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
-    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-    const idx = devices.findIndex((d) => d.id === deviceId);
-    if (idx === -1) return res.status(404).json({ error: 'Device not found' });
-    devices[idx] = { ...devices[idx], serverId: newServerId };
-    const { error } = await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), server_id: newServerId, updated_at: new Date().toISOString() }).eq('id', sub.id);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
-router.post('/users/move-server', adminOnly, async (req, res) => {
-  const { userId, newServerId } = req.body;
-  try {
-    const { error } = await supabase.from('subscriptions').update({ server_id: newServerId, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
 router.post('/users/:userId/devices', adminOnly, async (req, res) => {
   const { userId } = req.params;
   const { label } = req.body;
