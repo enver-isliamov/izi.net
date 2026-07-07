@@ -77,6 +77,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Login />} />
+            <Route path="/forgot-password" element={<Login />} />
             <Route path="/update-password" element={<UpdatePassword />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/refund" element={<RefundPolicy />} />

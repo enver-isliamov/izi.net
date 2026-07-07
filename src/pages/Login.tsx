@@ -7,16 +7,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { motion } from 'motion/react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppConfig } from '@/hooks/useAppConfig';
 
 export default function Login() {
   const { telegramBotName } = useAppConfig();
+  const location = useLocation();
+  const isRegisterPage = location.pathname === '/register';
+  const isForgotPage = location.pathname === '/forgot-password';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(isForgotPage);
   const [isLoading, setIsLoading] = useState(false);
   const [refCode, setRefCode] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -26,19 +29,21 @@ export default function Login() {
     if (user) {
       navigate('/dashboard');
     }
-    
-    // Check for referral code in URL
+
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     if (ref) {
       setRefCode(ref);
       sessionStorage.setItem('referral_code', ref);
     } else {
-      // Check if it's already in session
       const savedRef = sessionStorage.getItem('referral_code');
       if (savedRef) setRefCode(savedRef);
     }
   }, [user, navigate]);
+
+  useEffect(() => {
+    setIsForgotPassword(location.pathname === '/forgot-password');
+  }, [location.pathname]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -190,7 +195,7 @@ export default function Login() {
           </div>
         </div>
 
-        <Tabs defaultValue="login" className="w-full">
+        <Tabs defaultValue={isRegisterPage ? 'register' : 'login'} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-6 bg-muted/50 rounded-xl p-1">
             <TabsTrigger value="login" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-black">Вход</TabsTrigger>
             <TabsTrigger value="register" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-black">Регистрация</TabsTrigger>
@@ -236,11 +241,11 @@ export default function Login() {
                   )}
                   <div className="flex justify-between items-center text-right">
                     {isForgotPassword ? (
-                      <Button type="button" variant="link" className="text-xs text-muted-foreground hover:text-primary p-0 h-auto" onClick={() => setIsForgotPassword(false)}>
+                      <Button type="button" variant="link" className="text-xs text-muted-foreground hover:text-primary p-0 h-auto" onClick={() => navigate('/login')}>
                         Вернуться ко входу
                       </Button>
                     ) : (
-                      <Button type="button" variant="link" className="text-xs text-primary hover:text-primary/80 p-0 h-auto" onClick={() => setIsForgotPassword(true)}>
+                      <Button type="button" variant="link" className="text-xs text-primary hover:text-primary/80 p-0 h-auto" onClick={() => navigate('/forgot-password')}>
                         Забыли пароль?
                       </Button>
                     )}
