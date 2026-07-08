@@ -352,6 +352,13 @@ export class XUIService {
           const wsPath = streamSettings.wsSettings?.path || '/ws';
           const wsHost = streamSettings.wsSettings?.headers?.Host || sni;
           transportParams = `type=ws&path=${encodeURIComponent(wsPath)}&host=${encodeURIComponent(wsHost)}`;
+        } else if (network === 'xhttp') {
+          const xhttpPath = streamSettings.xhttpSettings?.path || '/xhttp';
+          const xhttpHost = streamSettings.xhttpSettings?.host || sni;
+          transportParams = `type=xhttp&path=${encodeURIComponent(xhttpPath)}&host=${encodeURIComponent(xhttpHost)}`;
+        } else if (network === 'grpc') {
+          const grpcService = streamSettings.grpcSettings?.serviceName || '';
+          transportParams = `type=grpc&serviceName=${encodeURIComponent(grpcService)}`;
         }
 
         console.log(`✅ [XUI] Reality link for ${email}: transport=${network}, SNI=${sni}, SID=${sid.substring(0, 10)}...`);
