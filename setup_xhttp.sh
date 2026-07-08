@@ -10,8 +10,39 @@ XHTTP_PORT=2087
 
 echo "=== IZINET: Reality+XHTTP Setup ==="
 
-# 1. Проверяем есть ли уже XHTTP inbound
-echo "[1/4] Проверка существующих inbound'ов..."
+# 1. Останавливаем x3-ui для работы с SQLite
+echo "[1/5] Остановка x3-ui для очистки БД..."
+docker stop x3-ui 2>/dev/null || true
+sleep 2
+
+# 2. Удаляем сломанные Reality+WS inbound'ы (Xray Reality НЕ поддерживает WebSocket)
+echo "[2/5] Очистка сломанных Reality+WS inbound'ов..."
+python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('$DB_PATH')
+c = conn.cursor()
+c.execute('SELECT id, port, remark, enable, stream_settings FROM inbounds')
+removed = 0
+for row in c.fetchall():
+    iid, port, remark, enable, ss_raw = row
+    ss = json.loads(ss_raw or '{}')
+    net = ss.get('network', 'tcp')
+    sec = ss.get('security', 'none')
+    # Reality+WS is BROKEN — Xray only supports RAW, XHTTP, gRPC with Reality
+    if sec == 'reality' and net == 'ws':
+        print(f'  Удаляю inbound-{iid} ({remark}) — Reality+WebSocket НЕ поддерживается Xray')
+        c.execute('DELETE FROM inbounds WHERE id=?', (iid,))
+        removed += 1
+conn.commit()
+conn.close()
+if removed:
+    print(f'  Удалено {removed} сломанных inbound\'ов')
+else:
+    print('  Сломанных inbound\'ов нет')
+" 2>/dev/null
+
+# 2. Проверяем есть ли уже Reality+XHTTP inbound
+echo "[2/5] Проверка существующих inbound'ов..."
 EXISTING=$(python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('$DB_PATH')
@@ -22,7 +53,7 @@ for row in c.fetchall():
     ss = json.loads(ss_raw or '{}')
     net = ss.get('network', 'tcp')
     sec = ss.get('security', 'none')
-    if port == $XHTTP_PORT and sec == 'reality':
+    if port == $XHTTP_PORT and sec == 'reality' and net == 'xhttp':
         print(f'EXISTS id={iid} net={net} sec={sec} remark={remark} enable={enable}')
         break
 else:
@@ -37,8 +68,8 @@ if echo "$EXISTING" | grep -q "EXISTS"; then
 fi
 echo "  Reality+XHTTP inbound не найден — создаю"
 
-# 2. Читаем Reality ключи из inbound 443
-echo "[2/4] Чтение Reality ключей из inbound 443..."
+# 3. Читаем Reality ключи из inbound 443
+echo "[3/5] Чтение Reality ключей из inbound 443..."
 KEYS=$(python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('$DB_PATH')
@@ -76,8 +107,8 @@ if [[ "$PRIV" == ERROR* ]] || [ -z "$PRIV" ]; then
 fi
 echo "  Public Key: ${PUB:0:25}..."
 
-# 3. Создаём inbound Reality+XHTTP через SQLite
-echo "[3/4] Создание inbound Reality+XHTTP на порту $XHTTP_PORT..."
+# 4. Создаём inbound Reality+XHTTP через SQLite
+echo "[4/5] Создание inbound Reality+XHTTP на порту $XHTTP_PORT..."
 python3 -c "
 import sqlite3, json
 
@@ -138,8 +169,8 @@ conn.close()
 print(f'OK id={new_id}')
 "
 
-# 4. Перезапуск x3-ui
-echo "[4/4] Перезапуск x3-ui..."
+# 5. Перезапуск x3-ui
+echo "[5/5] Перезапуск x3-ui..."
 docker restart x3-ui
 sleep 10
 
