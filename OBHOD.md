@@ -1,154 +1,145 @@
-# План обхода блокировок и DPI (ТСПУ)
+# План обхода блокировок — izinet.online
 
-**Дата:** 07.07.2026
-**Текущий статус:** Reality+TCP на cloudflare.com работает, ТСПУ блокирует microsoft.com
-
----
-
-## Что мы знаем
-
-- ТСПУ (Роскомнадзор) блокирует VPN по анализу трафика (DPI)
-- Reality+TCP работает через cloudflare.com — ТСПУ не распознаёт как VPN
-- microsoft.com как SNI/dest — **заблокирован** ТСПУ (подтверждено Xray Discussion #6387)
-- Reality+WS inbound не создаётся через API (404) — исправлено через SQLite
-- Первое подключение через VPN может быть заблокировано, последующие — работают (ТСПУ обучается)
+**Обновлено:** 09.07.2026
+**Источники:** Habr 992232, Habr 1027276, runetfreedom/russia-v2ray-rules-dat, ku78/tspu-checker
 
 ---
 
-## Методы обхода DPI
+## Что такое белые списки (главная проблема)
 
-### 1. Reality+TCP (ТЕКУЩЕЕ — РАБОТАЕТ) ✅
+Провайдеры используют **двухуровневую фильтрацию**:
 
-**Что это:** Трафик маскируется под обычный TLS-хендшейк с cloudflare.com. DPI видит "обычный HTTPS" и пропускает.
-
-**Настройка:** Уже работает на порту 443. serverNames=cloudflare.com, fingerprint=chrome.
-
-**Ограничение:** ТСПУ может начать распознавать Reality по характерным паттернам трафика (размер пакетов, тайминги). Пока работает.
-
----
-
-### 2. Reality+XHTTP (СЛЕДУЮЩИЙ ШАГ) ⭐
-
-**Что это:** Новый транспорт в Xray-core v26+, разработан специально для обхода DPI. Объединяет Reality с HTTP-маскировкой.
-
-**Преимущество:** 
-- Трафик выглядит как обычный HTTP/HTTPS
-- Поддерживает разделение upload/download (auto mode)
-- Разработан автором Xray (RPRX) как "Beyond REALITY"
-- **Reality поддерживает XHTTP** (в отличие от WebSocket)
-
-**Статус:** Дискуссия с 341 ⭐ на GitHub. Активно обсуждается. Требует Xray-core v26+.
-
-**Как внедрить:**
-1. Обновить 3x-ui до версии с поддержкой Xray v26+
-2. Настроить inbound с транспортом xhttp + security=reality
-3. Клиенты (Hiddify/NekoBox) должны поддерживать xhttp
-
-**Ссылки:**
-- https://github.com/XTLS/Xray-core/discussions/4113
-- https://github.com/XTLS/Xray-core/discussions/5377
-
----
-
-### 3. TLS Fragment (ФРАГМЕНТАЦИЯ)
-
-**Что это:** Разбиение TLS ClientHello на мелкие части. DPI не может собрать полный пакет для анализа.
-
-**Преимущество:** Просто в настройке, не требует новых протоколов.
-
-**Ограничение:** ТСПУ научился собирать фрагменты. Эффективность снижается.
-
-**Настройка в Xray:**
-```json
-{
-  "fragment": {
-    "packets": "tlshello",
-    "length": "100-200",
-    "sleep": "50-100"
-  }
-}
+```
+Пакет → [L3: IP в белом списке?]
+          ↓ НЕТ → DROP (пакет исчезает)
+          ↓ ДА
+       [L7: SNI в чёрном списке?]
+          ↓ ДА → RST (соединение рвётся)
+          ↓ НЕТ → PASS
 ```
 
----
+**L3 (сетевой):** Пакет физически не покидает сеть если dst IP не в белом списке. 63,126 IP из 46 миллионов — это 0.14%.
 
-### 5. CDN Relay (РЕЛЕЙ ЧЕРЕЗ CDN)
-
-**Что это:** Трафик идёт через CDN (Cloudflare, BunnyCDN, Fastly). DPI видит "обычный" CDN-трафик.
-
-**Преимущество:** Один IP адрес = тысячи сайтов. DPI не может заблокировать CDN.
-
-**Реализация:**
-1. Настроить Cloudflare Workers как прокси
-2. Reality+TCP подключается к CDN IP
-3. CDN перенаправляет на наш сервер
-
-**Сложность:** Средняя. Требует настройки CDN и DNS.
-
-**Альтернатива:** Reality уже работает через cloudflare.com как "dest" — это по сути CDN relay через SNI.
+**L7 (приложения):** Даже если IP разрешён, DPI проверяет SNI. Заблокированный SNI = RST.
 
 ---
 
-### 6. sing-box (АЛЬТЕРНАТИВА)
+## Наша проблема
 
-**Что это:** Универсальная прокси-платформа (35.8k ⭐). Поддерживает больше протоколов чем 3x-ui.
+| Что | Статус |
+|-----|--------|
+| Сервер | Нидерланды (194.50.94.28) — IP **НЕ в белом списке** |
+| Reality+TCP:443 | Блокируется早期 DPI |
+| Reality+XHTTP:2088 | Блокируется早期 DPI |
+| v2rayNG через OpenVPN | Работает (трафик идёт через другой IP) |
 
-**Преимущество:** 
-- Встроенные методы обхода DPI
-- Поддержка Reality, XHTTP, Shadowsocks, VLESS
-- Активная разработка
+**Вывод:** Провайдер использует белые списки. Наш сервер за границей — IP заблокирован на уровне L3. Никакой протокол не поможет если IP не в белом списке.
 
-**Ограничение:** Нужно отдельно ставить на сервер, не интегрирован с 3x-ui.
+---
 
-**Ссылка:** https://github.com/SagerNet/sing-box
+## Что работает для обхода (из статей)
+
+### Метод 1: VLESS+Reality на РОССИЙСКОМ VPS ⭐
+
+**Единственный надёжный метод для белых списков.**
+
+Требования:
+1. IP сервера в белом списке (Timeweb, Yandex.Cloud, VK Cloud)
+2. SNI whitelisted домена (vk.com, ya.ru, userapi.com)
+3. Reality + XTLS-Vision + uTLS chrome
+
+Где брать VPS:
+- **Timeweb** — бесплатный reroll IP, высокий шанс попасть в БС
+- **Yandex.Cloud** — грант 4000₽ при регистрации
+- **VK Cloud** — дороже, сложная верификация
+
+Хорошие SNI для маскировки:
+- `storage.yandex.net`, `yastatic.net` (Яндекс CDN)
+- `userapi.com`, `vkuser.net` (VK CDN)
+- `hosting.reg.ru` (хостинг)
+- `cdnvideo.ru`, `okcdn.ru` (CDN)
+
+**Реализация:** Тот же Xray + Reality, но на российском сервере.
+
+### Метод 2: Yandex Cloud Functions
+
+Serverless-функция как прокси. `functions.yandexcloud.net` — в БС у всех провайдеров.
+
+Free tier: 1M вызовов/мес, 100K ГБ-секунд.
+
+Схема:
+```
+Клиент → Yandex Functions → VPN-сервер
+```
+
+### Метод 3: TURN relay
+
+Публичные TURN серверы VK/Яндекса для relay. Работает но быстро банят.
+
+### Метод 4: xDNS
+
+Туннелирование через DNS-запросы. Низкая скорость, только для текста/SSH.
+
+---
+
+## Что НЕ работает
+
+| Метод | Почему не работает |
+|-------|-------------------|
+| QUIC/HTTP3 | UDP:443 режется в БС |
+| ECH/ESNI | Блокируется ТСПУ + бесполезно при L3 блокировке |
+| Обычный VPN за границей | IP не в БС — DROP на L3 |
+| Cloudflare Workers | Не поддерживают raw TCP для Reality |
+| Нестандартные порты | DPI проверяет и порты тоже |
+
+---
+
+## Что делать нам
+
+### Срочно: Получить российский VPS
+
+1. Зарегистрироваться в **Timeweb** или **Yandex.Cloud**
+2. Создать VPS в России
+3. Установить Xray + Reality
+4. Настроить SNI: `vk.com` или `userapi.com` (в белом списке)
+5. Настроить DNS-маршрутизацию: российский трафик → напрямую, иностранный → через VPN
+
+### Для гео-маршрутизации
+
+Использовать `russia-v2ray-rules-dat` для определения российских IP/доменов:
+- `geoip:ru-blocked` — заблокированные в РФ IP
+- `geosite:ru-blocked` — заблокированные домены
+- `geosite:ru-available-only-inside` — доступные только в РФ
+
+Ссылки для скачивания:
+- geoip.dat: `https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat`
+- geosite.dat: `https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat`
+
+### Инструменты диагностики
+
+- **tspu-checker** (`github.com/ku78/tspu-checker`) — диагностика блокировок из CLI
+- **rkn-block-checker** (`github.com/MayersScott/rkn-block-checker`) — проверка блокировок
+- **vpn-configs-for-russia** (`github.com/igareck/vpn-configs-for-russia`) — готовые конфиги
 
 ---
 
 ## Приоритеты реализации
 
-| # | Метод | Сложность | Эффективность | Приоритет |
-|---|-------|-----------|---------------|-----------|
-| 1 | Reality+TCP (текущее) | ✅ Готово | Высокая | — |
-| 2 | Reality+WS | Средняя | Средняя+ | 🔄 В работе |
-| 3 | XHTTP | Средняя | Очень высокая | ⭐ Следующий |
-| 4 | CDN Relay | Низкая | Высокая | 📋 Рассмотреть |
-| 5 | TLS Fragment | Низкая | Средняя | 📋 Рассмотреть |
-| 6 | sing-box | Высокая | Очень высокая | 📋 Далёкое будущее |
+| # | Задача | Сложность | Срочность |
+|---|--------|-----------|-----------|
+| 1 | Купить российский VPS (Timeweb/Yandex) | Низкая | 🔴 Высокая |
+| 2 | Настроить Xray+Reality на российском VPS | Средняя | 🔴 Высокая |
+| 3 | Настроить geo-маршрутизацию | Средняя | 🟡 Средняя |
+| 4 | Интегрировать в izinet | Средняя | 🟡 Средняя |
+| 5 | Yandex Functions как запасной вариант | Низкая | 🟢 Низкая |
 
 ---
 
-## Что делать прямо сейчас
+## Ключевые ссылки
 
-### Фаза 1: Reality+XHTTP (порт 2088) ✅
-1. Inbound создан через панель 3x-ui
-2. Нужно: протестировать подключение
-3. Нужно: добавить WS ссылку в подписку пользователей
-4. Протестировать подключение через Hiddify/NekoBox
-
-### Фаза 2: Обновить 3x-ui до последней версии
-1. Проверить текущую версию: `docker exec x3-ui xray version`
-2. Обновить: `docker pull ghcr.io/mhsanaei/3x-ui:latest`
-3. Пересобрать: `docker compose up -d --build`
-
-### Фаза 3: Настроить XHTTP
-1. После обновления 3x-ui — проверить поддержку xhttp
-2. Настроить inbound с транспортом xhttp
-3. Сгенерировать ссылки для клиентов
-
----
-
-## Клиентские приложения
-
-| Приложение | Reality | WS | XHTTP | Ссылка |
-|-----------|---------|-----|-------|--------|
-| Hiddify | ✅ | ✅ | ❓ | https://hiddify.com |
-| NekoBox | ✅ | ✅ | ❓ | https://github.com/MatsuriDayo/NekoBoxForAndroid |
-| V2Ray | ✅ | ✅ | ❓ | https://github.com/XTLS/v2ray-core |
-| Streisand | ✅ | ✅ | ❓ | https://github.com/nickspaargaren/no-google |
-
----
-
-## Мониторинг блокировок
-
-- https://github.com/nickspaargaren/no-google — список блокировок
-- https://xray-project.github.io/china_detection/ — тестирование DPI
-- Telegram: @projectXray — последние новости о блокировках
+- [Habr: Как работают ТСПУ и DPI](https://habr.com/ru/articles/992232/)
+- [Habr: Белые списки — 6 способов обхода](https://habr.com/ru/articles/1027276/)
+- [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat) — geo файлы
+- [ku78/tspu-checker](https://github.com/ku78/tspu-checker) — диагностика
+- [openlibrecommunity/twl](https://github.com/openlibrecommunity/twl) — сканирование БС
+- [igareck/vpn-configs-for-russia](https://github.com/igareck/vpn-configs-for-russia) — готовые конфиги
