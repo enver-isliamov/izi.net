@@ -41,8 +41,51 @@ else:
     print('  Сломанных inbound\'ов нет')
 " 2>/dev/null
 
-# 2. Проверяем есть ли уже Reality+XHTTP inbound
-echo "[2/5] Проверка существующих inbound'ов..."
+# 2. Исправляем gRPC inbound — SNI microsoft.com -> cloudflare.com, включаем
+echo "[2/5] Исправление gRPC inbound (SNI + enable)..."
+python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('$DB_PATH')
+c = conn.cursor()
+c.execute('SELECT id, port, remark, enable, stream_settings FROM inbounds')
+fixed = 0
+for row in c.fetchall():
+    iid, port, remark, enable, ss_raw = row
+    ss = json.loads(ss_raw or '{}')
+    net = ss.get('network', 'tcp')
+    sec = ss.get('security', 'none')
+    rs = ss.get('realitySettings', {})
+    settings = rs.get('settings', rs)
+    snis = settings.get('serverNames', rs.get('serverNames', []))
+    # Fix gRPC inbound with microsoft.com SNI
+    if net == 'grpc' and sec == 'reality':
+        needs_fix = False
+        new_snis = []
+        for s in snis:
+            if 'microsoft.com' in s:
+                needs_fix = True
+                new_snis.append(s.replace('microsoft.com', 'cloudflare.com'))
+            else:
+                new_snis.append(s)
+        if not new_snis:
+            new_snis = ['www.cloudflare.com']
+        if needs_fix or not enable:
+            settings['serverNames'] = new_snis
+            rs['settings'] = settings
+            ss['realitySettings'] = rs
+            new_enable = 1
+            c.execute('UPDATE inbounds SET enable=?, stream_settings=? WHERE id=?',
+                     (new_enable, json.dumps(ss), iid))
+            print(f'  ✅ Inbound {iid} ({remark}): SNI={new_snis}, enable={new_enable}')
+            fixed += 1
+conn.commit()
+conn.close()
+if not fixed:
+    print('  gRPC inbound не требует исправлений')
+" 2>/dev/null
+
+# 3. Проверяем есть ли уже Reality+XHTTP inbound
+echo "[3/5] Проверка существующих inbound'ов..."
 EXISTING=$(python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('$DB_PATH')
@@ -68,8 +111,8 @@ if echo "$EXISTING" | grep -q "EXISTS"; then
 fi
 echo "  Reality+XHTTP inbound не найден — создаю"
 
-# 3. Читаем Reality ключи из inbound 443
-echo "[3/5] Чтение Reality ключей из inbound 443..."
+# 4. Читаем Reality ключи из inbound 443
+echo "[4/5] Чтение Reality ключей из inbound 443..."
 KEYS=$(python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('$DB_PATH')
@@ -107,8 +150,8 @@ if [[ "$PRIV" == ERROR* ]] || [ -z "$PRIV" ]; then
 fi
 echo "  Public Key: ${PUB:0:25}..."
 
-# 4. Создаём inbound Reality+XHTTP через SQLite
-echo "[4/5] Создание inbound Reality+XHTTP на порту $XHTTP_PORT..."
+# 5. Создаём inbound Reality+XHTTP через SQLite
+echo "[5/5] Создание inbound Reality+XHTTP на порту $XHTTP_PORT..."
 python3 -c "
 import sqlite3, json
 
@@ -169,8 +212,8 @@ conn.close()
 print(f'OK id={new_id}')
 "
 
-# 5. Перезапуск x3-ui
-echo "[5/5] Перезапуск x3-ui..."
+# 6. Перезапуск x3-ui
+echo "[6/6] Перезапуск x3-ui..."
 docker restart x3-ui
 sleep 10
 
