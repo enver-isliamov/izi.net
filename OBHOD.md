@@ -27,26 +27,7 @@
 
 ---
 
-### 2. Reality+WebSocket (В РАЗРАБОТКЕ) 🔄
-
-**Что это:** То же Reality, но трафик идёт через WebSocket. Выглядит как обычное WS-соединение (как чат на сайте).
-
-**Преимущество:** WS-трафик выглядит более "обычно" чем raw TCP. DPI может не различать VPN и реальный WS.
-
-**Статус:** Inbound создан через SQLite на порту 2087. Нужно протестировать.
-
-**Настройка в X-UI:**
-```
-Network: ws
-Security: reality
-Path: /ws
-Host: www.cloudflare.com
-Dest: www.cloudflare.com:443
-```
-
----
-
-### 3. XHTTP (НАДЕЖДА) ⭐
+### 2. Reality+XHTTP (СЛЕДУЮЩИЙ ШАГ) ⭐
 
 **Что это:** Новый транспорт в Xray-core v26+, разработан специально для обхода DPI. Объединяет Reality с HTTP-маскировкой.
 
@@ -54,12 +35,13 @@ Dest: www.cloudflare.com:443
 - Трафик выглядит как обычный HTTP/HTTPS
 - Поддерживает разделение upload/download (auto mode)
 - Разработан автором Xray (RPRX) как "Beyond REALITY"
+- **Reality поддерживает XHTTP** (в отличие от WebSocket)
 
 **Статус:** Дискуссия с 341 ⭐ на GitHub. Активно обсуждается. Требует Xray-core v26+.
 
 **Как внедрить:**
 1. Обновить 3x-ui до версии с поддержкой Xray v26+
-2. Настроить inbound с транспортом xhttp
+2. Настроить inbound с транспортом xhttp + security=reality
 3. Клиенты (Hiddify/NekoBox) должны поддерживать xhttp
 
 **Ссылки:**
@@ -68,7 +50,7 @@ Dest: www.cloudflare.com:443
 
 ---
 
-### 4. TLS Fragment (ФРАГМЕНТАЦИЯ)
+### 3. TLS Fragment (ФРАГМЕНТАЦИЯ)
 
 **Что это:** Разбиение TLS ClientHello на мелкие части. DPI не может собрать полный пакет для анализа.
 

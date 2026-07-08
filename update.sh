@@ -42,10 +42,6 @@ python3 server/src/scripts/fix_reality_inbound.py || echo "⚠️ Reality fix sk
 echo "🔧 Патчинг routing rules..."
 python3 server/src/scripts/patch_xray_routing.py || echo "⚠️ Routing patch skipped"
 
-# 4b. Создание Reality+WebSocket inbound (если ещё нет)
-echo "🔌 Проверяю Reality+WebSocket inbound..."
-bash add_reality_ws.sh || echo "⚠️ Reality+WS setup skipped"
-
 # 4c. Скачивание geo файлов — ОТКЛЮЧЕНО (volume mount убивает Xray binary)
 # echo "📥 Скачиваю geo файлы (geosite.dat, geoip.dat)..."
 # bash download_geo.sh || echo "⚠️ Geo download skipped"
