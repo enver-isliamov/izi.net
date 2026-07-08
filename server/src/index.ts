@@ -141,7 +141,7 @@ async function regenerateAllVlessLinks() {
               const realityInbounds = inbounds.filter((ib: any) => {
                 try {
                   const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                  return ss.security === 'reality' && ib.enable !== false && ib.port === 443;
+                  return ss.security === 'reality' && ib.enable !== false;
                 } catch { return false; }
               });
               for (const ri of realityInbounds) {

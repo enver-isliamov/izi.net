@@ -101,16 +101,19 @@ router.get('/sub/:id', async (req, res) => {
             for (const server of activeServers) {
               try {
                 const { instance, server: serverData } = await getXuiForServer(server.id);
-                let effectiveInboundId = serverData.inbound_id || 0;
-                if (!effectiveInboundId || effectiveInboundId <= 0) {
-                  const inbounds = await instance.getInbounds();
-                  const ri = inbounds.find((ib: any) => {
-                    try { const ss = JSON.parse(ib.streamSettings || '{}'); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
-                  });
-                  if (ri) effectiveInboundId = ri.id;
+                const inbounds = await instance.getInbounds();
+                const realityInbounds = inbounds.filter((ib: any) => {
+                  try {
+                    const ss = JSON.parse(ib.streamSettings || '{}');
+                    return ss.security === 'reality' && ib.enable !== false;
+                  } catch { return false; }
+                });
+                for (const ri of realityInbounds) {
+                  try {
+                    const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                    if (rawLink) lines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                  } catch (e) {}
                 }
-                const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
-                if (rawLink) lines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
               } catch (e) {}
             }
             if (lines.length > 0) { device.config = lines.join('\n'); changed = true; }

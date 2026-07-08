@@ -354,7 +354,7 @@ export class XUIService {
           transportParams = `type=ws&path=${encodeURIComponent(wsPath)}&host=${encodeURIComponent(wsHost)}`;
         } else if (network === 'xhttp') {
           const xhttpPath = streamSettings.xhttpSettings?.path || '/xhttp';
-          const xhttpHost = streamSettings.xhttpSettings?.host || sni;
+          const xhttpHost = streamSettings.xhttpSettings?.host || sni || 'www.cloudflare.com';
           transportParams = `type=xhttp&path=${encodeURIComponent(xhttpPath)}&host=${encodeURIComponent(xhttpHost)}`;
         } else if (network === 'grpc') {
           const grpcService = streamSettings.grpcSettings?.serviceName || '';
