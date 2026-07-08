@@ -17,7 +17,7 @@ python3 << 'PYEOF'
 import sqlite3, json, sys
 
 DB = "/opt/izinet/xui-db/x-ui.db"
-XHTTP_PORT = 2087
+XHTTP_PORT = 2088
 
 conn = sqlite3.connect(DB)
 c = conn.cursor()

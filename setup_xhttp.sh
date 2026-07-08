@@ -6,7 +6,7 @@
 set -e
 
 DB_PATH="/opt/izinet/xui-db/x-ui.db"
-XHTTP_PORT=2087
+XHTTP_PORT=2088
 
 echo "=== IZINET: Reality+XHTTP Setup ==="
 

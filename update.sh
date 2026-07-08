@@ -81,7 +81,7 @@ if command -v ufw &> /dev/null; then
     ufw allow 2053/tcp 2>/dev/null || true
     ufw allow 3005/tcp 2>/dev/null || true
     ufw allow 3443/tcp 2>/dev/null || true
-    ufw allow 2087/tcp 2>/dev/null || true
+    ufw allow 2088/tcp 2>/dev/null || true
     ufw allow from 172.16.0.0/12 to any port 3443 2>/dev/null || true
     ufw reload 2>/dev/null || true
     echo "✅ UFW порты обновлены."
