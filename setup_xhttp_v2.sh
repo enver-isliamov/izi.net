@@ -52,21 +52,28 @@ if not priv or not pub:
 
 print(f"  Ключи прочитаны: pub={pub[:25]}...")
 
-# Формируем stream_settings ТОЧНО как x3-ui
+# Формируем stream_settings ТОЧНО как x3-ui (сравнено с inbound 39)
 stream_settings = {
     "network": "xhttp",
     "security": "reality",
     "realitySettings": {
         "show": False,
         "xver": 0,
+        "target": "www.cloudflare.com:443",
         "dest": "www.cloudflare.com:443",
         "serverNames": ["www.cloudflare.com"],
         "privateKey": priv,
         "publicKey": pub,
         "shortIds": sids,
-        "fingerprint": "chrome",
-        "serverName": "www.cloudflare.com",
-        "spiderX": "/"
+        "minClientVer": "",
+        "maxClientVer": "",
+        "maxTimediff": 0,
+        "settings": {
+            "publicKey": pub,
+            "fingerprint": "chrome",
+            "serverName": "www.cloudflare.com",
+            "spiderX": "/"
+        }
     },
     "xhttpSettings": {
         "path": "/xhttp",
@@ -75,10 +82,11 @@ stream_settings = {
     }
 }
 
-# Формируем settings (clients)
+# Формируем settings (clients) — ТОЧНО как x3-ui
 settings = {
     "clients": [],
     "decryption": "none",
+    "encryption": "none",
     "fallbacks": [
         {"name": "izinet.online", "alpn": "", "path": "", "dest": "host.docker.internal:3443", "xver": 0},
         {"dest": "host.docker.internal:3443", "xver": 0}
