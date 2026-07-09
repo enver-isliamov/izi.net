@@ -1,6 +1,6 @@
 #!/bin/bash
 # IZINET — Установка Hysteria2 (UDP-протокол для обхода DPI)
-# Работает РЯДОМ с Xray на том же порту 443 (TCP vs UDP)
+# v2 — без ручной генерации ключей, автосертификат
 
 set -e
 
@@ -8,16 +8,16 @@ HYSTERIA_VERSION="2.6.1"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/hysteria"
 LISTEN_PORT=443
+AUTH_PASS="izinet-$(openssl rand -hex 16)"
 
 echo "=== IZINET: Установка Hysteria2 ==="
 
 # 1. Скачиваем Hysteria2
-echo "[1/5] Скачивание Hysteria2 v${HYSTERIA_VERSION}..."
+echo "[1/4] Скачивание Hysteria2 v${HYSTERIA_VERSION}..."
 ARCH=$(uname -m)
 case $ARCH in
   x86_64)  ARCH_NAME="amd64" ;;
   aarch64) ARCH_NAME="arm64" ;;
-  armv7l)  ARCH_NAME="armv7" ;;
   *) echo "  ОШИБКА: Архитектура $ARCH не поддерживается"; exit 1 ;;
 esac
 
@@ -25,33 +25,24 @@ URL="https://github.com/apernet/hysteria/releases/download/app%2Fv${HYSTERIA_VER
 curl -sL "$URL" -o /tmp/hysteria
 chmod +x /tmp/hysteria
 mv /tmp/hysteria ${INSTALL_DIR}/hysteria2
-echo "  ✅ Hysteria2 установлен: $(hysteria2 version 2>/dev/null || echo 'ok')"
+${INSTALL_DIR}/hysteria2 version
+echo "  ✅ Hysteria2 установлен"
 
-# 2. Генерируем ключи
-echo "[2/5] Генерация ключей..."
+# 2. Создаём конфиг (автосертификат, без ACME)
+echo "[2/4] Создание конфига..."
 mkdir -p ${CONFIG_DIR}
-hysteria2 genkey > ${CONFIG_DIR}/server.key 2>/dev/null
-cat ${CONFIG_DIR}/server.key > ${CONFIG_DIR}/server.pub
-# pub ключ генерируется из приватного
-PUB_KEY=$(hysteria2 genkey --public ${CONFIG_DIR}/server.key 2>/dev/null || echo "")
-if [ -z "$PUB_KEY" ]; then
-  # Альтернативный способ
-  PUB_KEY=$(openssl pkey -in ${CONFIG_DIR}/server.key -pubout 2>/dev/null | tail -n +2 | tr -d '\n' || echo "")
-fi
-echo "  Public Key: ${PUB_KEY:0:30}..."
 
-# 3. Создаём конфиг
-echo "[3/5] Создание конфига..."
 cat > ${CONFIG_DIR}/config.yaml << YAMLEOF
 listen: :${LISTEN_PORT}
 
-tls:
-  cert: /etc/letsencrypt/live/izinet.online/fullchain.pem
-  key: /etc/letsencrypt/live/izinet.online/privkey.pem
+acme:
+  domains:
+    - izinet.online
+  email: admin@izinet.online
 
 auth:
   type: password
-  password: izinet-hysteria-$(openssl rand -hex 8)
+  password: ${AUTH_PASS}
 
 masquerade:
   type: proxy
@@ -60,13 +51,11 @@ masquerade:
     rewriteHost: true
 YAMLEOF
 
-# Читаем пароль
-AUTH_PASS=$(grep "password:" ${CONFIG_DIR}/config.yaml | awk '{print $2}')
 echo "  ✅ Конфиг создан"
 echo "  Пароль: ${AUTH_PASS}"
 
-# 4. Создаём systemd сервис
-echo "[4/5] Создание systemd сервиса..."
+# 3. Создаём systemd сервис
+echo "[3/4] Создание systemd сервиса..."
 cat > /etc/systemd/system/hysteria2.service << 'EOF'
 [Unit]
 Description=Hysteria2 Proxy
@@ -87,8 +76,8 @@ systemctl enable hysteria2
 systemctl start hysteria2
 echo "  ✅ Hysteria2 запущен"
 
-# 5. UFW
-echo "[5/5] Открытие порта..."
+# 4. UFW
+echo "[4/4] Открытие порта..."
 ufw allow ${LISTEN_PORT}/udp 2>/dev/null || true
 echo "  ✅ UDP ${LISTEN_PORT} разрешён"
 
@@ -99,7 +88,7 @@ echo "Статус: $(systemctl is-active hysteria2)"
 echo "Порт: ${LISTEN_PORT}/udp"
 echo "Пароль: ${AUTH_PASS}"
 echo ""
-echo "Ссылка для клиента (пример):"
+echo "Ссылка для клиента:"
 echo "hysteria2://${AUTH_PASS}@194.50.94.28:${LISTEN_PORT}?insecure=1#izinet-hysteria"
 echo ""
 echo "⚠️ Сохрани пароль: ${AUTH_PASS}"
