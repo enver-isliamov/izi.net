@@ -4,6 +4,7 @@ import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cl
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
 import { toast } from 'sonner';
 
 interface Setting {
@@ -788,6 +789,9 @@ docker image prune -f`}
             </div>
           </div>
         </motion.div>
+
+        {/* Hysteria2 Section */}
+        <Hysteria2Section />
 
         <div className="sticky bottom-6 flex justify-end">
           <button

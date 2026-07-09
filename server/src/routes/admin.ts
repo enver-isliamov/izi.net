@@ -1170,5 +1170,71 @@ router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// --- Hysteria2 Management ---
+
+router.get('/hysteria/status', adminOnly, async (_req, res) => {
+  try {
+    const { data: pw } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
+    const password = pw?.value || '';
+    const serverIp = process.env.PUBLIC_URL?.replace(/https?:\/\//, '').split(':')[0] || '194.50.94.28';
+
+    let status = 'unknown';
+    let uptime = '';
+    try {
+      const { execSync } = require('child_process');
+      const out = execSync('systemctl is-active hysteria2 2>/dev/null || echo stopped', { timeout: 5000 }).toString().trim();
+      status = out;
+      if (out === 'active') {
+        const uptimeOut = execSync('systemctl show hysteria2 --property=ActiveEnterTimestamp 2>/dev/null || echo ""', { timeout: 5000 }).toString().trim();
+        uptime = uptimeOut.replace('ActiveEnterTimestamp=', '');
+      }
+    } catch (e) {}
+
+    const link = password ? `hysteria2://${password}@${serverIp}:443?insecure=1#izinet-hysteria` : '';
+
+    res.json({
+      ok: true,
+      status,
+      uptime,
+      password: password ? '***' + password.slice(-6) : '',
+      hasPassword: !!password,
+      link,
+      serverIp,
+      port: 443,
+      protocol: 'udp'
+    });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+router.post('/hysteria/password', adminOnly, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || password.length < 8) {
+      return res.status(400).json({ ok: false, error: 'Пароль должен быть не менее 8 символов' });
+    }
+    const { error } = await supabase.from('settings').upsert({ key: 'HYSTERIA_PASSWORD', value: password }, { onConflict: 'key' });
+    if (error) throw error;
+    res.json({ ok: true, message: 'Пароль обновлен. Перезапустите hysteria2 на сервере.' });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+router.post('/hysteria/restart', adminOnly, async (_req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    execSync('systemctl restart hysteria2', { timeout: 10000 });
+    res.json({ ok: true, message: 'Hysteria2 перезапущен' });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+router.post('/hysteria/regenerate-link', adminOnly, async (_req, res) => {
+  try {
+    const { data: pw } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
+    if (!pw?.value) return res.status(400).json({ ok: false, error: 'Hysteria2 не настроен. Сначала задайте пароль.' });
+    const serverIp = process.env.PUBLIC_URL?.replace(/https?:\/\//, '').split(':')[0] || '194.50.94.28';
+    const link = `hysteria2://${pw.value}@${serverIp}:443?insecure=1#izinet-hysteria`;
+    res.json({ ok: true, link });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 export default router;
 
