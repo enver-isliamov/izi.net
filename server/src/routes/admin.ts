@@ -1176,17 +1176,18 @@ router.get('/hysteria/status', adminOnly, async (_req, res) => {
   try {
     const { data: pw } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
     const password = pw?.value || '';
-    const serverIp = process.env.PUBLIC_URL?.replace(/https?:\/\//, '').split(':')[0] || '194.50.94.28';
+    const serverIp = '194.50.94.28';
 
     let status = 'unknown';
     let uptime = '';
     try {
       const { execSync } = require('child_process');
-      const out = execSync('systemctl is-active hysteria2 2>/dev/null || echo stopped', { timeout: 5000 }).toString().trim();
+      // Проверяем через docker exec (бэкенд в Docker, systemctl недоступен)
+      const out = execSync('docker exec x3-ui pgrep -x hysteria2 > /dev/null 2>&1 && echo active || echo stopped', { timeout: 5000 }).toString().trim();
       status = out;
       if (out === 'active') {
-        const uptimeOut = execSync('systemctl show hysteria2 --property=ActiveEnterTimestamp 2>/dev/null || echo ""', { timeout: 5000 }).toString().trim();
-        uptime = uptimeOut.replace('ActiveEnterTimestamp=', '');
+        const uptimeOut = execSync('docker exec x3-ui ps -o etime= -p $(pgrep -x hysteria2 2>/dev/null || echo 1) 2>/dev/null || echo ""', { timeout: 5000 }).toString().trim();
+        uptime = uptimeOut || 'running';
       }
     } catch (e) {}
 
