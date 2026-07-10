@@ -1,27 +1,49 @@
 #!/bin/bash
-# Исправление Hysteria2 — убираем ACME, используем self-signed
+# IZINET — Исправление Hysteria2 (self-signed сертификат)
+# Запускать если Hysteria2 не стартует из-за проблем с сертификатом
 
-CONFIG="/etc/hysteria/config.yaml"
-AUTH_PASS=$(grep "password:" $CONFIG | awk '{print $2}')
+set -e
 
-echo "=== Исправление Hysteria2 ==="
+CONFIG_DIR="/etc/hysteria"
+CONFIG="${CONFIG_DIR}/config.yaml"
+
+echo "=== IZINET: Исправление Hysteria2 ==="
+
+# Проверяем установлен ли
+if ! command -v hysteria2 &>/dev/null; then
+  echo "❌ Hysteria2 не установлен. Запусти: bash install_hysteria.sh"
+  exit 1
+fi
+
+# Сохраняем текущий пароль
+AUTH_PASS=$(grep "password:" $CONFIG 2>/dev/null | awk '{print $2}' | tr -d '"' | tr -d "'")
+if [ -z "$AUTH_PASS" ]; then
+  AUTH_PASS="izinet-$(openssl rand -hex 16)"
+  echo "⚠️ Пароль не найден, сгенерирован новый: ${AUTH_PASS}"
+fi
 
 # 1. Останавливаем сервис
-echo "[1/3] Остановка hysteria2..."
-systemctl stop hysteria2
+echo "[1/4] Остановка hysteria2..."
+systemctl stop hysteria2 2>/dev/null || true
 
-# 2. Перезаписываем конфиг без ACME
-echo "[2/3] Обновление конфига..."
+# 2. Генерируем сертификат
+echo "[2/4] Генерация сертификата..."
+mkdir -p ${CONFIG_DIR}
+openssl req -x509 -newkey rsa:2048 -keyout ${CONFIG_DIR}/key.pem -out ${CONFIG_DIR}/cert.pem -days 3650 -nodes -subj "/CN=izinet.online" 2>/dev/null
+echo "  ✅ Сертификат создан"
+
+# 3. Перезаписываем конфиг
+echo "[3/4] Обновление конфига..."
 cat > ${CONFIG} << YAMLEOF
 listen: :443
+
+tls:
+  cert: ${CONFIG_DIR}/cert.pem
+  key: ${CONFIG_DIR}/key.pem
 
 auth:
   type: password
   password: ${AUTH_PASS}
-
-tls:
-  cert: /etc/hysteria/cert.pem
-  key: /etc/hysteria/key.pem
 
 masquerade:
   type: proxy
@@ -30,18 +52,26 @@ masquerade:
     rewriteHost: true
 YAMLEOF
 
-# Генерируем самоподписанный сертификат
-echo "  Генерация самоподписанного сертификата..."
-openssl req -x509 -newkey rsa:2048 -keyout /etc/hysteria/key.pem -out /etc/hysteria/cert.pem -days 3650 -nodes -subj "/CN=izinet.online" 2>/dev/null
-echo "  ✅ Сертификат создан"
+echo "  ✅ Конфиг обновлен"
 
-# 3. Запускаем
-echo "[3/3] Запуск hysteria2..."
+# 4. Запускаем
+echo "[4/4] Запуск hysteria2..."
+systemctl daemon-reload
+systemctl enable hysteria2 2>/dev/null || true
 systemctl start hysteria2
 sleep 2
-systemctl status hysteria2 --no-pager | head -5
 
+STATUS=$(systemctl is-active hysteria2)
 echo ""
-echo "=== Готово ==="
+echo "=== ГОТОВО ==="
+echo "Статус: ${STATUS}"
+echo "Порт: 443/udp"
 echo "Пароль: ${AUTH_PASS}"
+echo ""
 echo "Ссылка: hysteria2://${AUTH_PASS}@194.50.94.28:443?insecure=1#izinet-hysteria"
+
+if [ "$STATUS" != "active" ]; then
+  echo ""
+  echo "❌ Hysteria2 не запустился. Логи:"
+  journalctl -u hysteria2 -n 20 --no-pager
+fi

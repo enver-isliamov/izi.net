@@ -1176,20 +1176,22 @@ router.get('/hysteria/status', adminOnly, async (_req, res) => {
   try {
     const { data: pw } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
     const password = pw?.value || '';
-    const serverIp = '194.50.94.28';
+    const serverIp = process.env.PUBLIC_URL?.replace(/https?:\/\//, '').split(':')[0] || '194.50.94.28';
 
     let status = 'unknown';
     let uptime = '';
     try {
       const { execSync } = require('child_process');
-      // Проверяем через docker exec (бэкенд в Docker, systemctl недоступен)
-      const out = execSync('docker exec x3-ui pgrep -x hysteria2 > /dev/null 2>&1 && echo active || echo stopped', { timeout: 5000 }).toString().trim();
-      status = out;
-      if (out === 'active') {
-        const uptimeOut = execSync('docker exec x3-ui ps -o etime= -p $(pgrep -x hysteria2 2>/dev/null || echo 1) 2>/dev/null || echo ""', { timeout: 5000 }).toString().trim();
+      // Проверяем через nsenter на хосте (Docker socket доступен)
+      const out = execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl is-active hysteria2 2>/dev/null || echo stopped', { timeout: 15000 }).toString().trim();
+      status = out === 'active' ? 'active' : 'stopped';
+      if (status === 'active') {
+        const uptimeOut = execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl show hysteria2 --property=ActiveEnterTimestamp 2>/dev/null | cut -d= -f2 || echo ""', { timeout: 15000 }).toString().trim();
         uptime = uptimeOut || 'running';
       }
-    } catch (e) {}
+    } catch (e) {
+      status = 'unknown';
+    }
 
     const link = password ? `hysteria2://${password}@${serverIp}:443?insecure=1#izinet-hysteria` : '';
 
@@ -1222,7 +1224,8 @@ router.post('/hysteria/password', adminOnly, async (req, res) => {
 router.post('/hysteria/restart', adminOnly, async (_req, res) => {
   try {
     const { execSync } = require('child_process');
-    execSync('systemctl restart hysteria2', { timeout: 10000 });
+    // Перезапуск через nsenter на хосте (Docker socket доступен)
+    execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl restart hysteria2', { timeout: 30000 });
     res.json({ ok: true, message: 'Hysteria2 перезапущен' });
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
