@@ -206,12 +206,21 @@ async function handleSubscriptionBuy(req: any, res: any) {
           subscriptionExpiresAt = new Date(renewalBase);
           subscriptionExpiresAt.setDate(subscriptionExpiresAt.getDate() + plan.days);
           devices = devices.map((device) => ({ ...device, expiresAt: subscriptionExpiresAt.toISOString() }));
-          
-          // DATA-002: Reset traffic on renewal
+
+          // DATA-002: Reset traffic + sync expiry to panel on renewal
+          const renewalMs = subscriptionExpiresAt.getTime();
           for (const server of activeServers) {
-            const { instance } = await getXuiForServer(server.id);
-            for (const dev of devices) {
-              await instance.resetClientTraffic(inboundId, dev.email).catch(() => {});
+            try {
+              const { instance, server: serverData } = await getXuiForServer(server.id);
+              const effectiveInboundId = serverData.inbound_id || inboundId;
+              for (const dev of devices) {
+                await instance.resetClientTraffic(effectiveInboundId, dev.email).catch(() => {});
+                if (dev.uuid && dev.email) {
+                  await instance.updateClient(dev.email, dev.uuid, effectiveInboundId, renewalMs, 0).catch(() => {});
+                }
+              }
+            } catch (e: any) {
+              console.warn(`⚠️ [User] Renewal sync failed for ${server.name}: ${e.message}`);
             }
           }
         }
@@ -248,7 +257,10 @@ async function handleSubscriptionBuy(req: any, res: any) {
           }));
         }
 
-        const { error: insertError } = await supabase.from('subscriptions').insert({
+        // SUB-001: в БД уникальный индекс на user_id (subscriptions_user_id_key) —
+        // после истечения подписки новая строка даёт duplicate key. Используем upsert:
+        // для нового пользователя — INSERT, для существующей (в т.ч. expired) — UPDATE.
+        const { error: insertError } = await supabase.from('subscriptions').upsert({
           user_id: userId,
           status: 'active',
           plan_type: planId,
@@ -258,7 +270,7 @@ async function handleSubscriptionBuy(req: any, res: any) {
           traffic_used_mb: 0,
           device_limit: globalDeviceLimit,
           server_id: activeServers[0].id
-        });
+        }, { onConflict: 'user_id' });
         if (insertError) throw insertError;
       }
 
@@ -382,19 +394,68 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
   }
 });
 
-// 🎁 Активация промокода
+// 🎁 Активация промокода (TRIAL-001: заглушка не создавала подписку — теперь создаёт)
 router.post('/promocode/apply', authenticateUser, async (req: any, res) => {
   const { code } = req.body;
   const userId = req.user.id;
-  
+
   try {
-    // Временная заглушка для промокода
-    if (code?.toUpperCase() === 'TRIAL24') {
-      res.json({ success: true, message: 'Промокод активирован: +24 часа доступа!' });
-    } else {
-      res.status(400).json({ error: 'Неверный или просроченный промокод' });
+    if (code?.toUpperCase() !== 'TRIAL24') {
+      return res.status(400).json({ error: 'Неверный или просроченный промокод' });
     }
+
+    // Уже есть активная подписка? Не перезаписываем.
+    const { data: existingSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existingSub && existingSub.status === 'active' && new Date(existingSub.expires_at).getTime() > Date.now()) {
+      return res.json({ success: true, message: 'У вас уже есть активная подписка' });
+    }
+
+    // Здоровые серверы (health-gate как в buy)
+    const { data: activeServers } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true)
+      .eq('health_status', 'ok');
+    if (!activeServers || activeServers.length === 0) {
+      return res.status(500).json({ error: 'Нет здоровых серверов для подключения. Попробуйте позже.' });
+    }
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const deviceLimit = clampInt(await getSystemSetting('DEVICE_LIMIT', '2'), 1, 20);
+
+    // Провижиним устройство на 3x-ui (как в buy)
+    const device = await provisionDeviceOnServers({
+      userId,
+      activeServers,
+      inboundId: 0,
+      expiresAt,
+      trafficLimitMb: 102400,
+      serverType: 'WIFI',
+      label: 'Основное устройство',
+      id: 'primary'
+    });
+
+    // SUB-001: upsert по user_id — не падаем на duplicate key после истечения
+    const { error: subError } = await supabase.from('subscriptions').upsert({
+      user_id: userId,
+      status: 'active',
+      plan_type: 'trial',
+      expires_at: expiresAt.toISOString(),
+      v2ray_config: JSON.stringify([device]),
+      traffic_limit_mb: 102400,
+      traffic_used_mb: 0,
+      device_limit: deviceLimit,
+      server_id: activeServers[0].id
+    }, { onConflict: 'user_id' });
+    if (subError) throw subError;
+
+    res.json({ success: true, message: 'Промокод активирован: +24 часа доступа!' });
   } catch (err: any) {
+    console.error('Promocode activation failed:', err);
     res.status(500).json({ error: err.message });
   }
 });

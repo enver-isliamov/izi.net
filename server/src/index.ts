@@ -20,6 +20,7 @@ import adminRoutes from './routes/admin';
 import paymentRoutes from './routes/payments';
 import userRoutes from './routes/user';
 import configRoutes from './routes/config';
+import { authenticateUser } from './utils/auth';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -27,6 +28,11 @@ const PORT = parseInt(process.env.PORT || '3005');
 
 app.use(cors());
 app.use(express.json());
+
+// --- HEALTHCHECK (без auth, без rate limit) ---
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
 
 // --- МАРШРУТЫ ---
 
@@ -67,7 +73,20 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/pay', paymentRoutes);
 
 // --- УНИВЕРСАЛЬНЫЙ SUPABASE PROXY ---
-app.all('/api/supabase-proxy/*', async (req, res) => {
+// SEC-001: анонимный доступ к прокси = полный доступ ко всей БД с service-ключом
+// (включая ключи Enot.io). Открыты только pre-auth эндпоинты: token (вход/refresh),
+// signup, recover. Всё остальное — только для авторизованных пользователей.
+app.all('/api/supabase-proxy/*', (req: any, res: any, next: any) => {
+  const targetPath = req.params[0] || '';
+  if (new RegExp('^auth/v1/(token|signup|recover)').test(targetPath)) return next();
+  // B2: вход через Telegram вставляет токен в telegram_linking_tokens ДО авторизации
+  // (Login.tsx, user_id=null). Разрешаем анонимно только POST (insert);
+  // чтение/изменение токенов — только авторизованным (прокси ходит с service-ключом).
+  if (req.method === 'POST' && new RegExp('^rest/v1/telegram_linking_tokens').test(targetPath)) return next();
+  return authenticateUser(req, res, next);
+}, supabaseProxyHandler);
+
+async function supabaseProxyHandler(req: any, res: any) {
   try {
     const targetPath = req.params[0]; // Например: auth/v1/token или rest/v1/users
     const supabaseUrl = (process.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
@@ -99,7 +118,7 @@ app.all('/api/supabase-proxy/*', async (req, res) => {
     console.error('❌ Proxy error:', err.message);
     res.status(500).json({ error: err.message });
   }
-});
+}
 
 const distPath = path.join(process.cwd(), 'dist');
 app.use(express.static(distPath));
@@ -136,7 +155,7 @@ async function regenerateAllVlessLinks() {
               const realityInbounds = inbounds.filter((ib: any) => {
                 try {
                   const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                  return ss.security === 'reality' && ib.enable !== false && ib.port === 443;
+                  return ss.security === 'reality' && ib.enable !== false;
                 } catch { return false; }
               });
               for (const ri of realityInbounds) {

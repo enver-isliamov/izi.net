@@ -1,93 +1,189 @@
-root@VM-846997:/opt/izinet# cd /opt/izinet && bash diagnose_vpn.sh
-══════════════════════════════════════════════════
-  IZINET VPN — ПОЛНАЯ ДИАГНОСТИКА
-  Sun Jun 28 12:09:51 UTC 2026
-══════════════════════════════════════════════════
+root@VM-846997:/opt/izinet# cd /opt/izinet && git pull origin main && bash update.sh
+remote: Enumerating objects: 8, done.
+remote: Counting objects: 100% (8/8), done.
+remote: Compressing objects: 100% (4/4), done.
+remote: Total 6 (delta 2), reused 6 (delta 2), pack-reused 0 (from 0)
+Unpacking objects: 100% (6/6), 5.58 KiB | 150.00 KiB/s, done.
+From https://github.com/enver-isliamov/izi.net
+ * branch            main       -> FETCH_HEAD
+   9c65ecf..6305502  main       -> origin/main
+Updating 9c65ecf..6305502
+Fast-forward
+ OBHOD.md          | 172 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ add_reality_ws.sh | 324 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 2 files changed, 289 insertions(+), 207 deletions(-)
+ create mode 100644 OBHOD.md
+🔄 Начинаю процесс принудительного обновления...
+📡 Скачиваю свежий код из ветки main...
+From https://github.com/enver-isliamov/izi.net
+ * branch            main       -> FETCH_HEAD
+HEAD is now at 6305502 feat: DPI bypass plan (OBHOD.md) + Reality+WS via SQLite
+🧹 Очищаю .env от невидимых символов...
+✅ .env очищен.
+🐳 Пересобираю и запускаю контейнеры...
+[+] down 3/3
+ ✔ Container izinet-app      Removed                                                                                                                                                                                                                                                                                     1.6s
+ ✔ Container x3-ui           Removed                                                                                                                                                                                                                                                                                     1.1s
+ ✔ Network izinet_izinet-net Removed                                                                                                                                                                                                                                                                                     0.3s
+[+] Building 205.4s (16/16) FINISHED                                                                                                                                                                                                                                                                                         
+ => [internal] load local bake definitions                                                                                                                                                                                                                                                                              0.0s
+ => => reading from stdin 842B                                                                                                                                                                                                                                                                                          0.0s
+ => [internal] load build definition from Dockerfile                                                                                                                                                                                                                                                                    0.1s
+ => => transferring dockerfile: 1.20kB                                                                                                                                                                                                                                                                                  0.0s
+ => [internal] load metadata for docker.io/library/node:20-alpine                                                                                                                                                                                                                                                       1.1s
+ => [internal] load .dockerignore                                                                                                                                                                                                                                                                                       0.2s
+ => => transferring context: 98B                                                                                                                                                                                                                                                                                        0.0s
+ => [internal] load build context                                                                                                                                                                                                                                                                                       0.9s
+ => => transferring context: 3.53MB                                                                                                                                                                                                                                                                                     0.8s
+ => [builder 1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                                                                                                                                                                         0.2s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                                                                                                                                                                                 0.2s
+ => CACHED [builder 2/7] WORKDIR /app                                                                                                                                                                                                                                                                                   0.0s
+ => CACHED [builder 3/7] RUN apk add --no-cache python3 make g++                                                                                                                                                                                                                                                        0.0s
+ => CACHED [builder 4/7] COPY package.json package-lock.json* ./                                                                                                                                                                                                                                                        0.0s
+ => CACHED [builder 5/7] RUN npm install                                                                                                                                                                                                                                                                                0.0s
+ => [builder 6/7] COPY . .                                                                                                                                                                                                                                                                                              3.0s
+ => [builder 7/7] RUN npm run build                                                                                                                                                                                                                                                                                    80.0s
+ => CACHED [stage-1 3/4] RUN apk add --no-cache docker-cli                                                                                                                                                                                                                                                              0.0s 
+ => [stage-1 4/4] COPY --from=builder /app ./                                                                                                                                                                                                                                                                           7.2s 
+ => exporting to image                                                                                                                                                                                                                                                                                                 76.9s 
+ => => exporting layers                                                                                                                                                                                                                                                                                                68.5s 
+ => => exporting manifest sha256:75372e8b44aa2547760350df860bdcdeb01a42c377305a4dbde28dbebfb9ae70                                                                                                                                                                                                                       0.0s 
+ => => exporting config sha256:e952ae1c080027a01489fa5cdff2dc236b193ed1b5c5e540db65e7f0ff16f801                                                                                                                                                                                                                         0.0s 
+ => => exporting attestation manifest sha256:a88188a0a86e8dcd2dac240c89d2141a130f03594799bd79dd26e2f907c9e28b                                                                                                                                                                                                           0.1s
+ => => exporting manifest list sha256:7636c3a6bae83bed8d896e5692f35850270e3066ae6ca8f828ff2112fdcad027                                                                                                                                                                                                                  0.0s
+ => => naming to docker.io/library/izinet-izinet-app:latest                                                                                                                                                                                                                                                             0.0s
+ => => unpacking to docker.io/library/izinet-izinet-app:latest                                                                                                                                                                                                                                                          8.0s
+ => resolving provenance for metadata file                                                                                                                                                                                                                                                                              0.0s
+[+] up 4/4
+ ✔ Image izinet-izinet-app   Built                                                                                                                                                                                                                                                                                     206.0s
+ ✔ Network izinet_izinet-net Created                                                                                                                                                                                                                                                                                     0.1s
+ ✔ Container x3-ui           Started                                                                                                                                                                                                                                                                                     3.0s
+ ✔ Container izinet-app      Started                                                                                                                                                                                                                                                                                     3.2s
+🔧 Запускаю xui_bootstrap.py...
+xui-bootstrap: repaired persistent 3x-ui DB (created_inbounds=0, updated_inbounds=0, broken_disabled=0, xray_template=0)
+🔧 Исправляю Reality inbound (serverNames, dest)...
+==================================================
+  IZINET — Fix Reality inbound (auto-detect port 443)
+==================================================
+📋 Found Reality inbound ID=39
+✅ Inbound 39 already correct
 
-══ 1. DOCKER ══
-NAMES        STATUS                   PORTS
-izinet-app   Up 5 minutes             0.0.0.0:3005->3005/tcp, [::]:3005->3005/tcp
-x3-ui        Up 5 minutes (healthy)   0.0.0.0:443->443/tcp, [::]:443->443/tcp, 0.0.0.0:2053->2053/tcp, [::]:2053->2053/tcp, 0.0.0.0:8443->8443/tcp, [::]:8443->8443/tcp
+Restart x3-ui to apply: docker restart x3-ui
+🔧 Патчинг routing rules...
+==================================================
+  IZINET — Патчинг xrayTemplateConfig routing
+==================================================
+📋 Текущий шаблон: 341 chars
+✅ xrayTemplateConfig записан в SQLite (1178 chars)
+✅ Routing rules обновлены: 4 правил
+   - api (управление панелью)
+   - ru direct (рунет)
+   - ads block (реклама)
+   - ru+private ip direct
+⚠️ Не удалось перезапустить Xray через API: HTTP Error 403: Forbidden
+🔌 Проверяю Reality+WebSocket inbound...
+=== IZINET: Reality+WebSocket Setup ===
+[1/4] Проверка существующих inbound'ов...
+  Reality+WS inbound не найден — создаю
+[2/4] Чтение Reality ключей из inbound 443...
+  Public Key: JT_QaiwfBgK3yUCbV41OaAguV...
+[3/4] Создание inbound Reality+WS на порту 2087...
+OK id=44
+[4/4] Перезапуск x3-ui...
+x3-ui
 
-══ 2. UFW ══
-Status: inactive
+=== ПРОВЕРКА ===
+  ID=39 port=443 network=tcp security=reality remark=vpn-main enable=1
+  ID=44 port=2087 network=ws security=reality remark=izinet-reality-ws enable=1
 
-══ 3. NGINX ══
-LISTEN 0      511          0.0.0.0:3443      0.0.0.0:*    users:(("nginx",pid=29837,fd=7),("nginx",pid=29836,fd=7),("nginx",pid=29835,fd=7))
-OK: Nginx слушает 3443
-OK: Сайт доступен
+=== ГОТОВО ===
+Reality+WS inbound создан на порту 2087
+Ссылка для клиента (пример):
+vless://UUID@vpn.izinet.online:2087?type=ws&path=%2Fws&host=www.cloudflare.com&encryption=none&security=reality&sni=www.cloudflare.com&pbk=JT_QaiwfBgK3yUCbV41OaAguVGxixtr9Je5JBaQuqV4&fp=chrome&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#OneD-WS
+🔄 Перезапускаю x3-ui...
+x3-ui
+🔧 Патчинг routing rules в xray config...
+==================================================
+  IZINET — Patch Xray config.json routing
+==================================================
+✅ Patched /app/bin/config.json
+   domainStrategy: IPIfNonMatch
+   rules: 4 (api, ads-block, ru-direct, ip-direct)
 
-══ 4. VLESS ССЫЛКА ДЛЯ ХАДИФАЙ ══
-Тестирую subscription endpoint...
-  Сервер: vpn.izinet.online
-  Имя: OneD
-  UUID: be5e558e-f35b-470c-ab9a-5eb708479ecc
-  pbk: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
-  sid: 79b27cf7799d5b4c
-  sni: www.microsoft.com
-  fp:  randomized
-  flow:xtls-rprx-vision
+Restart Xray to apply: kill -USR1 $(pgrep xray) or restart x3-ui
+🔄 Финальный перезапуск x3-ui...
+x3-ui
+⏳ Жду x3-ui (20 сек)...
+🌐 Проверяю Nginx...
+✅ Nginx запущен.
+🔥 Проверяю UFW порты...
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Skipping adding existing rule (v6)
+Skipping adding existing rule
+Firewall not enabled (skipping reload)
+✅ UFW порты обновлены.
+🔗 VPN-ссылки будут перегенерированы автоматически при старте backend...
+⏳ Жду 5 секунд для финализации...
+📊 Статус контейнеров:
+NAMES        STATUS                    PORTS
+izinet-app   Up About a minute         0.0.0.0:3005->3005/tcp, [::]:3005->3005/tcp
+x3-ui        Up 28 seconds (healthy)   0.0.0.0:443->443/tcp, [::]:443->443/tcp, 0.0.0.0:2053->2053/tcp, [::]:2053->2053/tcp, 0.0.0.0:2087->2087/tcp, [::]:2087->2087/tcp
 
-
-══ 5. КЛЮЧИ В ПАНЕЛИ X3-UI ══
-Inbound ID: 39
-Port: 443  Security: reality
-Public Key: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
-Fingerprint: randomized
-ServerNames: 
-ShortIDs: ['79b27cf7799d5b4c', '0248', '36b963e7713fa1', '34d587', 'ff', 'd522af961e', '7f82dc32', '63e6a9c2ccd3']
-Target (dest): host.docker.internal:3443
-SpiderX: /
-Clients: 36
-  email=Oja uuid=1068ae60-ce58-45dd-8b5f-3159dd7e3452 flow=xtls-rprx-vision
-  email=Lenika uuid=04b8bed9-61aa-4d24-adf7-8475ccaca1af flow=?
-  email=Madre uuid=a5ff39c8-9bc9-4d89-827b-d5ba0ff10865 flow=xtls-rprx-vision
-  email=Bob uuid=971dca12-af60-4f9e-8323-6bcdb53169eb flow=?
-  email=Dom46 uuid=1f6c9a4d-9d0b-43d0-8f7d-13c4fea0503d flow=xtls-rprx-vision
-  ... и ещё 31
-
-══ 6. СРАВНЕНИЕ pbk ИЗ ССЫЛКИ С ПАНЕЛЬЮ ══
-VLESS pbk: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
-PANEL pbk: CXL0o8BEC7wz-TIuA7w-QBbJIadSsb9xL7G6UB410Xw
-✅ pbk СОВПАДАЮТ
-
-══ 7. UUID ЕСТЬ В ПАНЕЛИ? ══
-UUID из ссылки: be5e558e-f35b-470c-ab9a-5eb708479ecc
-✅ UUID найден в inbound 39 (port 443) email=user_ee886_3ss_reg
-
-══ 8. XRAY RUNTIME CONFIG ══
-DNS: ['localhost', 'https://dns.adguard-dns.com/dns-query', 'https://dns.yandex.ru/dns-query', '94.140.14.14', '77.88.8.8', '9.9.9.9']
-Outbounds (2):
-  tag=direct protocol=freedom
-  tag=blocked protocol=blackhole
-Routing rules (1):
-  inboundTag=['api'] outboundTag=api domain=
-
-══ 9. XRAY ОШИБКИ ══
-syslog backend disabled: Unix syslog delivery error
-WARNING - Obtain Failed:  record not found
-syslog backend disabled: Unix syslog delivery error
-
-══ 10. СТАРЫЕ СЕРВЕРЫ В ЛОГАХ ══
-   📍 [DB] Amster: https://185.72.11.57:33718/65YobL3oIf6IRQ9nLO/ (Active: false)
-
-══ 11. ПОСЛЕДНИЕ 15 СТРОК IZINET-APP ══
-🔄 [XUI] Client user_01e1d83d_rv4s_0 already exists in inbound 39 (uuid=e13e6db2-7da2-470a-a82c-d500f9eeddf2) — updating instead
-✅ [XUI] Client user_01e1d83d_rv4s_0 updated on http://x3-ui:2053
-✅ [XUI] Reality link for user_01e1d83d_rv4s_0: transport=tcp, SNI=www.microsoft.com, SID=79b27cf779...
+✅ ОБНОВЛЕНИЕ ЗАВЕРШЕНО!
+Логи приложения (последние 20 строк):
+✅ [XUI] Reality link for user_39ddd_5xg: transport=tcp, SNI=www.cloudflare.com, SID=5cb64dcd6d...
+✅ [XUI] Reality link for user_19368730_1red_0: transport=tcp, SNI=www.cloudflare.com, SID=5cb64dcd6d...
+🔄 [XUI] Client user_21700_1mb_reg already exists in inbound 39 (uuid=91f4c1a3-555a-4e4d-a96e-fb52ad9cb8f5) — updating instead
+✅ [XUI] Client user_21700_1mb_reg updated on http://x3-ui:2053
+✅ [XUI] Reality link for user_21700_1mb_reg: transport=tcp, SNI=www.cloudflare.com, SID=5cb64dcd6d...
+🔄 [XUI] Client user_232f1_eqs_reg already exists in inbound 39 (uuid=b80ed160-550e-4d4e-89bd-0205f4b08d7a) — updating instead
+✅ [XUI] Client user_232f1_eqs_reg updated on http://x3-ui:2053
+✅ [XUI] Reality link for user_232f1_eqs_reg: transport=tcp, SNI=www.cloudflare.com, SID=5cb64dcd6d...
 🔄 [XUI] Client user_19368730_trial_lir3_0 already exists in inbound 39 (uuid=5cd36b89-9caa-480c-833a-8109de7c9741) — updating instead
 ✅ [XUI] Client user_19368730_trial_lir3_0 updated on http://x3-ui:2053
-✅ [XUI] Reality link for user_19368730_trial_lir3_0: transport=tcp, SNI=www.microsoft.com, SID=79b27cf779...
+✅ [XUI] Reality link for user_19368730_trial_lir3_0: transport=tcp, SNI=www.cloudflare.com, SID=5cb64dcd6d...
 🔄 [XUI] Client user_19368730_1red_0 already exists in inbound 39 (uuid=89402c6d-5f54-4991-ae2c-ad1e8bbacb84) — updating instead
 ✅ [XUI] Client user_19368730_1red_0 updated on http://x3-ui:2053
-✅ [XUI] Reality link for user_19368730_1red_0: transport=tcp, SNI=www.microsoft.com, SID=79b27cf779...
+✅ [XUI] Reality link for user_19368730_1red_0: transport=tcp, SNI=www.cloudflare.com, SID=5cb64dcd6d...
 ✅ [Maintenance] Server sync complete.
 🔄 [Routing] Synchronizing rules to all panels...
 🔍 [Routing] OneD template BEFORE: api=false stats=false policy=false inbounds=0 rules=0
-🔍 [Routing] OneD template AFTER: api=true stats=true policy=true inbounds=1 rules=4
+🔍 [Routing] OneD template AFTER: api=true stats=true policy=true inbounds=1 rules=6
 ✅ [Routing] Rules synced to OneD
 ✅ [Maintenance] Full maintenance cycle complete.
-
-══════════════════════════════════════════════════
-  Скопируйте ВЕСЬ вывод и скиньте мне
-══════════════════════════════════════════════════
+root@VM-846997:/opt/izinet# docker exec x3-ui sqlite3 /etc/x-ui/x-ui.db "SELECT id, port, remark, enable FROM inbounds WHERE port=2087;"
+OCI runtime exec failed: exec failed: unable to start container process: exec: "sqlite3": executable file not found in $PATH
+root@VM-846997:/opt/izinet# docker logs x3-ui --tail 20 | grep -i "2087\|ws\|reality"
+INFO - Remove Inbound User user_365705c7_trial_fxx7_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_ec359048_8grv_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_ec359048_xtq1_1 due to expiration or traffic limit
+INFO - Remove Inbound User user_83db9d2c_1g8n_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_43482026_m3sa_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_184a726c_trial_2pch_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_93650abb_08z4_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_faa72fd2_trial_3h0q_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_a11f23fe_04ee_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_93c07e23_g20e_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_93650_ch_reg due to expiration or traffic limit
+INFO - Remove Inbound User user_01e1d83d_rv4s_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_test due to expiration or traffic limit
+INFO - Remove Inbound User user_8b551a49_htoi_0 due to expiration or traffic limit
+INFO - Remove Inbound User user_8b551a49_kox8_1 due to expiration or traffic limit
+INFO - Remove Inbound User user_21700_au_reg due to expiration or traffic limit
+INFO - Remove Inbound User user_ee8860aa_15b1_0 due to expiration or traffic limit
+INFO - XRAY: infra/conf/serial: Reading config: &{Name:bin/config.json Format:json}
+ERROR - XRAY: Failed to start: main: failed to load config files: [bin/config.json] > infra/conf: failed to build inbound config with tag inbound-44 > infra/conf: REALITY only supports RAW, XHTTP and gRPC for now.
+ERROR - Failure in running xray-core: exit status 23
+root@VM-846997:/opt/izinet#

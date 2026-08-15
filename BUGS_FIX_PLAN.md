@@ -1,7 +1,7 @@
-# План исправления багов — ВСЁ ИСПРАВЛЕНО ✅
+# План исправления багов
 
 Дата создания: 2026-06-28
-Последнее обновление: 2026-06-28 (VPN работает)
+Последнее обновление: 2026-07-07
 
 ---
 
@@ -98,22 +98,22 @@ const pbk = (realitySettings.publicKey || rs.publicKey || '').trim();
 
 ---
 
-## Рабочая конфигурация (June 28, 2026)
+## Рабочая конфигурация (July 7, 2026)
 
 ### Xray Reality inbound (port 443):
 ```
 publicKey: 5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
 privateKey: kJ2F0HSQBw2hNydpwjCcmYoX5wgxbk0-zW2zr5PP630
-serverNames: ['www.microsoft.com', 'microsoft.com']
+serverNames: ['www.cloudflare.com']
 fingerprint: chrome
-target: host.docker.internal:3443
+target: www.cloudflare.com:443
 flow: xtls-rprx-vision
 ```
 
 ### VLESS ссылка (пример):
 ```
 vless://UUID@vpn.izinet.online:443?type=tcp&encryption=none&security=reality
-&sni=www.microsoft.com&pbk=5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
+&sni=www.cloudflare.com&pbk=5c63w00dONo3ks5GAOMf5WMsnV1cD2vvLCUpE3Os6xo
 &fp=chrome&sid=5cb64dcd6d60c1&spx=%2F&flow=xtls-rprx-vision#OneD
 ```
 
@@ -122,3 +122,67 @@ vless://UUID@vpn.izinet.online:443?type=tcp&encryption=none&security=reality
 2. **target**: ДОЛЖЕН быть `host.docker.internal:3443`, НЕ `www.microsoft.com:443`
 3. **Docker**: после git pull ОБЯЗАТЕЛЬНО `docker compose up -d --build`
 4. **Сервер**: 2GB RAM — update.sh через SSH вызывает OOM, только через Proxmox console
+
+---
+
+## ИСПРАВЛЕНИЯ 7 ИЮЛЯ 2026
+
+### BUG-10: /api/health отсутствовал ✅ ИСПРАВЛЕНО
+
+**Проблема:** Эндпоинт healthcheck не существовал, хотя требовался в acceptance checklist.
+
+**Решение:** `server/src/index.ts:31-34` — добавлен `GET /api/health` без auth и rate limit.
+
+---
+
+### BUG-11: addClient "record not found" ✅ ИСПРАВЛЕНО
+
+**Проблема:** При регенерации подписки `addClient` падал с "record not found" — панель 3x-ui не могла найти ранее удалённого клиента.
+
+**Решение:** `server/src/services/xui.service.ts:277-298` — при ошибке "record not found" ищем клиента во всех inbound'ах, удаляем, повторно добавляем.
+
+---
+
+### BUG-12: Продление не синхронизировало срок с панелью ✅ ИСПРАВЛЕНО
+
+**Проблема:** При продлении подписки срок обновлялся в Supabase, но не в панели 3x-ui. Панель отключала пользователя по старой дате.
+
+**Решение:** `server/src/routes/user.ts:210-225` — добавлен `updateClient()` для каждого устройства при продлении.
+
+---
+
+### BUG-13: Health check не валидировал Reality ✅ ИСПРАВЛЕНО
+
+**Проблема:** Health check проверял только панель + TCP. Reality мог быть сломан (пустой pbk, неверный fingerprint) — сервер получал `ok`.
+
+**Решение:** `server/src/services/maintenance.service.ts:156-200` — добавлена валидация Reality конфигурации (publicKey, shortIds, fingerprint=chrome, serverNames).
+
+---
+
+## ИЗВЕСТНЫЕ ПРОБЛЕМЫ (требуют внимания)
+
+### WARN-1: MozillaCookiejar импорт (Python 3.12) ✅ ИСПРАВЛЕНО
+
+**Проблема:** `patch_xray_routing.py` падал с `cannot import name 'MozillaCookiejar'`. Регистр: правильный — `MozillaCookieJar` (capital J).
+
+**Решение:** `patch_xray_routing.py:142` — `MozillaCookiejar` → `MozillaCookieJar`.
+
+---
+
+### WARN-2: Сервер 185.72.11.57:33718 недоступен ⚠️
+
+**Проблема:** Второй VPN сервер в Supabase не отвечает. Health check помечает как `down`.
+
+**Влияние:** Новые пользователи не назначаются на этот сервер. Старые клиенты на нём не могут подключиться.
+
+**Действие:** Проверить сервер в Proxmox или удалить из `vpn_servers` если не используется.
+
+---
+
+### WARN-3: Reality+WebSocket inbound не создан ✅ ИСПРАВЛЕНО
+
+**Проблема:** `add_reality_ws.sh` читал ключи из hardcoded inbound ID=32 (не существует). Плюс `www.microsoft.com` заблокирован ТСПУ.
+
+**Решение:**
+- Auto-detect inbound по порту 443 + security=reality (вместо хардкода ID=32)
+- `www.microsoft.com` → `www.cloudflare.com` (обход блокировки ТСПУ)

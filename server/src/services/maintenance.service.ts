@@ -117,18 +117,18 @@ export class MaintenanceService {
             if (!device.uuid || !device.email) continue;
             try {
               const { instance, server: serverData } = await getXuiForServer(server.id);
-              let effectiveInboundId = serverData.inbound_id || 0;
-              if (!effectiveInboundId || effectiveInboundId <= 0) {
-                const inbounds = await instance.getInbounds();
-                const ri = inbounds.find((ib: any) => {
-                  try { const s = JSON.parse(ib.streamSettings || '{}'); return s.security === 'reality' && ib.port === 443; } catch { return false; }
-                });
-                if (ri) effectiveInboundId = ri.id;
-              }
-              const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
-              if (rawLink) {
-                const newConfig = rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
-                if (device.config !== newConfig) { device.config = newConfig; changed = true; }
+              const inbounds = await instance.getInbounds();
+              const realityInbounds = inbounds.filter((ib: any) => {
+                try { const s = JSON.parse(ib.streamSettings || '{}'); return s.security === 'reality' && ib.enable !== false; } catch { return false; }
+              });
+              for (const ri of realityInbounds) {
+                try {
+                  const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                  if (rawLink) {
+                    const newConfig = rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
+                    if (device.config !== newConfig) { device.config = newConfig; changed = true; }
+                  }
+                } catch (e) {}
               }
             } catch (e) {}
           }
@@ -157,8 +157,10 @@ export class MaintenanceService {
         try {
           const { instance } = await getXuiForServer(server.id);
           const panelOk = await instance.checkHealth();
-          
+
           let tcpReachable = false;
+          let realityOk = false;
+
           if (panelOk) {
             try {
               const host = (server.public_host || server.domain || server.ip || '').replace(/^https?:\/\//, '').split(':')[0];
@@ -173,16 +175,42 @@ export class MaintenanceService {
                 });
               }
             } catch (e) {}
+
+            try {
+              const inbounds = await instance.getInbounds();
+              const ri = inbounds.find((ib: any) => {
+                try {
+                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                  return ss.security === 'reality' && ib.port === 443 && ib.enable !== false;
+                } catch { return false; }
+              });
+              if (ri) {
+                const ss = typeof ri.streamSettings === 'string' ? JSON.parse(ri.streamSettings) : (ri.streamSettings || {});
+                const rs = ss.realitySettings || {};
+                const settings = rs.settings || rs;
+                const pbk = (rs.publicKey || settings.publicKey || '').trim();
+                const sids = settings.shortIds || rs.shortIds || [];
+                const fp = settings.fingerprint || rs.fingerprint || '';
+                const snis = settings.serverNames || rs.serverNames || [];
+                realityOk = !!pbk && sids.length > 0 && fp === 'chrome' && snis.length > 0;
+                if (!realityOk) {
+                  console.warn(`⚠️ [Health] ${server.name} Reality config invalid: pbk=${!!pbk} sids=${sids.length} fp=${fp} snis=${snis.length}`);
+                }
+              }
+            } catch (e) {}
           }
 
-          const healthStatus = panelOk && tcpReachable ? 'ok' : (panelOk ? 'degraded' : 'down');
-          
+          const healthStatus = panelOk && tcpReachable && realityOk ? 'ok'
+            : panelOk && tcpReachable ? 'degraded'
+            : panelOk ? 'degraded'
+            : 'down';
+
           await supabase.from('vpn_servers').update({
             health_status: healthStatus,
             last_health_check_at: new Date().toISOString()
           }).eq('id', server.id);
 
-          console.log(`🏥 [Health] ${server.name}: ${healthStatus} (panel=${panelOk}, tcp=${tcpReachable})`);
+          console.log(`🏥 [Health] ${server.name}: ${healthStatus} (panel=${panelOk} tcp=${tcpReachable} reality=${realityOk})`);
         } catch (e: any) {
           console.error(`❌ [Health] ${server.name} check failed: ${e.message}`);
           await supabase.from('vpn_servers').update({

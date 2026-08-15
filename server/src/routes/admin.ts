@@ -646,31 +646,6 @@ router.delete('/users/:userId/devices/:deviceId', adminOnly, async (req, res) =>
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.put('/users/:userId/devices/:deviceId/move', adminOnly, async (req, res) => {
-  const { userId, deviceId } = req.params;
-  const { newServerId } = req.body;
-  try {
-    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).eq('status', 'active').maybeSingle();
-    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
-    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-    const idx = devices.findIndex((d) => d.id === deviceId);
-    if (idx === -1) return res.status(404).json({ error: 'Device not found' });
-    devices[idx] = { ...devices[idx], serverId: newServerId };
-    const { error } = await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), server_id: newServerId, updated_at: new Date().toISOString() }).eq('id', sub.id);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
-router.post('/users/move-server', adminOnly, async (req, res) => {
-  const { userId, newServerId } = req.body;
-  try {
-    const { error } = await supabase.from('subscriptions').update({ server_id: newServerId, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
 router.post('/users/:userId/devices', adminOnly, async (req, res) => {
   const { userId } = req.params;
   const { label } = req.body;
@@ -710,7 +685,9 @@ router.post('/users/:userId/devices', adminOnly, async (req, res) => {
 router.get('/payments', adminOnly, async (req, res) => {
   try {
     const { data } = await supabase.from('payments').select('*, users(email)').order('created_at', { ascending: false });
-    res.json(data || []);
+    // PAY-006: админ-UI читает invoice_id/provider; в БД колонки называются external_id/provider
+    const rows = (data || []).map((p: any) => ({ ...p, invoice_id: p.external_id || null, provider: p.provider || 'enot' }));
+    res.json(rows);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1192,6 +1169,76 @@ router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
       }
     }
     res.json({ ok: true, updated: totalUpdated, errors: totalErrors, total: subs.length, report });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// --- Hysteria2 Management ---
+
+router.get('/hysteria/status', adminOnly, async (_req, res) => {
+  try {
+    const { data: pw } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
+    const password = pw?.value || '';
+    const serverIp = process.env.PUBLIC_URL?.replace(/https?:\/\//, '').split(':')[0] || '194.50.94.28';
+
+    let status = 'unknown';
+    let uptime = '';
+    try {
+      const { execSync } = require('child_process');
+      // Проверяем через nsenter на хосте (Docker socket доступен)
+      const out = execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl is-active hysteria2 2>/dev/null || echo stopped', { timeout: 15000 }).toString().trim();
+      status = out === 'active' ? 'active' : 'stopped';
+      if (status === 'active') {
+        const uptimeOut = execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl show hysteria2 --property=ActiveEnterTimestamp 2>/dev/null | cut -d= -f2 || echo ""', { timeout: 15000 }).toString().trim();
+        uptime = uptimeOut || 'running';
+      }
+    } catch (e) {
+      status = 'unknown';
+    }
+
+    const link = password ? `hysteria2://${password}@${serverIp}:443?insecure=1#izinet-hysteria` : '';
+
+    res.json({
+      ok: true,
+      status,
+      uptime,
+      password: password ? '***' + password.slice(-6) : '',
+      hasPassword: !!password,
+      link,
+      serverIp,
+      port: 443,
+      protocol: 'udp'
+    });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+router.post('/hysteria/password', adminOnly, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || password.length < 8) {
+      return res.status(400).json({ ok: false, error: 'Пароль должен быть не менее 8 символов' });
+    }
+    const { error } = await supabase.from('settings').upsert({ key: 'HYSTERIA_PASSWORD', value: password }, { onConflict: 'key' });
+    if (error) throw error;
+    res.json({ ok: true, message: 'Пароль обновлен. Перезапустите hysteria2 на сервере.' });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+router.post('/hysteria/restart', adminOnly, async (_req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    // Перезапуск через nsenter на хосте (Docker socket доступен)
+    execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl restart hysteria2', { timeout: 30000 });
+    res.json({ ok: true, message: 'Hysteria2 перезапущен' });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+router.post('/hysteria/regenerate-link', adminOnly, async (_req, res) => {
+  try {
+    const { data: pw } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
+    if (!pw?.value) return res.status(400).json({ ok: false, error: 'Hysteria2 не настроен. Сначала задайте пароль.' });
+    const serverIp = process.env.PUBLIC_URL?.replace(/https?:\/\//, '').split(':')[0] || '194.50.94.28';
+    const link = `hysteria2://${pw.value}@${serverIp}:443?insecure=1#izinet-hysteria`;
+    res.json({ ok: true, link });
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

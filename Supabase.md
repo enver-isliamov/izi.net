@@ -103,7 +103,11 @@ CREATE TABLE IF NOT EXISTS payments (
   currency text DEFAULT 'RUB',
   status text DEFAULT 'pending',
   payment_method text,
+  provider text,
   external_id text,
+  payment_link text,
+  expires_at timestamptz,
+  completed_at timestamptz,
   metadata jsonb,
   created_at timestamptz DEFAULT now()
 );

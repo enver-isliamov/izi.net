@@ -99,7 +99,8 @@ export class PaymentService {
       shop_id: merchantId
     };
 
-    const response = await axios.post('https://api.enot.io/invoice/info', payload, {
+    const response = await axios.get('https://api.enot.io/invoice/info', {
+      params: payload,
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
@@ -114,7 +115,7 @@ export class PaymentService {
       const info = response.data.data;
       return {
         enotStatus: info?.status || 'unknown',
-        amount: info?.amount,
+        amount: info?.invoice_amount ?? info?.amount,
         enotResponse: response.data
       };
     } else {
@@ -150,7 +151,7 @@ export class PaymentService {
     return matchesStable || matchesCompact;
   }
 
-  async processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
+    async processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
     console.log(`Processing payment: ${amount} for user ${userId} via ${provider}`);
 
     const { data: existingPayment, error: paymentReadErr } = await supabase
@@ -165,23 +166,14 @@ export class PaymentService {
       return;
     }
 
-    const { data: balanceData } = await supabase
-      .from('balances')
-      .select('amount')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    const currentAmount = Number(balanceData?.amount || 0);
-    const { error: balErr } = await supabase
-      .from('balances')
-      .upsert({
-        user_id: userId,
-        amount: currentAmount + amount,
-        currency: 'RUB',
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' });
-
-    if (balErr) throw new Error(`Balance update failed: ${balErr.message}`);
+    // PAY-007: атомарное зачисление через RPC (INSERT ... ON CONFLICT (user_id)
+    // DO UPDATE SET amount = balances.amount + p_amount) — исключает гонку
+    // read-modify-write при параллельных платежах одного пользователя.
+    const { error: creditErr } = await supabase.rpc('refund_user_balance', {
+      p_user_id: userId,
+      p_amount: amount
+    });
+    if (creditErr) throw new Error(`Balance credit failed: ${creditErr.message}`);
 
     const { error: paymentStatusErr } = await supabase
       .from('payments')
@@ -206,7 +198,7 @@ export class PaymentService {
 
     if (txInsertErr) console.error('Failed to insert transaction journal row:', txInsertErr.message);
 
-    console.log(`Balance successfully updated for user ${userId}. New total: ${currentAmount + amount}`);
+    console.log(`Balance successfully credited for user ${userId}: +${amount}`);
   }
 }
 

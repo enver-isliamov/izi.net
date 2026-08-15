@@ -101,16 +101,19 @@ router.get('/sub/:id', async (req, res) => {
             for (const server of activeServers) {
               try {
                 const { instance, server: serverData } = await getXuiForServer(server.id);
-                let effectiveInboundId = serverData.inbound_id || 0;
-                if (!effectiveInboundId || effectiveInboundId <= 0) {
-                  const inbounds = await instance.getInbounds();
-                  const ri = inbounds.find((ib: any) => {
-                    try { const ss = JSON.parse(ib.streamSettings || '{}'); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
-                  });
-                  if (ri) effectiveInboundId = ri.id;
+                const inbounds = await instance.getInbounds();
+                const realityInbounds = inbounds.filter((ib: any) => {
+                  try {
+                    const ss = JSON.parse(ib.streamSettings || '{}');
+                    return ss.security === 'reality' && ib.enable !== false;
+                  } catch { return false; }
+                });
+                for (const ri of realityInbounds) {
+                  try {
+                    const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                    if (rawLink) lines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                  } catch (e) {}
                 }
-                const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
-                if (rawLink) lines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
               } catch (e) {}
             }
             if (lines.length > 0) { device.config = lines.join('\n'); changed = true; }
@@ -129,6 +132,24 @@ router.get('/sub/:id', async (req, res) => {
     if (!configText || !configText.trim()) {
       return res.status(404).send('No valid VPN configs found for this subscription');
     }
+
+    // Добавляем Hysteria2 ссылки если настроен
+    try {
+      const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
+      if (hySettings?.value) {
+        const hyPassword = hySettings.value;
+        const hyLinks: string[] = [];
+        const devices = configText.split('\n').filter((l: string) => l.startsWith('vless://'));
+        for (const device of devices) {
+          const emailMatch = device.match(/#(.+)$/);
+          const name = emailMatch ? decodeURIComponent(emailMatch[1]) : 'izinet';
+          hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#${name}-hysteria`);
+        }
+        if (hyLinks.length > 0) {
+          configText = configText + '\n' + hyLinks.join('\n');
+        }
+      }
+    } catch (e) {}
 
     const base64Config = Buffer.from(configText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
