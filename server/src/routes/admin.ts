@@ -685,7 +685,9 @@ router.post('/users/:userId/devices', adminOnly, async (req, res) => {
 router.get('/payments', adminOnly, async (req, res) => {
   try {
     const { data } = await supabase.from('payments').select('*, users(email)').order('created_at', { ascending: false });
-    res.json(data || []);
+    // PAY-006: админ-UI читает invoice_id/provider; в БД колонки называются external_id/provider
+    const rows = (data || []).map((p: any) => ({ ...p, invoice_id: p.external_id || null, provider: p.provider || 'enot' }));
+    res.json(rows);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
