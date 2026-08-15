@@ -175,36 +175,6 @@ export default function AdminUsers() {
     }
   };
 
-  const moveUserServer = async (userId: string, newServerId: string) => {
-    const loadingToast = toast.loading('Перенос пользователя на новый сервер...');
-    try {
-      await axios.post('/api/admin/users/move-server', { userId, newServerId }, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      toast.dismiss(loadingToast);
-      toast.success('Пользователь успешно перенесен');
-      fetchData();
-    } catch (e: any) {
-      toast.dismiss(loadingToast);
-      toast.error(e.response?.data?.error || 'Ошибка переноса сервера');
-    }
-  };
-
-  const moveDeviceServer = async (userId: string, deviceId: string, newServerId: string) => {
-    try {
-      const loadingToast = toast.loading('Перенос устройства...');
-      await axios.put(`/api/admin/users/${userId}/devices/${deviceId}/move`, { newServerId }, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      toast.dismiss(loadingToast);
-      toast.success('Устройство успешно перенесено');
-      fetchData();
-    } catch (e: any) {
-      toast.dismiss();
-      toast.error(e.response?.data?.error || 'Ошибка переноса устройства');
-    }
-  };
-
   const deleteDevice = async (userId: string, deviceId: string) => {
     if (!window.confirm('Действительно удалить устройство? Пользователь потеряет доступ с него.')) return;
     try {
@@ -353,7 +323,7 @@ export default function AdminUsers() {
                             </button>
                           )}
                         </div>
-                        <span className="text-[10px] text-muted-foreground font-mono break-all line-clamp-1">{user.email}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{user.email}</span>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="font-mono text-xs text-blue-400 font-bold">Баланс: {user.balance || 0} ₽</span>
                           <button
@@ -571,7 +541,7 @@ export default function AdminUsers() {
                         </button>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground font-mono break-all">{user.email}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{user.email}</span>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="font-mono text-xs text-blue-400 font-bold">Баланс: {user.balance || 0} ₽</span>
                       <button

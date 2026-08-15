@@ -205,7 +205,7 @@ export default function AdminDashboard() {
           </button>
           
           {showDebug && (
-            <pre className="mt-4 p-4 bg-black rounded-xl max-w-full overflow-x-auto whitespace-pre-wrap break-all text-[10px] font-mono text-blue-300/80 max-h-60 border border-white/5">
+            <pre className="mt-4 p-4 bg-black rounded-xl overflow-auto text-[10px] font-mono text-blue-300/80 max-h-60 border border-white/5">
               {JSON.stringify(diag, null, 2)}
             </pre>
           )}

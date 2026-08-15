@@ -149,9 +149,11 @@ export default function Dashboard() {
 
       let serverData = null;
       if (subRes?.server_id) {
+        // B1: после REVOKE SELECT (password, username) в миграции 002 select('*') падает с 42501.
+        // Явный список колонок — только то, что рендерит дашборд (location_code).
         const { data } = await supabase
           .from('vpn_servers')
-          .select('*')
+          .select('id,name,location_code,is_active,ip')
           .eq('id', subRes.server_id)
           .single();
         serverData = data;
@@ -181,6 +183,19 @@ export default function Dashboard() {
     if (user?.id) {
       fetchDashboardData(true);
     }
+  }, [user?.id]);
+
+  // CACHE-002: Poll traffic data every 30 seconds
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const pollInterval = setInterval(() => {
+      if (!isFetching.current) {
+        fetchDashboardData(false);
+      }
+    }, 30000);
+
+    return () => clearInterval(pollInterval);
   }, [user?.id]);
 
   useEffect(() => {
@@ -442,6 +457,7 @@ export default function Dashboard() {
                 onClose={() => {
                   setIsWizardOpen(false);
                   fetchDashboardData();
+                  setTimeout(() => fetchDashboardData(), 3000);
                 }} 
                 forceNew={wizardMode === 'new'}
                 targetDeviceId={targetDevice}

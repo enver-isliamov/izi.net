@@ -39,3 +39,86 @@
 - Стабилизация платежей Enot.io, обход сбоев HMAC подписей.
 - Бесшовная и синхронная работа клиентов сразу на всех активных VPN-нодах (3x-ui).
 - Точный учёт лимитов устройств (`DEVICE_LIMIT`) и объема трафика.
+
+---
+
+## 🔐 АРХИТЕКТУРА REALITY КЛЮЧЕЙ
+
+**Ключевой принцип:** Reality ключи хранятся ТОЛЬКО в SQLite базе 3x-ui (`x-ui.db`). Сервер читает их из панели 3x-ui API. Ключи НЕ хранятся в `.env` и НЕ хранятся в Supabase.
+
+### Поток данных:
+```
+xui_bootstrap.py → генерирует x25519 ключи → пишет в SQLite (x-ui.db)
+                                                        ↓
+server.ts getInboundLink() ← GET /panel/api/inbounds/get/{id} ← 3x-ui API
+                                                        ↓
+                                    Генерирует vless:// ссылку с ключами из панели
+```
+
+### ⚠️ КРИТИЧЕСКИЕ УРОКИ (June 28, 2026):
+
+1. **publicKey PRIORITY**: API возвращает ДВА разных ключа:
+   - `realitySettings.publicKey` = ТЕКУЩИЙ ключ (используется Xray) ✅
+   - `realitySettings.settings.publicKey` = УСТАРЕВШИЙ ключ ❌
+   - Код ОБЯЗАН читать `realitySettings.publicKey` ПЕРВЫМ!
+
+2. **target ОБЯЗАН быть `host.docker.internal:3443`**:
+   - Если target = `www.microsoft.com:443` → браузер получает сертификат Microsoft
+   - Reality target определяет КУДА идёт non-Reality трафик
+   - Для работы сайта нужен fallback на Nginx (порт 3443)
+
+3. **fingerprint**: ТОЛЬКО `chrome`/`firefox`. `randomized` НЕ работает с Reality.
+
+4. **Docker rebuild ОБЯЗАТЕЛЕН**: `git pull` обновляет файлы на хосте, но контейнер работает со СТАРЫМ image. Всегда `docker compose up -d --build`.
+
+5. **НИКОГДА не монтировать volume на /app/bin/**: Директория `/app/bin/` содержит Xray binary. Volume mount `./xray-assets:/app/bin` **ПЕРЕЗАПИСЫВАЕТ** её, удаляя Xray → VPN не работает. Ошибка: `fork/exec bin/xray-linux-amd64: no such file or directory`.
+
+6. **serverNames**: Должны быть чистыми строками БЕЗ пробелов и кавычек. `" microsoft.com'"` → `microsoft.com`. fix_reality_inbound.py проверяет это.
+
+### Никогда не делайте:
+- Хранить Reality ключи в `.env`
+- Использовать хардкод ключи
+- Читать publicKey из `realitySettings.settings.publicKey`
+- Ставить target = `www.microsoft.com:443` (ломает SSL сайта)
+- Использовать `randomized` fingerprint
+- Запускать update.sh через SSH на сервере с 2GB RAM (OOM)
+
+### Всегда делайте:
+- Использовать `xui_bootstrap.py` для генерации ключей
+- Читать publicKey из `realitySettings.publicKey`
+- Ставить target = `host.docker.internal:3443`
+- После git pull: `docker compose up -d --build`
+- Использовать Proxmox console для тяжёлых операций
+
+---
+
+## 🔧 УСТАНОВКА НА ЧИСТЫЙ СЕРВЕР
+
+### Автоматическая (рекомендуется):
+```bash
+curl -sSL https://raw.githubusercontent.com/enver-isliamov/izi.net/main/install.sh | bash
+```
+
+### Что делает install.sh:
+1. Устанавливает Docker, Nginx, certbot, UFW
+2. Клонирует репозиторий в `/opt/izinet`
+3. Интерактивно задаёт ключи Supabase, Telegram, Enot.io
+4. Запускает Docker контейнеры
+5. Запускает `xui_bootstrap.py` — генерирует уникальные x25519 ключи и создаёт Reality inbound
+6. Получает SSL-сертификат Let's Encrypt
+7. Настраивает Nginx на **порту 3443** (НЕ 443 — там Xray!)
+8. Настраивает UFW (включая Docker→Host:3443)
+
+### Критические требования:
+- Домен → A-запись на IP сервера
+- Cloudflare: **DNS Only** (серое облако), НЕ Proxied!
+- Nginx слушает **3443** (не 443 — порт 443 занят Xray)
+- Reality ключи генерируются автоматически — хардкод запрещён
+
+### Fallback архитектура (сайт работает без VPN):
+```
+Порт 443 → Xray (VLESS-Reality)
+  ├─ VPN-клиенты → туннель → интернет (цензор видит microsoft.com)
+  └─ Браузеры → SNI Sniffing → fallback → host.docker.internal:3443
+       → Nginx (SSL termination) → порт 3005 (сайт)
+```

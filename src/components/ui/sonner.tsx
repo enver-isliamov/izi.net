@@ -37,12 +37,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }
       toastOptions={{
         classNames: {
-          toast: "group toast group-[.toaster]:bg-zinc-900 group-[.toaster]:text-zinc-50 group-[.toaster]:border-zinc-800 shadow-xl rounded-xl p-4 sm:p-5 text-sm sm:text-base leading-relaxed break-words items-start max-w-[calc(100vw-2rem)]",
-          description: "group-[.toast]:text-zinc-400 text-sm mt-1",
-          actionButton: "group-[.toast]:bg-white group-[.toast]:text-black font-medium px-3 py-1.5 rounded-lg",
-          cancelButton: "group-[.toast]:bg-zinc-800 group-[.toast]:text-zinc-400 font-medium px-3 py-1.5 rounded-lg",
-          title: "font-medium mb-1 group-[.toast]:text-zinc-50",
-          icon: "group-data-[type=error]:text-red-500 group-data-[type=success]:text-emerald-500 group-data-[type=warning]:text-amber-500 group-data-[type=info]:text-blue-500 mt-0.5 min-w-[20px]",
+          toast: "cn-toast",
         },
       }}
       {...props}

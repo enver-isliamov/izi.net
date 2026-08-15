@@ -1,0 +1,251 @@
+import { rateLimit } from 'express-rate-limit';
+import * as dotenv from 'dotenv';
+dotenv.config();
+
+process.on('uncaughtException', (err) => console.error('🔥 [CRITICAL] Exception:', err));
+process.on('unhandledRejection', (reason) => console.error('🔥 [CRITICAL] Rejection:', reason));
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import axios from 'axios';
+import { checkDatabase } from './services/supabase';
+import { botService } from './services/bot.service';
+import { MaintenanceService } from './services/maintenance.service';
+import { RoutingService } from './services/routing.service';
+
+import adminRoutes from './routes/admin';
+import paymentRoutes from './routes/payments';
+import userRoutes from './routes/user';
+import configRoutes from './routes/config';
+import { authenticateUser } from './utils/auth';
+
+const app = express();
+app.set('trust proxy', 1);
+const PORT = parseInt(process.env.PORT || '3005');
+
+app.use(cors());
+app.use(express.json());
+
+// --- HEALTHCHECK (без auth, без rate limit) ---
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
+// --- МАРШРУТЫ ---
+
+// --- RATE LIMITING (PERF-001) ---
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Увеличен до 1000 для стабильности
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 30, // Увеличен до 30
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts, please try again after an hour.' }
+});
+
+// ADMIN-010: Мягкий лимитер для админки
+const adminLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 500, // 500 запросов за 5 минут для админки
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many admin requests, please try again later.' }
+});
+
+app.use('/api/subscription/buy', authLimiter);
+app.use('/api/pay/create', authLimiter);
+app.use('/api/admin', adminLimiter);
+app.use('/api', generalLimiter);
+app.use('/api', userRoutes);
+app.use('/api', configRoutes);
+app.use('/api/subscription', configRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/pay', paymentRoutes);
+
+// --- УНИВЕРСАЛЬНЫЙ SUPABASE PROXY ---
+// SEC-001: анонимный доступ к прокси = полный доступ ко всей БД с service-ключом
+// (включая ключи Enot.io). Открыты только pre-auth эндпоинты: token (вход/refresh),
+// signup, recover. Всё остальное — только для авторизованных пользователей.
+app.all('/api/supabase-proxy/*', (req: any, res: any, next: any) => {
+  const targetPath = req.params[0] || '';
+  if (new RegExp('^auth/v1/(token|signup|recover)').test(targetPath)) return next();
+  // B2: вход через Telegram вставляет токен в telegram_linking_tokens ДО авторизации
+  // (Login.tsx, user_id=null). Разрешаем анонимно только POST (insert);
+  // чтение/изменение токенов — только авторизованным (прокси ходит с service-ключом).
+  if (req.method === 'POST' && new RegExp('^rest/v1/telegram_linking_tokens').test(targetPath)) return next();
+  return authenticateUser(req, res, next);
+}, supabaseProxyHandler);
+
+async function supabaseProxyHandler(req: any, res: any) {
+  try {
+    const targetPath = req.params[0]; // Например: auth/v1/token или rest/v1/users
+    const supabaseUrl = (process.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl) throw new Error('Supabase URL missing');
+
+    // FIX: Не добавляем /rest/v1/, так как путь уже содержит нужный сервис
+    const url = supabaseUrl + '/' + targetPath;
+    
+    const headers: any = {
+      'apikey': supabaseKey,
+      'Authorization': req.headers.authorization || 'Bearer ' + supabaseKey,
+      'Content-Type': 'application/json',
+      'Prefer': req.headers.prefer || ''
+    };
+
+    const response = await axios({
+      method: req.method,
+      url: url,
+      data: req.body,
+      params: req.query,
+      headers: headers,
+      validateStatus: () => true
+    });
+
+    res.status(response.status).json(response.data);
+  } catch (err: any) {
+    console.error('❌ Proxy error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+const distPath = path.join(process.cwd(), 'dist');
+app.use(express.static(distPath));
+
+app.get('*', (req, res) => {
+  if (req.url.startsWith('/api')) return res.status(404).json({ error: 'Not found' });
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
+async function regenerateAllVlessLinks() {
+  try {
+    const { supabase } = await import('./services/supabase');
+    const { getXuiForServer } = await import('./services/xui.service');
+    const { parseVpnDevices } = await import('./utils/vpn');
+
+    const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+    if (!subs || subs.length === 0) return;
+
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!activeServers || activeServers.length === 0) return;
+
+    let updated = 0;
+    for (const sub of subs) {
+      try {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+        let changed = false;
+        for (const device of devices) {
+          if (!device.uuid || !device.email) continue;
+          const newConfigLines: string[] = [];
+          for (const server of activeServers) {
+            try {
+              const { instance } = await getXuiForServer(server.id);
+              const inbounds = await instance.getInbounds();
+              const realityInbounds = inbounds.filter((ib: any) => {
+                try {
+                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                  return ss.security === 'reality' && ib.enable !== false;
+                } catch { return false; }
+              });
+              for (const ri of realityInbounds) {
+                try {
+                  const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                  if (rawLink) newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                } catch (e) {}
+              }
+            } catch (e) {}
+          }
+          if (newConfigLines.length > 0) {
+            const newConfig = newConfigLines.join('\n');
+            if (device.config !== newConfig) { device.config = newConfig; changed = true; }
+          }
+        }
+        if (changed) {
+          await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+          updated++;
+        }
+      } catch (e) {}
+    }
+    if (updated > 0) console.log(`✅ [BOOT] Перегенерировано VPN-ссылок: ${updated}/${subs.length}`);
+  } catch (err: any) {
+    console.error('❌ [BOOT] Regenerate links failed:', err.message);
+  }
+}
+
+async function autoDetectServerFields() {
+  try {
+    const { supabase } = await import('./services/supabase');
+    const { getXuiForServer } = await import('./services/xui.service');
+
+    const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!servers) return;
+
+    for (const server of servers) {
+      const needsUpdate: any = {};
+      let changed = false;
+
+      if (!server.inbound_id || server.inbound_id === 0) {
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          const inbounds = await instance.getInbounds();
+          const realityInbound = inbounds.find((ib: any) => {
+            try {
+              const ss = JSON.parse(ib.streamSettings || '{}');
+              return ss.security === 'reality' && ib.port === 443;
+            } catch { return false; }
+          });
+          if (realityInbound) {
+            needsUpdate.inbound_id = realityInbound.id;
+            changed = true;
+            console.log(`  🔧 ${server.name}: inbound_id → ${realityInbound.id}`);
+          }
+        } catch (e: any) {
+          console.warn(`  ⚠️ ${server.name}: cannot detect inbound_id: ${e.message}`);
+        }
+      }
+
+      if (!server.public_host) {
+        const host = (server.ip || '').replace(/^https?:\/\//, '').split(':')[0] || (server.domain || '').replace(/^https?:\/\//, '').split(':')[0];
+        if (host) {
+          needsUpdate.public_host = host;
+          changed = true;
+          console.log(`  🔧 ${server.name}: public_host → ${host}`);
+        }
+      }
+
+      if (changed) {
+        needsUpdate.updated_at = new Date().toISOString();
+        await supabase.from('vpn_servers').update(needsUpdate).eq('id', server.id);
+      }
+    }
+  } catch (err: any) {
+    console.error('❌ [BOOT] autoDetectServerFields failed:', err.message);
+  }
+}
+
+async function start() {
+  console.log('🚀 [BOOT] Проверка Supabase...');
+  const dbOk = await checkDatabase();
+  if (dbOk) {
+    botService.init();
+    MaintenanceService.init();
+    autoDetectServerFields().catch(e => console.error('❌ [BOOT] autoDetect failed:', e.message));
+    RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
+    setTimeout(() => regenerateAllVlessLinks(), 15000);
+  }
+  app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));
+}
+
+start().catch(err => process.exit(1));
+

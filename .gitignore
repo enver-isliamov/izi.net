@@ -5,4 +5,7 @@ coverage/
 .DS_Store
 *.log
 .env*
+.read only/
 !.env.example
+
+.read only/Терминал.txt
