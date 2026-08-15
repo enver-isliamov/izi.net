@@ -443,6 +443,7 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
     if (balance > 0) {
       await supabase.from('balances').upsert({ user_id: uid, amount: balance, currency: 'RUB', updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
     }
+    let provisioningFailed = false;
     if (createSubscription) {
       const days = (parseInt(periodMonths) || 1) * 30;
       const expiresAtMs = Date.now() + days * 86400000;
@@ -476,8 +477,9 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
         v2ray_config: JSON.stringify(devices)
       }).select('id').single();
       if (subErr) throw subErr;
+      provisioningFailed = devices.length === 0;
     }
-    res.json({ success: true, user: { id: uid, email: created.user.email }, password: genPassword });
+    res.json({ success: true, user: { id: uid, email: created.user.email }, password: genPassword, provisioningFailed });
   } catch (err: any) {
     if (/already registered|duplicate/i.test(err.message || '')) return res.status(409).json({ error: 'Пользователь с таким email уже существует' });
     res.status(500).json({ error: err.message });
