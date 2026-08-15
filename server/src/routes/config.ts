@@ -146,14 +146,20 @@ router.get('/sub/:id', async (req, res) => {
           hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#${name}-hysteria`);
         }
         if (hyLinks.length > 0) {
-          configText = configText + '\n' + hyLinks.join('\n');
+          configText = configText + '\n' + [...new Set(hyLinks)].join('\n');
         }
       }
     } catch (e) {}
 
+    // RENAME-001: в клиенте VPN показываем бренд и email подписчика вместо «izi.net VPN» / имён серверов (#OneD)
+    const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
+    const userEmail = subUser?.email || '';
+    const subRemark = `izinet.online${userEmail ? '_' + userEmail : ''}`;
+    configText = configText.split('\n').map(line => line.trim() ? line.replace(/(#.*)$/, `#${subRemark}`) : line).join('\n');
+
     const base64Config = Buffer.from(configText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('profile-title', 'izi.net VPN');
+    res.setHeader('profile-title', `izinet.online${userEmail ? ' ' + userEmail : ''}`);
     res.setHeader('profile-web-page-url', 'https://izinet.online');
     res.setHeader('profile-update-interval', '12');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));

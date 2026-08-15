@@ -430,6 +430,35 @@ router.get('/users', adminOnly, async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ADMIN-CREATE-001: создание пользователя (модалка CreateUserModal)
+router.post('/users/create', adminOnly, async (req: any, res) => {
+  try {
+    const { email, password, initialBalance = '0', createSubscription, serverId, trafficLimitMb, periodMonths } = req.body || {};
+    if (!email || typeof email !== 'string' || !email.includes('@')) return res.status(400).json({ error: 'Введите корректный Email' });
+    const genPassword = password || (Math.random().toString(36).slice(2, 10) + 'A1!');
+    const { data: created, error } = await supabase.auth.admin.createUser({ email, password: genPassword, email_confirm: true });
+    if (error) throw error;
+    const uid = created.user.id;
+    const balance = Number(initialBalance) || 0;
+    if (balance > 0) {
+      await supabase.from('balances').upsert({ user_id: uid, amount: balance, currency: 'RUB', updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    }
+    if (createSubscription) {
+      const days = (parseInt(periodMonths) || 1) * 30;
+      const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+      await supabase.from('subscriptions').insert({
+        user_id: uid, server_id: serverId || null, plan_type: 'basic', status: 'active',
+        traffic_limit_mb: parseInt(trafficLimitMb) || 102400, traffic_used_mb: 0, device_limit: 2,
+        period_months: parseInt(periodMonths) || 1, expires_at: expiresAt, v2ray_config: '[]'
+      });
+    }
+    res.json({ success: true, user: { id: uid, email: created.user.email }, password: genPassword });
+  } catch (err: any) {
+    if (/already registered|duplicate/i.test(err.message || '')) return res.status(409).json({ error: 'Пользователь с таким email уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ADMIN-011: Выдача подписки пользователю из админки
 router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
   const { userId } = req.params;
@@ -814,7 +843,9 @@ router.get('/stats', adminOnly, async (req, res) => {
   try {
     const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
     const { data: subs } = await supabase.from('subscriptions').select('id').eq('status', 'active');
-    res.json({ totalUsers: count || 0, activeSubscriptions: subs?.length || 0, totalRevenue: 0 });
+    const { data: paidPayments } = await supabase.from('payments').select('amount').eq('status', 'completed');
+    const totalRevenue = (paidPayments || []).reduce((sum, pp) => sum + Number(pp.amount || 0), 0);
+    res.json({ totalUsers: count || 0, activeSubscriptions: subs?.length || 0, totalRevenue });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
