@@ -132,7 +132,7 @@ async function regenerateAllVlessLinks() {
   try {
     const { supabase } = await import('./services/supabase');
     const { getXuiForServer } = await import('./services/xui.service');
-    const { parseVpnDevices } = await import('./utils/vpn');
+    const { parseVpnDevices, getPublishedVlessPorts } = await import('./utils/vpn');
 
     const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
     if (!subs || subs.length === 0) return;
@@ -152,10 +152,11 @@ async function regenerateAllVlessLinks() {
             try {
               const { instance } = await getXuiForServer(server.id);
               const inbounds = await instance.getInbounds();
+              const pubPorts = await getPublishedVlessPorts();
               const realityInbounds = inbounds.filter((ib: any) => {
                 try {
                   const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                  return ss.security === 'reality' && ib.enable !== false;
+                  return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
                 } catch { return false; }
               });
               for (const ri of realityInbounds) {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../services/supabase';
 import { getXuiForServer } from '../services/xui.service';
-import { parseVpnDevices } from '../utils/vpn';
+import { parseVpnDevices, getPublishedVlessPorts } from '../utils/vpn';
 import { MaintenanceService } from '../services/maintenance.service';
 
 const router = Router();
@@ -115,10 +115,11 @@ router.get('/sub/:id', async (req, res) => {
               try {
                 const { instance, server: serverData } = await getXuiForServer(server.id);
                 const inbounds = await instance.getInbounds();
+                const pubPorts = await getPublishedVlessPorts();
                 const realityInbounds = inbounds.filter((ib: any) => {
                   try {
                     const ss = JSON.parse(ib.streamSettings || '{}');
-                    return ss.security === 'reality' && ib.enable !== false;
+                    return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
                   } catch { return false; }
                 });
                 for (const ri of realityInbounds) {

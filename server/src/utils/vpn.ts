@@ -41,3 +41,17 @@ export function parseVpnDevices(configStr: string | null, rootExpiresAt?: string
     };
   });
 }
+
+
+// --- VLESS: фильтр портов, опубликованных наружу (docker-compose/ufw) ---
+// Настройка PUBLIC_VLESS_PORTS: '443,2088' (CSV). Нет настройки -> все порты (прежнее поведение).
+export async function getPublishedVlessPorts(): Promise<number[] | null> {
+  try {
+    const { supabase } = await import('../services/supabase');
+    const { data } = await supabase.from('settings').select('value').eq('key', 'PUBLIC_VLESS_PORTS').maybeSingle();
+    const csv = data?.value?.trim();
+    if (!csv) return null;
+    const ports = csv.split(',').map((x: string) => parseInt(x.trim(), 10)).filter((n: number) => Number.isFinite(n) && n > 0);
+    return ports.length ? ports : null;
+  } catch { return null; }
+}

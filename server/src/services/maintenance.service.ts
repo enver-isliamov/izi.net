@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
-import { parseVpnDevices } from '../utils/vpn';
+import { parseVpnDevices, getPublishedVlessPorts } from '../utils/vpn';
 
 import { RoutingService } from './routing.service';
 
@@ -118,8 +118,9 @@ export class MaintenanceService {
             try {
               const { instance, server: serverData } = await getXuiForServer(server.id);
               const inbounds = await instance.getInbounds();
+              const pubPorts = await getPublishedVlessPorts();
               const realityInbounds = inbounds.filter((ib: any) => {
-                try { const s = JSON.parse(ib.streamSettings || '{}'); return s.security === 'reality' && ib.enable !== false; } catch { return false; }
+                try { const s = JSON.parse(ib.streamSettings || '{}'); return s.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port)); } catch { return false; }
               });
               for (const ri of realityInbounds) {
                 try {

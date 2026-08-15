@@ -362,7 +362,8 @@ export class XUIService {
         }
 
         console.log(`✅ [XUI] Reality link for ${email}: transport=${network}, SNI=${sni}, SID=${sid.substring(0, 10)}...`);
-        let link = `vless://${uuid}@${hostName}:${port}?${transportParams}&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}&flow=xtls-rprx-vision`;
+        const flowParam = network === 'tcp' ? '&flow=xtls-rprx-vision' : '';
+        let link = `vless://${uuid}@${hostName}:${port}?${transportParams}&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}${flowParam}`;
         return `${link}#${encodedEmail}`;
       }
 
