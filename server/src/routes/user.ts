@@ -86,8 +86,9 @@ async function provisionDeviceOnServers(params: {
         });
         for (const ri of realityInbounds) {
           try {
-            await instance.addClient(email, uuid, ri.id, params.expiresAt.getTime(), limitBytes);
-            const rawLink = await instance.getInboundLink(ri.id, uuid, email);
+            const inboundEmail = ri.id === effectiveInboundId ? email : `${email}_${ri.port}`;
+            await instance.addClient(inboundEmail, uuid, ri.id, params.expiresAt.getTime(), limitBytes);
+            const rawLink = await instance.getInboundLink(ri.id, uuid, inboundEmail);
             if (rawLink) {
               configLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
             }

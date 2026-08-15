@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { execSync } from 'child_process';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
@@ -845,9 +846,10 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
                 for (const ri of realityInbounds) {
                   try {
                     const expMs = device.expiresAt ? new Date(device.expiresAt).getTime() : 0;
-                    const existing = await instance.getClientByEmail(ri.id, device.email);
-                    if (!existing) await instance.addClient(device.email, device.uuid, ri.id, Number.isFinite(expMs) ? expMs : 0, 0);
-                    const rawLink2 = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                    const inboundEmail = ri.id === effectiveInboundId ? device.email : `${device.email}_${ri.port}`;
+                    const existing = await instance.getClientByEmail(ri.id, inboundEmail);
+                    if (!existing) await instance.addClient(inboundEmail, device.uuid, ri.id, Number.isFinite(expMs) ? expMs : 0, 0);
+                    const rawLink2 = await instance.getInboundLink(ri.id, device.uuid, inboundEmail);
                     if (rawLink2) {
                       newConfigLines.push(rawLink2.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
                       anyLink = true;
@@ -1265,7 +1267,6 @@ router.get('/hysteria/status', adminOnly, async (_req, res) => {
     let status = 'unknown';
     let uptime = '';
     try {
-      const { execSync } = require('child_process');
       // Проверяем через nsenter на хосте (Docker socket доступен)
       const out = execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl is-active hysteria2 2>/dev/null || echo stopped', { timeout: 15000 }).toString().trim();
       status = out === 'active' ? 'active' : 'stopped';
@@ -1307,7 +1308,6 @@ router.post('/hysteria/password', adminOnly, async (req, res) => {
 
 router.post('/hysteria/restart', adminOnly, async (_req, res) => {
   try {
-    const { execSync } = require('child_process');
     // Перезапуск через nsenter на хосте (Docker socket доступен)
     execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl restart hysteria2', { timeout: 30000 });
     res.json({ ok: true, message: 'Hysteria2 перезапущен' });

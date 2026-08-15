@@ -236,7 +236,7 @@ export class XUIService {
       const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
       if (resp.data?.success) {
         const streamSettings = this.parseJson<Record<string, any>>(resp.data.obj?.streamSettings, {});
-        if (streamSettings.security === 'reality') flow = 'xtls-rprx-vision';
+        if (streamSettings.security === 'reality' && streamSettings.network === 'tcp') flow = 'xtls-rprx-vision';
       }
     } catch (e) {
       console.warn(`⚠️ [XUI] Could not fetch inbound settings for ${inboundId}`);
