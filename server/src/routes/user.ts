@@ -3,7 +3,7 @@ import { supabase } from '../services/supabase';
 import { authenticateUser } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
-import { parseVpnDevices, VpnDevice } from '../utils/vpn';
+import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 import crypto from 'crypto';
 
 const router = Router();
@@ -75,10 +75,29 @@ async function provisionDeviceOnServers(params: {
         } catch (e) {}
       }
 
-      const rawConfig = await instance.addClient(email, uuid, effectiveInboundId, params.expiresAt.getTime(), limitBytes);
-      if (rawConfig) {
-        const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
-        configLines.push(configWithSuffix);
+            try {
+        const inbounds = await instance.getInbounds();
+        const pubPorts = await getPublishedVlessPorts();
+        const realityInbounds = inbounds.filter((ib: any) => {
+          try {
+            const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+            return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
+          } catch { return false; }
+        });
+        for (const ri of realityInbounds) {
+          try {
+            await instance.addClient(email, uuid, ri.id, params.expiresAt.getTime(), limitBytes);
+            const rawLink = await instance.getInboundLink(ri.id, uuid, email);
+            if (rawLink) {
+              configLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+            }
+          } catch (e: any) {
+            console.error(`XUI provisioning failed on ${server.name} inbound ${ri.id}:`, e.message);
+          }
+        }
+      } catch (e: any) {
+        console.error(`XUI provisioning failed on ${server.name}:`, e.message);
+        throw e;
       }
     } catch (e: any) {
       console.error(`XUI provisioning failed on ${server.name}:`, e.message);

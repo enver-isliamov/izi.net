@@ -3,7 +3,7 @@ import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
-import { parseVpnDevices, VpnDevice } from '../utils/vpn';
+import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 
 import { getRequestConfig } from '../utils/axios';
 import { restartContainer } from '../utils/docker';
@@ -832,10 +832,34 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
                 if (realityInbound) effectiveInboundId = realityInbound.id;
               } catch (e) {}
 
-              const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
-              if (rawLink) {
-                const linkWithSuffix = rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
-                newConfigLines.push(linkWithSuffix);
+                            let anyLink = false;
+              try {
+                const inbounds = await instance.getInbounds();
+                const pubPorts = await getPublishedVlessPorts();
+                const realityInbounds = inbounds.filter((ib: any) => {
+                  try {
+                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                    return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
+                  } catch { return false; }
+                });
+                for (const ri of realityInbounds) {
+                  try {
+                    const expMs = device.expiresAt ? new Date(device.expiresAt).getTime() : 0;
+                    const existing = await instance.getClientByEmail(ri.id, device.email);
+                    if (!existing) await instance.addClient(device.email, device.uuid, ri.id, Number.isFinite(expMs) ? expMs : 0, 0);
+                    const rawLink2 = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                    if (rawLink2) {
+                      newConfigLines.push(rawLink2.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                      anyLink = true;
+                    }
+                  } catch (e) {}
+                }
+              } catch (e) {}
+              if (!anyLink) {
+                const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
+                if (rawLink) {
+                  newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                }
               }
             } catch (e) {}
           }
