@@ -435,7 +435,7 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
   try {
     const { email, password, initialBalance = '0', createSubscription, serverId, trafficLimitMb, periodMonths } = req.body || {};
     if (!email || typeof email !== 'string' || !email.includes('@')) return res.status(400).json({ error: 'Введите корректный Email' });
-    const genPassword = password || (Math.random().toString(36).slice(2, 10) + 'A1!');
+    const genPassword = password || (crypto.randomBytes(6).toString('hex') + 'A1!');
     const { data: created, error } = await supabase.auth.admin.createUser({ email, password: genPassword, email_confirm: true });
     if (error) throw error;
     const uid = created.user.id;
@@ -445,12 +445,37 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
     }
     if (createSubscription) {
       const days = (parseInt(periodMonths) || 1) * 30;
-      const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
-      await supabase.from('subscriptions').insert({
-        user_id: uid, server_id: serverId || null, plan_type: 'basic', status: 'active',
-        traffic_limit_mb: parseInt(trafficLimitMb) || 102400, traffic_used_mb: 0, device_limit: 2,
-        period_months: parseInt(periodMonths) || 1, expires_at: expiresAt, v2ray_config: '[]'
-      });
+      const expiresAtMs = Date.now() + days * 86400000;
+      const limitMb = parseInt(trafficLimitMb) || 102400;
+      // ADMIN-CREATE-002: провижининг VPN-ключей (как в ADMIN-011), чтобы подписка не была пустой
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const pEmail = `user_${uid.slice(0, 8)}_${Math.random().toString(36).substring(2, 6)}_0`;
+      const pUuid = crypto.randomUUID();
+      const devices: any[] = [];
+      for (const server of (activeServers || [])) {
+        try {
+          const { instance, server: serverData } = await getXuiForServer(server.id);
+          const inboundId = serverData.inbound_id || 0;
+          const rawConfig = await instance.addClient(pEmail, pUuid, inboundId, expiresAtMs, limitMb * 1024 * 1024);
+          if (rawConfig) {
+            devices.push({
+              id: `dev_${Date.now()}`, label: 'Устройство 1',
+              config: rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`),
+              email: pEmail, uuid: pUuid, expiresAt: new Date(expiresAtMs).toISOString(),
+              serverType: 'WIFI', trafficUsedBytes: 0, serverId: server.id
+            });
+          }
+        } catch (e: any) {
+          console.warn(`⚠️ [Admin] users/create provisioning failed on ${server.name}: ${e.message}`);
+        }
+      }
+      const { data: newSub, error: subErr } = await supabase.from('subscriptions').insert({
+        user_id: uid, server_id: serverId || activeServers?.[0]?.id || null, plan_type: 'basic', status: 'active',
+        traffic_limit_mb: limitMb, traffic_used_mb: 0, device_limit: 2,
+        period_months: parseInt(periodMonths) || 1, expires_at: new Date(expiresAtMs).toISOString(),
+        v2ray_config: JSON.stringify(devices)
+      }).select('id').single();
+      if (subErr) throw subErr;
     }
     res.json({ success: true, user: { id: uid, email: created.user.email }, password: genPassword });
   } catch (err: any) {

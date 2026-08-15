@@ -15,6 +15,19 @@ router.get('/config', (req, res) => {
   });
 });
 
+// SERVERS-STATUS: публичная страница «Сети» (/servers); ping/load — заглушки (колонок в БД нет, нужен сборщик метрик)
+router.get('/servers/status', async (_req, res) => {
+  try {
+    const { data: servers, error } = await supabase.from('vpn_servers').select('id,name,location_code,is_active,ip,domain,health_status');
+    if (error) throw error;
+    res.json((servers || []).map((sv: any) => ({
+      ...sv,
+      ping: sv.health_status === 'ok' ? 42 : 999,
+      load: sv.health_status === 'ok' ? 25 : 0
+    })));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // Синхронизация серверов (фронтенд вызывает это через /api/subscription/sync-servers)
 router.post('/sync-servers', async (req, res) => {
   try {
@@ -155,7 +168,7 @@ router.get('/sub/:id', async (req, res) => {
     const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
     const userEmail = subUser?.email || '';
     const subRemark = `izinet.online${userEmail ? '_' + userEmail : ''}`;
-    configText = configText.split('\n').map(line => line.trim() ? line.replace(/(#.*)$/, `#${subRemark}`) : line).join('\n');
+    configText = [...new Set(configText.split('\n').map(line => line.trim() ? line.replace(/(#.*)$/, `#${subRemark}`) : line))].join('\n');
 
     const base64Config = Buffer.from(configText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
