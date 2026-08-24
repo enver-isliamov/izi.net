@@ -261,7 +261,7 @@ export class XUIService {
     const clientData = {
       id: inboundId,
       settings: JSON.stringify({
-        clients: [{ id: uuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: '', subId: '' }]
+        clients: [{ id: uuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: 0, subId: '' }]
       })
     };
 
@@ -299,7 +299,12 @@ export class XUIService {
             console.error(`❌ [XUI] Retry addClient after cleanup failed: ${retryErr.message}`);
           }
         }
-        throw new Error(msg || 'Failed to add client');
+        try {
+          return await this.addClientViaFullUpdate(email, uuid, inboundId, expiryTime, limitBytes);
+        } catch (fallbackErr: any) {
+          console.error(`[XUI] Full-update fallback failed for ${email}: ${fallbackErr.message}`);
+          throw new Error(msg || 'Failed to add client');
+        }
       }
     } catch (error: any) {
       if (error.response?.status === 401) {
@@ -308,8 +313,36 @@ export class XUIService {
         return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
       console.error(`❌ [XUI] addClient error for ${email}: ${error.message}`);
-      throw error;
+      try {
+        return await this.addClientViaFullUpdate(email, uuid, inboundId, expiryTime, limitBytes);
+      } catch (fallbackErr: any) {
+        console.error(`[XUI] Full-update fallback failed for ${email}: ${fallbackErr.message}`);
+        throw error;
+      }
     }
+  }
+
+  private async addClientViaFullUpdate(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0): Promise<string> {
+    await this.login();
+    const getUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+    const resp = await axios.get(getUrl, getRequestConfig(getUrl, this.authHeaders()));
+    if (!resp.data?.success || !resp.data?.obj) throw new Error('Inbound not found for full update');
+    const inbound = resp.data.obj;
+    const settings = this.parseJson<Record<string, any>>(inbound.settings, {});
+    if (!settings || typeof settings !== 'object') throw new Error('Inbound settings not parseable');
+    const clients = Array.isArray(settings.clients) ? settings.clients : (settings.clients = []);
+    if (!clients.some((c: any) => c.id === uuid)) {
+      let flow = '';
+      const streamSettings = this.parseJson<Record<string, any>>(inbound.streamSettings, {});
+      if (streamSettings.security === 'reality' && streamSettings.network === 'tcp') flow = 'xtls-rprx-vision';
+      clients.push({ id: uuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: 0, subId: '' });
+    }
+    const payload = { ...inbound, settings };
+    const updUrl = `${this.host}${this.basePath}/panel/api/inbounds/update/${inboundId}`;
+    const updResp = await axios.post(updUrl, payload, getRequestConfig(updUrl, this.authHeaders({ 'Content-Type': 'application/json' })));
+    if (!updResp.data?.success) throw new Error(updResp.data?.msg || 'Full inbound update failed');
+    console.log(`[XUI] Client ${email} added via full inbound update (inbound ${inboundId})`);
+    return this.getInboundLink(inboundId, uuid, email);
   }
 
   async getInboundLink(inboundId: number, uuid: string, email: string): Promise<string> {
@@ -432,7 +465,7 @@ export class XUIService {
     const clientData = {
       id: effectiveInboundId,
       settings: JSON.stringify({
-        clients: [{ id: effectiveUuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: '', subId: '' }]
+        clients: [{ id: effectiveUuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: 0, subId: '' }]
       })
     };
 

@@ -133,6 +133,10 @@ cd /opt/izinet && bash diagnose.sh       # Общая диагностика
 curl -s http://localhost:3005/api/sub/SUBSCRIPTION_ID | base64 -d
 ```
 
+## Документация
+
+- [VLESS / подписки — чек-лист проверок перед релизом](docs/vless-checklist.md)
+
 ## Development
 
 ```bash

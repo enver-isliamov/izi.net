@@ -457,7 +457,16 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
       for (const server of (activeServers || [])) {
         try {
           const { instance, server: serverData } = await getXuiForServer(server.id);
-          const inboundId = serverData.inbound_id || 0;
+          let inboundId = serverData.inbound_id || 0;
+          if (!inboundId || inboundId <= 0) {
+            try {
+              const inbounds = await instance.getInbounds();
+              const realityInbound = inbounds.find((ib: any) => {
+                try { const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {}); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
+              });
+              if (realityInbound) inboundId = realityInbound.id;
+            } catch (e) {}
+          }
           const rawConfig = await instance.addClient(pEmail, pUuid, inboundId, expiresAtMs, limitMb * 1024 * 1024);
           if (rawConfig) {
             devices.push({
@@ -551,7 +560,16 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     for (const server of (activeServers || [])) {
       try {
         const { instance, server: serverData } = await getXuiForServer(server.id);
-              const inboundId = serverData.inbound_id || 0;
+              let inboundId = serverData.inbound_id || 0;
+              if (!inboundId || inboundId <= 0) {
+                try {
+                  const inbounds = await instance.getInbounds();
+                  const realityInbound = inbounds.find((ib: any) => {
+                    try { const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {}); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
+                  });
+                  if (realityInbound) inboundId = realityInbound.id;
+                } catch (e) {}
+              }
         const rawConfig = await instance.addClient(email, uuid, inboundId, expiresAtMs, limitBytes);
         if (rawConfig) {
           devices.push({
@@ -717,15 +735,25 @@ router.post('/users/:userId/devices', adminOnly, async (req, res) => {
     let configs: string[] = [];
     for (const s of servers) {
       try {
-        const { instance } = await getXuiForServer(s.id);
-        const cfg = await instance.addClient(email, uuid, 1, new Date(sub.expires_at).getTime(), 100*1024*1024*1024);
-        if (cfg) configs.push(cfg + '#' + s.name.replace(/\\s+/g, '_'));
+        const { instance, server: serverData } = await getXuiForServer(s.id);
+        let inboundId = serverData.inbound_id || 0;
+        if (!inboundId || inboundId <= 0) {
+          try {
+            const inbounds = await instance.getInbounds();
+            const realityInbound = inbounds.find((ib: any) => {
+              try { const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {}); return ss.security === 'reality' && ib.port === 443; } catch { return false; }
+            });
+            if (realityInbound) inboundId = realityInbound.id;
+          } catch (e) {}
+        }
+        const cfg = await instance.addClient(email, uuid, inboundId, new Date(sub.expires_at).getTime(), 100*1024*1024*1024);
+        if (cfg) configs.push(cfg.replace(/(#.*)?$/, '#' + s.name.replace(/\s+/g, '_')));
       } catch (e: any) { }
     }
     const newDev: VpnDevice = {
       id: 'dev_' + Date.now(),
       label: label || 'Device',
-      config: configs.join('\\n'),
+      config: configs.join('\n'),
       email,
       uuid,
       expiresAt: sub.expires_at,
