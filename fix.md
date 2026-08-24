@@ -122,3 +122,13 @@ serverNames: ['www.microsoft.com', 'microsoft.com']
 target: host.docker.internal:3443
 flow: xtls-rprx-vision
 ```
+
+---
+
+## 🚀 AI STUDIO MIGRATION (24 августа 2026)
+
+- [x] [2026-08-24 02:33] **SYS/DEV-SERVER-002**: Исправление запуска dev-сервера (non-blocking boot):
+  - `server/src/index.ts`: Вызов `app.listen` и монтирование Vite middleware перенесены в начало функции `start()`, чтобы сервер немедленно открывал порт 3000. Фоновые проверки Supabase и сервисов вынесены в асинхронную задачу без блокировки и без вызова `process.exit(1)`.
+  - `server/src/services/supabase.ts`: Добавлена мгновенная проверка на пустой/placeholder `VITE_SUPABASE_URL`, исключающая ожидание таймаутов сетевых запросов при инициализации.
+
+

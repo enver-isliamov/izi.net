@@ -2,16 +2,23 @@ import { Telegraf, Context } from 'telegraf';
 import { supabase } from './supabase';
 
 export class BotService {
-  private bot: Telegraf;
-  private adminId: string;
+  private bot: Telegraf | null = null;
+  private adminId: string = '';
 
   constructor() {
     const token = process.env.TELEGRAM_BOT_TOKEN || '';
+    if (!token) {
+      console.log('ℹ️ [BotService] TELEGRAM_BOT_TOKEN is not set - bot disabled');
+      return;
+    }
     this.bot = new Telegraf(token);
     this.adminId = process.env.TELEGRAM_ADMIN_ID || '';
   }
 
   public init() {
+    if (!process.env.TELEGRAM_BOT_TOKEN || !this.bot) {
+      return;
+    }
     this.bot.start((ctx) => this.handleStart(ctx));
 
     this.bot.action('action_status', (ctx) => this.handleStatus(ctx));
@@ -132,7 +139,9 @@ export class BotService {
   }
 
   public stop(signal: string) {
-    this.bot.stop(signal);
+    if (this.bot) {
+      this.bot.stop(signal);
+    }
   }
 }
 
