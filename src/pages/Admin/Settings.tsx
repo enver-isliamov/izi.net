@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2, Lock, Unlock, Copy } from 'lucide-react';
+import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2, Lock, Unlock, Copy, Archive, Download, Trash2, HardDrive } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -10,6 +10,13 @@ import { toast } from 'sonner';
 interface Setting {
   key: string;
   value: string;
+}
+
+interface BackupItem {
+  filename: string;
+  size_bytes: number;
+  size_formatted: string;
+  created_at: string;
 }
 
 export default function AdminSettings() {
@@ -29,6 +36,9 @@ export default function AdminSettings() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
+  const [backups, setBackups] = useState<BackupItem[]>([]);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [loadingBackups, setLoadingBackups] = useState(false);
   const [editLocks, setEditLocks] = useState<Record<string, boolean>>({
     MONTHLY_PRICE: true,
     PUBLIC_URL: true,
@@ -44,7 +54,92 @@ export default function AdminSettings() {
 
   useEffect(() => {
     fetchSettings();
+    fetchBackups();
   }, [session]);
+
+  const fetchBackups = async () => {
+    try {
+      setLoadingBackups(true);
+      const { data } = await axios.get('/api/admin/system/backups', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (data.ok && Array.isArray(data.backups)) {
+        setBackups(data.backups);
+      }
+    } catch (e: any) {
+      console.error('Failed to fetch backups:', e);
+    } finally {
+      setLoadingBackups(false);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    try {
+      setIsBackingUp(true);
+      setSystemLogs(prev => [
+        ...prev,
+        '[Старт] Создание полной резервной копии VPS (3x-ui x-ui.db, Hysteria2, .env, Supabase snapshot)...',
+        '[Система] Упаковка в tar.gz архив...'
+      ]);
+      toast.loading('Создание бэкапа VPS...', { id: 'sys-backup' });
+      
+      const { data } = await axios.post('/api/admin/system/backup', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+
+      if (data.ok) {
+        toast.success(`Бэкап создан: ${data.filename} (${data.size_formatted})`, { id: 'sys-backup' });
+        setSystemLogs(prev => [
+          ...prev,
+          `[Успех] Резервная копия сохранена: ${data.filename} (${data.size_formatted})`,
+          `[Инфо] Сохранённые компоненты: ${(data.saved_files || []).join(', ')}`
+        ]);
+        fetchBackups();
+      } else {
+        toast.error(`Ошибка создания бэкапа: ${data.error}`, { id: 'sys-backup' });
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка бэкапа] ${errMsg}`]);
+      toast.error('Ошибка бэкапа: ' + errMsg, { id: 'sys-backup' });
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleDownloadBackup = async (filename: string) => {
+    try {
+      toast.loading(`Скачивание ${filename}...`, { id: 'dl-backup' });
+      const response = await axios.get(`/api/admin/system/backups/${encodeURIComponent(filename)}/download`, {
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Архив успешно скачан на ваше устройство!', { id: 'dl-backup' });
+    } catch (e: any) {
+      toast.error('Ошибка скачивания: ' + (e.response?.data?.error || e.message), { id: 'dl-backup' });
+    }
+  };
+
+  const handleDeleteBackup = async (filename: string) => {
+    if (!confirm(`Вы действительно хотите удалить бэкап ${filename}?`)) return;
+    try {
+      await axios.delete(`/api/admin/system/backups/${encodeURIComponent(filename)}`, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success('Бэкап удален');
+      fetchBackups();
+    } catch (e: any) {
+      toast.error('Ошибка удаления: ' + (e.response?.data?.error || e.message));
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -757,6 +852,86 @@ docker image prune -f`}
                 {isRegenerating ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
                 Обновить все ссылки
               </button>
+            </div>
+          </div>
+
+          {/* VPS Backup Management Card */}
+          <div className="p-5 bg-gradient-to-r from-blue-950/30 to-purple-950/20 rounded-2xl border border-blue-500/20 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400 border border-blue-500/20">
+                  <Archive size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Резервное копирование VPS в 1 клик
+                    <span className="text-[10px] bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded-full border border-blue-500/30">
+                      3x-ui + Hysteria2 + .env + Supabase
+                    </span>
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Создайте архив состояния VPS перед обновлением или миграцией. Архив можно скачать прямо в браузер.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isBackingUp}
+                onClick={handleCreateBackup}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/20 transition-all active:scale-95 shrink-0"
+              >
+                {isBackingUp ? <RefreshCw className="animate-spin" size={14} /> : <HardDrive size={14} />}
+                Создать бэкап VPS
+              </button>
+            </div>
+
+            {/* Backups List */}
+            <div className="space-y-2 pt-2 border-t border-white/5">
+              <div className="flex justify-between items-center text-xs font-mono text-zinc-400">
+                <span>Сохраненные архивы ({backups.length}):</span>
+                {loadingBackups && <RefreshCw size={12} className="animate-spin text-blue-400" />}
+              </div>
+
+              {backups.length === 0 ? (
+                <p className="text-xs text-zinc-500 font-mono py-2">
+                  Архивы еще не создавались. Нажмите кнопку выше для создания первой резервной копии.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {backups.map((b) => (
+                    <div key={b.filename} className="flex items-center justify-between p-3 bg-black/40 rounded-xl border border-white/5 hover:border-blue-500/20 transition-all font-mono text-xs">
+                      <div className="flex items-center gap-3 truncate">
+                        <Archive size={14} className="text-blue-400 shrink-0" />
+                        <div className="truncate">
+                          <p className="text-zinc-200 truncate font-semibold">{b.filename}</p>
+                          <p className="text-[10px] text-zinc-500">
+                            {new Date(b.created_at).toLocaleString('ru-RU')} • {b.size_formatted}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-3">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadBackup(b.filename)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/20 rounded-lg text-xs font-semibold transition-colors"
+                          title="Скачать на устройство"
+                        >
+                          <Download size={12} />
+                          Скачать
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBackup(b.filename)}
+                          className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition-colors"
+                          title="Удалить архив"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

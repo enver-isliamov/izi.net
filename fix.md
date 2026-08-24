@@ -146,6 +146,12 @@ flow: xtls-rprx-vision
   - `src/pages/Admin/Servers.tsx`: Кнопка «Проверить соединение» подключена к расширенной комплексной диагностике (`client-check`), проверяющей не только доступ к веб-панели 3x-ui, но и доступность TCP 443, валидность Reality PBK, SID, SNI и отсутствие проксирования Cloudflare.
   - `migrations/000_full_schema.sql`: Сформирован единый мастер-скрипт полной схемы PostgreSQL/Supabase со всеми связями, внешними ключами и уникальными индексами.
   - `scripts/backup_all.sh`: Создан скрипт резервного копирования одной командой (архивация SQLite `x-ui.db`, `config.yaml` Hysteria и `.env`).
+- [x] [2026-08-24 11:12] **SYS/UI-BACKUP-001**: Внедрение резервного копирования VPS в 1 клик прямо из панели управления UI:
+  - `server/src/routes/admin.ts`: Созданы эндпоинты `/api/admin/system/backup` (создание архива), `/api/admin/system/backups` (список архивов), `/api/admin/system/backups/:filename/download` (скачивание в браузер) и удаление.
+  - `src/pages/Admin/Settings.tsx`: Добавлен интерактивный блок «Резервное копирование VPS в 1 клик» с индикацией процесса, списком созданных архивов с датой/размером и кнопкой прямого скачивания файла на компьютер администратора.
+- [x] [2026-08-24 11:19] **SYS/PORT-BIND-001**: Исправление несоответствия портов между Docker Compose/Nginx (3005) и Node Express (3000):
+  - `server/src/index.ts`: Настройка `PORT = process.env.PORT || (process.env.NODE_ENV === 'production' || process.env.IS_DOCKER ? 3005 : 3000)`.
+  - Устранена ошибка `502 Bad Gateway` в Nginx при развёртывании через Docker на VPS.
 
 
 

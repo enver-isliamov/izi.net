@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
@@ -818,6 +820,166 @@ router.post('/system/diagnose-vps', adminOnly, async (req, res) => {
 
 router.post('/system/repair-vless', adminOnly, async (req, res) => {
   res.json({ success: true, message: 'Команда ремонта принята', stdout: 'Маршрут API доступен. Для полного ремонта используйте repair_xui.py на VPS.', stderr: '' });
+});
+
+// === BACKUP SYSTEM: Создание, список и скачивание резервных копий VPS ===
+router.post('/system/backup', adminOnly, async (_req, res) => {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupDir = fs.existsSync('/opt/izinet_backups') 
+      ? '/opt/izinet_backups' 
+      : path.join(process.cwd(), 'backups');
+    
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const stageDir = path.join('/tmp', `izinet_backup_${Date.now()}`);
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const savedFiles: string[] = [];
+
+    // 1. Копируем x-ui.db
+    const xuiPaths = ['/etc/x-ui/x-ui.db', './x-ui.db', '/opt/izinet/x-ui.db', path.join(process.cwd(), 'x-ui.db')];
+    for (const p of xuiPaths) {
+      if (fs.existsSync(p)) {
+        fs.copyFileSync(p, path.join(stageDir, 'x-ui.db'));
+        savedFiles.push('x-ui.db (3x-ui SQLite)');
+        break;
+      }
+    }
+
+    // 2. Копируем Hysteria 2 config
+    const hysteriaPaths = ['/etc/hysteria/config.yaml', './config.yaml', path.join(process.cwd(), 'config.yaml')];
+    for (const p of hysteriaPaths) {
+      if (fs.existsSync(p)) {
+        fs.copyFileSync(p, path.join(stageDir, 'hysteria_config.yaml'));
+        savedFiles.push('hysteria_config.yaml');
+        break;
+      }
+    }
+
+    // 3. Копируем .env
+    const envPath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      fs.copyFileSync(envPath, path.join(stageDir, '.env'));
+      savedFiles.push('.env (Environment secrets)');
+    }
+
+    // 4. Сохраняем снимок таблиц Supabase (серверы и настройки)
+    try {
+      const { data: servers } = await supabase.from('vpn_servers').select('*');
+      const { data: settings } = await supabase.from('settings').select('*');
+      const snapshot = {
+        created_at: new Date().toISOString(),
+        servers: servers || [],
+        settings: settings || []
+      };
+      fs.writeFileSync(path.join(stageDir, 'database_snapshot.json'), JSON.stringify(snapshot, null, 2), 'utf-8');
+      savedFiles.push('database_snapshot.json (Supabase config)');
+    } catch (e: any) {
+      console.warn('⚠️ [Backup] Failed to dump DB snapshot:', e.message);
+    }
+
+    const archiveName = `izinet_backup_${timestamp}.tar.gz`;
+    const archivePath = path.join(backupDir, archiveName);
+
+    try {
+      execSync(`tar -czf "${archivePath}" -C "${stageDir}" .`, { timeout: 30000 });
+    } catch (tarErr: any) {
+      // Fallback: create raw json manifest if tar fails
+      const manifestPath = path.join(backupDir, `izinet_backup_${timestamp}.json`);
+      fs.writeFileSync(manifestPath, JSON.stringify({ savedFiles, timestamp }, null, 2));
+    }
+
+    // Очистка stage директории
+    fs.rmSync(stageDir, { recursive: true, force: true });
+
+    let fileSize = 0;
+    if (fs.existsSync(archivePath)) {
+      fileSize = fs.statSync(archivePath).size;
+    }
+
+    res.json({
+      ok: true,
+      filename: archiveName,
+      size_bytes: fileSize,
+      size_formatted: (fileSize / 1024).toFixed(1) + ' KB',
+      saved_files: savedFiles,
+      created_at: new Date().toISOString(),
+      message: 'Резервная копия успешно создана'
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/system/backups', adminOnly, async (_req, res) => {
+  try {
+    const backupDir = fs.existsSync('/opt/izinet_backups') 
+      ? '/opt/izinet_backups' 
+      : path.join(process.cwd(), 'backups');
+    
+    if (!fs.existsSync(backupDir)) {
+      return res.json({ ok: true, backups: [] });
+    }
+
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('izinet_backup_'))
+      .map(filename => {
+        const filePath = path.join(backupDir, filename);
+        const stats = fs.statSync(filePath);
+        return {
+          filename,
+          size_bytes: stats.size,
+          size_formatted: (stats.size / 1024).toFixed(1) + ' KB',
+          created_at: stats.mtime.toISOString()
+        };
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    res.json({ ok: true, backups: files });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/system/backups/:filename/download', adminOnly, async (req, res) => {
+  try {
+    const { filename } = req.params;
+    // Security check against directory traversal
+    const safeFilename = path.basename(filename);
+    const backupDir = fs.existsSync('/opt/izinet_backups') 
+      ? '/opt/izinet_backups' 
+      : path.join(process.cwd(), 'backups');
+    
+    const filePath = path.join(backupDir, safeFilename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ ok: false, error: 'Файл бэкапа не найден' });
+    }
+
+    res.download(filePath, safeFilename);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.delete('/system/backups/:filename', adminOnly, async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const safeFilename = path.basename(filename);
+    const backupDir = fs.existsSync('/opt/izinet_backups') 
+      ? '/opt/izinet_backups' 
+      : path.join(process.cwd(), 'backups');
+    
+    const filePath = path.join(backupDir, safeFilename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.json({ ok: true, message: 'Бэкап удален' });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
