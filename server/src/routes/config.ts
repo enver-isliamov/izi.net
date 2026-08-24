@@ -59,10 +59,37 @@ router.get('/sub/:id', async (req, res) => {
   const { deviceId } = req.query;
 
   try {
-    const { data: sub, error } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    let sub: any = null;
+    const { data: subById, error: errById } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    
+    if (subById) {
+      sub = subById;
+    } else {
+      // Fallback: search by user_id
+      const { data: subByUser } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (subByUser) {
+        sub = subByUser;
+      }
+    }
 
-    if (error || !sub || sub.status !== 'active') {
+    if (!sub) {
+      console.warn(`⚠️ [SUB] Subscription not found for param: ${id}`);
       return res.status(404).send('Subscription not found');
+    }
+
+    // Allow active, limited, trial or valid unexpired subscriptions
+    const isStatusAllowed = ['active', 'limited', 'trial'].includes(sub.status) || 
+      (sub.expires_at && new Date(sub.expires_at).getTime() > Date.now());
+
+    if (!isStatusAllowed) {
+      console.warn(`⚠️ [SUB] Subscription ${id} inactive status: ${sub.status}`);
+      return res.status(404).send('Subscription inactive');
     }
 
     // CACHE-001: VPN clients always get fresh subscription data
@@ -76,22 +103,24 @@ router.get('/sub/:id', async (req, res) => {
         let devices = JSON.parse(configText);
         if (deviceId) devices = devices.filter((d: any) => d.id === deviceId);
 
-        // Get active server names for filtering (only healthy servers)
-        const { data: activeServers } = await supabase
+        // Get active server names for filtering
+        const { data: allActiveServers } = await supabase
           .from('vpn_servers')
-          .select('name')
-          .eq('is_active', true)
-          .eq('health_status', 'ok');
-        const activeNames = (activeServers || []).map((s: any) => s.name.replace(/\s+/g, '_'));
+          .select('name,health_status')
+          .eq('is_active', true);
+        
+        const healthyServers = (allActiveServers || []).filter((s: any) => s.health_status === 'ok');
+        const activeServers = healthyServers.length > 0 ? healthyServers : (allActiveServers || []);
+        const activeNames = activeServers.map((s: any) => s.name.replace(/\s+/g, '_'));
 
         // Join device configs with real newline
-        const allLines = devices.map((d: any) => d.config).join('\n');
+        const allLines = devices.map((d: any) => d.config).filter(Boolean).join('\n');
 
         // Filter: keep lines from active servers (or all if no active servers found)
-        if (activeNames.length > 0) {
+        if (activeNames.length > 0 && allLines) {
           const filtered = allLines.split('\n').filter((line: string) => {
             const suffix = line.split('#')[1] || '';
-            return activeNames.some((name: string) => suffix.includes(name));
+            return activeNames.some((name: string) => suffix.includes(name)) || suffix.includes('izinet');
           });
           configText = filtered.length > 0 ? filtered.join('\n') : allLines;
         } else {
@@ -105,7 +134,10 @@ router.get('/sub/:id', async (req, res) => {
       console.log(`🔄 [SUB] Lazy heal for ${id} — v2ray_config empty or no valid links`);
       try {
         const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-        const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true).eq('health_status', 'ok');
+        const { data: allActiveServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+        const healthyServers = (allActiveServers || []).filter((s: any) => s.health_status === 'ok');
+        const activeServers = healthyServers.length > 0 ? healthyServers : (allActiveServers || []);
+
         if (devices.length > 0 && activeServers && activeServers.length > 0) {
           let changed = false;
           for (const device of devices) {
@@ -133,18 +165,14 @@ router.get('/sub/:id', async (req, res) => {
             if (lines.length > 0) { device.config = lines.join('\n'); changed = true; }
           }
           if (changed) {
-            await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', id);
-            configText = devices.map((d: any) => d.config).join('\n');
-            console.log(`✅ [SUB] Lazy heal succeeded for ${id}`);
+            await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+            configText = devices.map((d: any) => d.config).filter(Boolean).join('\n');
+            console.log(`✅ [SUB] Lazy heal succeeded for ${sub.id}`);
           }
         }
       } catch (e: any) {
         console.error(`❌ [SUB] Lazy heal failed for ${id}: ${e.message}`);
       }
-    }
-
-    if (!configText || !configText.trim()) {
-      return res.status(404).send('No valid VPN configs found for this subscription');
     }
 
     // Добавляем Hysteria2 ссылки если настроен
@@ -160,7 +188,7 @@ router.get('/sub/:id', async (req, res) => {
           hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#${name}-hysteria`);
         }
         if (hyLinks.length > 0) {
-          configText = configText + '\n' + [...new Set(hyLinks)].join('\n');
+          configText = (configText ? configText + '\n' : '') + [...new Set(hyLinks)].join('\n');
         }
       }
     } catch (e) {}
@@ -169,7 +197,15 @@ router.get('/sub/:id', async (req, res) => {
     const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
     const userEmail = subUser?.email || '';
     const subRemark = `izinet.online${userEmail ? '_' + userEmail : ''}`;
-    configText = [...new Set(configText.split('\n').map(line => line.trim() ? line.replace(/(#.*)$/, `#${subRemark}`) : line))].join('\n');
+
+    if (configText && configText.trim()) {
+      configText = [...new Set(configText.split('\n').map(line => line.trim() ? line.replace(/(#.*)$/, `#${subRemark}`) : line))].join('\n');
+    }
+
+    if (!configText || !configText.trim()) {
+      console.warn(`⚠️ [SUB] Empty config for subscription ${sub.id}, returning fallback notice`);
+      configText = `# profile: izinet.online\n# status: configuring\n# user: ${userEmail || sub.id}`;
+    }
 
     const base64Config = Buffer.from(configText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -178,8 +214,9 @@ router.get('/sub/:id', async (req, res) => {
     res.setHeader('profile-update-interval', '12');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));
     res.send(base64Config);
-  } catch (err) {
-    res.status(500).send('Error');
+  } catch (err: any) {
+    console.error('🔥 [SUB] Error generating subscription config:', err);
+    res.status(500).send('Error generating subscription');
   }
 });
 

@@ -1,7 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+function sanitizeUrl(url?: string): string {
+  if (!url || typeof url !== 'string') return 'https://placeholder.supabase.co';
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return 'https://placeholder.supabase.co';
+  }
+  return trimmed;
+}
+
+function sanitizeKey(key?: string): string {
+  if (!key || typeof key !== 'string') return 'placeholder-anon-key';
+  const trimmed = key.trim();
+  if (trimmed.startsWith('#') || trimmed.length < 5) return 'placeholder-anon-key';
+  return trimmed;
+}
+
+const supabaseUrl = sanitizeUrl(import.meta.env.VITE_SUPABASE_URL);
+const supabaseAnonKey = sanitizeKey(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
 const PROXY_PATHS = ['/rest/v1/', '/auth/v1/'];
 

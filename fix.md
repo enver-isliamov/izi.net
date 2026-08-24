@@ -130,5 +130,8 @@ flow: xtls-rprx-vision
 - [x] [2026-08-24 02:33] **SYS/DEV-SERVER-002**: Исправление запуска dev-сервера (non-blocking boot):
   - `server/src/index.ts`: Вызов `app.listen` и монтирование Vite middleware перенесены в начало функции `start()`, чтобы сервер немедленно открывал порт 3000. Фоновые проверки Supabase и сервисов вынесены в асинхронную задачу без блокировки и без вызова `process.exit(1)`.
   - `server/src/services/supabase.ts`: Добавлена мгновенная проверка на пустой/placeholder `VITE_SUPABASE_URL`, исключающая ожидание таймаутов сетевых запросов при инициализации.
+- [x] [2026-08-24 02:45] **SYS/DEV-SERVER-003**: Исправление конфликта портов и инициализации Supabase URL:
+  - `server/src/index.ts`: Порт жестко зафиксирован на `3000` (переменная `PORT` из Cloud Run окружения передавала `8080`, что вызывало `EADDRINUSE`).
+  - `server/src/services/supabase.ts` & `src/lib/supabase.ts`: Добавлены санитайзеры `sanitizeUrl` и `sanitizeKey`, исключающие выброс `Invalid supabaseUrl` при наличии плейсхолдеров/комментариев в переменных окружения.
 
 

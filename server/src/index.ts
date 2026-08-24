@@ -24,7 +24,7 @@ import { authenticateUser } from './utils/auth';
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = parseInt(process.env.PORT || '3000');
+const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -69,6 +69,7 @@ app.use('/api', generalLimiter);
 app.use('/api', userRoutes);
 app.use('/api', configRoutes);
 app.use('/api/subscription', configRoutes);
+app.use('/sub', configRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/pay', paymentRoutes);
 
