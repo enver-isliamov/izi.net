@@ -1,0 +1,13 @@
+# Cursor IDE Rules — izinet
+
+# 1. CORE PRINCIPLE: ZERO-BREAK POLICY
+- Never break VLESS-Reality, Hysteria2, Enot.io payments, Telegram bot polling, or user auth.
+- Always review `AGENTS.md` and `docs/ARCHITECTURE.md` for architecture details.
+
+# 2. KEY REPOSITORY RULES:
+- Reality Keys are stored ONLY in 3x-ui SQLite database (`x-ui.db`). NEVER put keys in `.env` or database tables.
+- Nginx listens on port 3443 (SSL termination). Xray listens on port 443. Reality target is `host.docker.internal:3443`.
+- Hysteria2 runs on UDP 443 (ensure UDP rules are preserved).
+- When resolving bugs, record them in `fix.md` with format: `- [x] [YYYY-MM-DD HH:MM] **SYS/BUG-ID**: Description`.
+- Tag critical code changes with `// FIX-ID: Description`.
+- Always check type safety: `npm run lint` and `npm run build` must pass.
