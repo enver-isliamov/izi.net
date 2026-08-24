@@ -152,6 +152,8 @@ flow: xtls-rprx-vision
 - [x] [2026-08-24 11:19] **SYS/PORT-BIND-001**: Исправление несоответствия портов между Docker Compose/Nginx (3005) и Node Express (3000):
   - `server/src/index.ts`: Настройка `PORT = process.env.PORT || (process.env.NODE_ENV === 'production' || process.env.IS_DOCKER ? 3005 : 3000)`.
   - Устранена ошибка `502 Bad Gateway` в Nginx при развёртывании через Docker на VPS.
+- [x] [2026-08-24 11:46] **SYS/REALITY-PARSE-001**: Исправление парсинга `streamSettings` в проверке соединения `/api/admin/servers/:id/client-check`:
+  - `server/src/routes/admin.ts`: Безопасная обработка `streamSettings` (объект или JSON-строка) при получении из 3x-ui API. Устранена ложная ошибка `NO_REALITY_INBOUND_ON_443`.
 
 
 

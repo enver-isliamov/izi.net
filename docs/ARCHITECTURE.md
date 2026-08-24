@@ -77,7 +77,21 @@
 
 ---
 
-## 🔄 4. ПРОТОКОЛ БЕЗОПАСНОГО ОБНОВЛЕНИЯ (SAFE UPDATE WORKFLOW)
+## 🔌 4. ПРАВИЛА ПОРТОВ ВЕБ-СЕРВЕРА И NGINX (ПРЕДОТВРАЩЕНИЕ 502 BAD GATEWAY)
+
+1. **Порты Express Web App**:
+   - На боевом VPS в Docker Express обязан слушать **порт 3005** (`docker-compose.yml` пробрасывает `3005:3005`).
+   - Nginx на хосте настроен на `proxy_pass http://127.0.0.1:3005;`.
+   - В среде разработки AI Studio Express слушает **порт 3000**.
+2. **Строгий запрет**:
+   - Запрещено жестко писать `const PORT = 3000;` в `server/src/index.ts`.
+   - Порт обязан определяться динамически:
+     `const PORT = Number(process.env.PORT) || (process.env.NODE_ENV === 'production' || process.env.IS_DOCKER ? 3005 : 3000);`
+   - Если сервер запустится на порту 3000 в Docker, Nginx не сможет до него достучаться на 3005 и выдаст ошибку **502 Bad Gateway**.
+
+---
+
+## 🔄 5. ПРОТОКОЛ БЕЗОПАСНОГО ОБНОВЛЕНИЯ (SAFE UPDATE WORKFLOW)
 
 Перед накатом обновлений на VPS (`update.sh` или ручной `git pull`) агенты и администраторы обязаны соблюдать следующий регламент:
 
@@ -87,10 +101,11 @@ npm run lint && npm run build
 
 # 2. Накат на сервере без перезаписи базы данных SQLite 3x-ui:
 git pull
+docker compose down
 docker compose up -d --build
 
 # 3. Валидация работоспособности (Smoke Test):
-curl -s http://localhost:3000/api/health
+curl -s http://localhost:3005/api/health
 curl -k -I https://127.0.0.1:3443/
 
 # 4. Проверка выдачи конфигураций VLESS и Hysteria2:
@@ -99,10 +114,11 @@ curl -k -I https://127.0.0.1:3443/
 
 ---
 
-## 📋 5. ТАБЛИЦА СОВМЕСТИМОСТИ И ДИАГНОСТИКИ
+## 📋 6. ТАБЛИЦА СОВМЕСТИМОСТИ И ДИАГНОСТИКИ
 
 | Симптом | Корневая причина | Решение |
 | :--- | :--- | :--- |
+| **502 Bad Gateway на сайте** | Express слушает порт 3000 вместо 3005 в Docker | Проверить `server/src/index.ts`: `PORT` должен быть 3005 при `IS_DOCKER` / `NODE_ENV=production` |
 | **VLESS не подключается (TLS Handshake error)** | Истёк SSL сертификат домена или сбился SNI | `certbot renew && systemctl reload nginx`, проверить `sni` в ссылке |
 | **VLESS: 404 при добавлении клиента** | 3x-ui API не имеет метода `addClient` | Срабатывает fallback `addClientViaFullUpdate` в `xui.service.ts` |
 | **Сайт недоступен, но VPN работает** | Xray target не указывает на `host.docker.internal:3443` | Запустить `python3 server/src/scripts/fix_reality_inbound.py` |

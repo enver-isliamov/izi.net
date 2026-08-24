@@ -1265,20 +1265,26 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
 
         const realityInbound = inbounds.find((ib: any) => {
           try {
-            const ss = JSON.parse(ib.streamSettings || '{}');
-            return ss.security === 'reality' && ib.port === 443;
+            let ss = ib.streamSettings;
+            if (typeof ss === 'string') ss = JSON.parse(ss || '{}');
+            const portMatch = Number(ib.port) === 443;
+            const isReality = ss?.security === 'reality';
+            return isReality && portMatch;
           } catch { return false; }
         });
 
         if (realityInbound) {
-          const ss = JSON.parse(realityInbound.streamSettings || '{}');
+          let ss: any = realityInbound.streamSettings;
+          if (typeof ss === 'string') {
+            try { ss = JSON.parse(ss || '{}'); } catch { ss = {}; }
+          }
           const rs = ss.realitySettings || {};
           const s = rs.settings || rs;
           checks.reality = {
             id: realityInbound.id, port: realityInbound.port, network: ss.network || 'tcp',
-            publicKey: s.publicKey || rs.publicKey || '', fingerprint: s.fingerprint || '',
-            serverNames: s.serverName || rs.serverNames || [], shortIds: s.shortIds || rs.shortIds || [],
-            spiderX: s.spiderX || rs.spiderX || '', dest: rs.dest || ''
+            publicKey: rs.publicKey || s.publicKey || '', fingerprint: s.fingerprint || rs.fingerprint || 'chrome',
+            serverNames: rs.serverNames || (s.serverName ? [s.serverName] : []), shortIds: rs.shortIds || s.shortIds || [],
+            spiderX: s.spiderX || rs.spiderX || '', dest: rs.dest || rs.target || ''
           };
 
           if (!checks.reality.publicKey) { checks.issues.push('REALITY_NO_PBK'); }

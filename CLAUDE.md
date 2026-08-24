@@ -13,6 +13,7 @@
 - **Reality keys**: Stored ONLY in 3x-ui SQLite database (`x-ui.db`). NEVER hardcode in `.env` or Supabase.
 - **Inbounds provisioning**: If 3x-ui `addClient` returns 404, the codebase uses `addClientViaFullUpdate`. Keep this fallback intact.
 - **Nginx & Ports**: Nginx listens on port **3443**, Xray listens on port **443**. Reality target must be `host.docker.internal:3443`.
+- **Node Server Port**: Dynamic `process.env.PORT || (isDocker/Prod ? 3005 : 3000)`. NEVER hardcode `const PORT = 3000` because Nginx proxies to `127.0.0.1:3005` in production (causing 502 Bad Gateway if 3000 is hardcoded).
 - **Hysteria 2**: Uses UDP on port 443 (ensure UFW allows 443/udp).
 - **Code comments**: Tag significant bug fixes with `// FIX-ID: Description`.
 - **Validation**: Always run `npm run lint` and `npm run build` before concluding changes.
