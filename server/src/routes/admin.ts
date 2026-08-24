@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import { execSync } from 'child_process';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { MaintenanceService } from '../services/maintenance.service';
-import { parseVpnDevices, VpnDevice } from '../utils/vpn';
+import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 
 import { getRequestConfig } from '../utils/axios';
 import { restartContainer } from '../utils/docker';
@@ -832,10 +833,35 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
                 if (realityInbound) effectiveInboundId = realityInbound.id;
               } catch (e) {}
 
-              const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
-              if (rawLink) {
-                const linkWithSuffix = rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`);
-                newConfigLines.push(linkWithSuffix);
+                            let anyLink = false;
+              try {
+                const inbounds = await instance.getInbounds();
+                const pubPorts = await getPublishedVlessPorts();
+                const realityInbounds = inbounds.filter((ib: any) => {
+                  try {
+                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                    return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
+                  } catch { return false; }
+                });
+                for (const ri of realityInbounds) {
+                  try {
+                    const expMs = device.expiresAt ? new Date(device.expiresAt).getTime() : 0;
+                    const inboundEmail = ri.id === effectiveInboundId ? device.email : `${device.email}_${ri.port}`;
+                    const existing = await instance.getClientByEmail(ri.id, inboundEmail);
+                    if (!existing) await instance.addClient(inboundEmail, device.uuid, ri.id, Number.isFinite(expMs) ? expMs : 0, 0);
+                    const rawLink2 = await instance.getInboundLink(ri.id, device.uuid, inboundEmail);
+                    if (rawLink2) {
+                      newConfigLines.push(rawLink2.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                      anyLink = true;
+                    }
+                  } catch (e) {}
+                }
+              } catch (e) {}
+              if (!anyLink) {
+                const rawLink = await instance.getInboundLink(effectiveInboundId, device.uuid, device.email);
+                if (rawLink) {
+                  newConfigLines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
+                }
               }
             } catch (e) {}
           }
@@ -1241,7 +1267,6 @@ router.get('/hysteria/status', adminOnly, async (_req, res) => {
     let status = 'unknown';
     let uptime = '';
     try {
-      const { execSync } = require('child_process');
       // Проверяем через nsenter на хосте (Docker socket доступен)
       const out = execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl is-active hysteria2 2>/dev/null || echo stopped', { timeout: 15000 }).toString().trim();
       status = out === 'active' ? 'active' : 'stopped';
@@ -1283,7 +1308,6 @@ router.post('/hysteria/password', adminOnly, async (req, res) => {
 
 router.post('/hysteria/restart', adminOnly, async (_req, res) => {
   try {
-    const { execSync } = require('child_process');
     // Перезапуск через nsenter на хосте (Docker socket доступен)
     execSync('docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl restart hysteria2', { timeout: 30000 });
     res.json({ ok: true, message: 'Hysteria2 перезапущен' });
