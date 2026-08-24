@@ -98,24 +98,36 @@ export function AdminServersList() {
   const checkConnection = async (id: string | number) => {
     try {
       setIsChecking(id.toString());
-      toast.loading('Проверка соединения...', { id: 'check-conn' });
-      const { data } = await axios.post(`/api/admin/servers/${id}/check`, {}, {
+      toast.loading('Проверка соединения и Reality...', { id: 'check-conn' });
+      const { data } = await axios.post(`/api/admin/servers/${id}/client-check`, {}, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
-      if (data.status === 'ok') {
-        toast.success('Соединение установлено!', { id: 'check-conn' });
+      if (data.ok) {
+        toast.success(`Сервер в норме! (Inbounds: ${data.inbounds?.length || 0}, TCP ${data.vpn_port || 443} OK)`, { id: 'check-conn' });
+        fetchServers();
+      } else if (data.panel_ok) {
+        const issues = (data.issues || []).join(', ');
+        toast.error(`Панель OK, но проблемы VPN: ${issues || 'Проверьте Reality'}`, { id: 'check-conn', duration: 6000 });
         fetchServers();
       } else {
-        toast.error(`Ошибка: ${data.message}`, { id: 'check-conn' });
+        toast.error(`Ошибка связи с панелью: ${data.error || (data.issues || []).join(', ') || 'Нет ответа'}`, { id: 'check-conn' });
       }
     } catch (e: any) {
       console.error('Check connection error:', e);
-      const status = e.response?.status;
-      const errorData = e.response?.data?.error || e.message;
-      
-      if (status === 404) {
-        toast.error('Маршрут /api/admin/servers/:id/check не найден на сервере.', { id: 'check-conn' });
-      } else {
+      // Fallback to simple check
+      try {
+        const { data } = await axios.post(`/api/admin/servers/${id}/check`, {}, {
+          headers: { Authorization: `Bearer ${session?.access_token}` }
+        });
+        if (data.status === 'ok') {
+          toast.success('Соединение с панелью установлено!', { id: 'check-conn' });
+          fetchServers();
+        } else {
+          toast.error(`Ошибка: ${data.message}`, { id: 'check-conn' });
+        }
+      } catch (fallbackErr: any) {
+        const status = fallbackErr.response?.status;
+        const errorData = fallbackErr.response?.data?.error || fallbackErr.message;
         toast.error(`Ошибка соединения (${status || 'Network'}): ${errorData}`, { id: 'check-conn' });
       }
     } finally {

@@ -232,26 +232,46 @@ export class XUIService {
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     await this.login();
 
+    // Auto-resolve inboundId if 0 or invalid by finding reality inbound on port 443
+    let effectiveInboundId = inboundId;
+    if (!effectiveInboundId || effectiveInboundId <= 0) {
+      try {
+        const inbounds = await this.getInbounds();
+        const realityInbound = inbounds.find((ib: any) => {
+          try {
+            const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+            return ss.security === 'reality' && ib.port === 443;
+          } catch { return false; }
+        });
+        if (realityInbound?.id) {
+          effectiveInboundId = realityInbound.id;
+          console.log(`[XUI] Auto-resolved reality inboundId=${effectiveInboundId} for ${email}`);
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ [XUI] Failed to auto-resolve inboundId: ${e.message}`);
+      }
+    }
+
     let flow = '';
     try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${inboundId}`;
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
       const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
       if (resp.data?.success) {
         const streamSettings = this.parseJson<Record<string, any>>(resp.data.obj?.streamSettings, {});
         if (streamSettings.security === 'reality' && streamSettings.network === 'tcp') flow = 'xtls-rprx-vision';
       }
     } catch (e) {
-      console.warn(`⚠️ [XUI] Could not fetch inbound settings for ${inboundId}`);
+      console.warn(`⚠️ [XUI] Could not fetch inbound settings for ${effectiveInboundId}`);
     }
 
     // Check if client already exists in this inbound
     try {
-      const existingClient = await this.getClientByEmail(inboundId, email);
+      const existingClient = await this.getClientByEmail(effectiveInboundId, email);
       if (existingClient?.id) {
-        console.log(`🔄 [XUI] Client ${email} already exists in inbound ${inboundId} (uuid=${existingClient.id}) — updating instead`);
-        const updated = await this.updateClient(email, existingClient.id, existingClient.inboundId || inboundId, expiryTime, limitBytes);
+        console.log(`🔄 [XUI] Client ${email} already exists in inbound ${effectiveInboundId} (uuid=${existingClient.id}) — updating instead`);
+        const updated = await this.updateClient(email, existingClient.id, existingClient.inboundId || effectiveInboundId, expiryTime, limitBytes);
         if (updated) {
-          return this.getInboundLink(existingClient.inboundId || inboundId, existingClient.id, email);
+          return this.getInboundLink(existingClient.inboundId || effectiveInboundId, existingClient.id, email);
         }
         console.warn(`⚠️ [XUI] updateClient returned false for ${email} — trying to delete and re-add`);
         await this.deleteClient(existingClient.id, email).catch(() => {});
@@ -259,7 +279,7 @@ export class XUIService {
     } catch (e) {}
 
     const clientData = {
-      id: inboundId,
+      id: effectiveInboundId,
       settings: JSON.stringify({
         clients: [{ id: uuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: 0, subId: '' }]
       })
