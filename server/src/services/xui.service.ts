@@ -527,54 +527,41 @@ export class XUIService {
   async deleteClient(uuid: string, email?: string) {
     if (!this.sessionCookie) await this.login();
 
-    let effectiveUuid = uuid;
+    // New 3x-ui removed /panel/api/inbounds/deleteClient/{uuid}.
+    // Client deletion now goes through the full inbound update route.
+    const inbounds = await this.getInbounds();
+    for (const inbound of inbounds) {
+      const settings = this.parseJson<Record<string, any>>(inbound.settings, {});
+      const clients = Array.isArray(settings.clients) ? settings.clients : [];
+      const target = clients.find((c: any) => c.id === uuid || (email && c.email === email));
+      if (!target) continue;
 
-    if (email) {
-      try {
-        const inbounds = await this.getInbounds();
-        for (const inbound of inbounds) {
-          const serverClient = await this.getClientByEmail(inbound.id, email);
-          if (serverClient?.id) {
-            effectiveUuid = serverClient.id;
-            break;
-          }
-        }
-      } catch (e) {}
-    }
-
-    try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/deleteClient/${effectiveUuid}`;
-      await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
-      console.log(`✅ [XUI] Client ${email || effectiveUuid} deleted from ${this.host}`);
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        this.sessionCookie = null;
-        await this.login(true);
-        return this.deleteClient(uuid, email);
+      const updatedClients = clients.filter((c: any) => c !== target);
+      const newSettings = { ...settings, clients: updatedClients };
+      const payload = { ...inbound, settings: JSON.stringify(newSettings) };
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inbound.id}`;
+      const resp = await axios.post(url, payload, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      if (resp.data?.success) {
+        console.log(`✅ [XUI] Client ${email || uuid} deleted from ${this.host} (inbound ${inbound.id})`);
+      } else {
+        console.warn(`⚠️ [XUI] deleteClient failed for ${email || uuid}: ${resp.data?.msg}`);
       }
-      if (error.response?.status === 404) return;
-      console.warn(`⚠️ [XUI] deleteClient error: ${error.message}`);
     }
   }
 
   async getClientTraffic(email: string) {
     if (!this.sessionCookie) await this.login();
-    try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/getClientTraffics/${email}`;
-      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
-      if (resp.data?.success && resp.data?.obj) {
-        const stats = resp.data.obj;
+    // New 3x-ui removed /panel/api/inbounds/getClientTraffics/{email}.
+    // Client stats now come embedded in the /list payload (clientStats per inbound).
+    const inbounds = await this.getInbounds();
+    for (const inbound of inbounds) {
+      const clientStats = Array.isArray(inbound.clientStats) ? inbound.clientStats : [];
+      const stats = clientStats.find((s: any) => s.email === email || s.email === `izinet_${email}`);
+      if (stats) {
         return { up: stats.up || 0, down: stats.down || 0, used: (stats.up || 0) + (stats.down || 0), limit: stats.total || 0 };
       }
-      return null;
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        this.sessionCookie = null;
-        return this.getClientTraffic(email);
-      }
-      console.warn(`⚠️ [XUI] Could not read traffic for ${email}: ${error.message}`);
-      return null;
     }
+    return null;
   }
 
   async getSettings(): Promise<XuiSettings> {

@@ -14,8 +14,8 @@ export class MaintenanceService {
 
     console.log('📦 Maintenance Service initialized (Lightweight Sync)');
     
-    // Run sync every 30 minutes
-    this.interval = setInterval(() => this.runFullMaintenance(), 30 * 60 * 1000);
+    // Run sync every MAINTENANCE_INTERVAL_MIN minutes (default 60)
+    this.interval = setInterval(() => this.runFullMaintenance(), Number(process.env.MAINTENANCE_INTERVAL_MIN || 60) * 60 * 1000);
     
     // Initial run
     setTimeout(() => this.runFullMaintenance(), 10000);
