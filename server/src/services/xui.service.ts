@@ -278,68 +278,8 @@ export class XUIService {
       }
     } catch (e) {}
 
-    const clientData = {
-      id: effectiveInboundId,
-      settings: JSON.stringify({
-        clients: [{ id: uuid, flow, email, limitIp: 0, totalGB: limitBytes, expiryTime, enable: true, tgId: 0, subId: '' }]
-      })
-    };
-
-    try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/addClient`;
-      const response = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
-
-      if (response.data?.success) {
-        console.log(`✅ [XUI] Client ${email} added to ${this.host} (inbound ${inboundId})`);
-        return this.getInboundLink(inboundId, uuid, email);
-      } else {
-        const msg = response.data?.msg || JSON.stringify(response.data);
-        console.error(`❌ [XUI] addClient failed for ${email}: ${msg}`);
-
-        if (msg.includes('Duplicate email') || msg.includes('record not found')) {
-          console.log(`🔄 [XUI] ${msg.includes('Duplicate email') ? 'Duplicate email' : 'Record not found'} — cleaning stale clients for ${email}`);
-          const allInbounds = await this.getInbounds();
-          for (const ib of allInbounds) {
-            try {
-              const settings = this.parseJson<any>(ib.settings, {});
-              const found = (settings.clients || []).find((c: any) => c.email === email);
-              if (found) {
-                console.log(`🔄 [XUI] Found stale ${email} in inbound ${ib.id} — deleting`);
-                await this.deleteClient(found.id || found.uuid, email).catch(() => {});
-              }
-            } catch (e) {}
-          }
-          try {
-            const retryResp = await axios.post(`${this.host}${this.basePath}/panel/api/inbounds/addClient`, clientData, getRequestConfig(`${this.host}${this.basePath}/panel/api/inbounds/addClient`, this.authHeaders({ 'Content-Type': 'application/json' })));
-            if (retryResp.data?.success) {
-              console.log(`✅ [XUI] Client ${email} added after cleanup (inbound ${inboundId})`);
-              return this.getInboundLink(inboundId, uuid, email);
-            }
-          } catch (retryErr: any) {
-            console.error(`❌ [XUI] Retry addClient after cleanup failed: ${retryErr.message}`);
-          }
-        }
-        try {
-          return await this.addClientViaFullUpdate(email, uuid, inboundId, expiryTime, limitBytes);
-        } catch (fallbackErr: any) {
-          console.error(`[XUI] Full-update fallback failed for ${email}: ${fallbackErr.message}`);
-          throw new Error(msg || 'Failed to add client');
-        }
-      }
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        this.sessionCookie = null;
-        this.csrfToken = null;
-        return this.addClient(email, uuid, inboundId, expiryTime, limitBytes);
-      }
-      console.error(`❌ [XUI] addClient error for ${email}: ${error.message}`);
-      try {
-        return await this.addClientViaFullUpdate(email, uuid, inboundId, expiryTime, limitBytes);
-      } catch (fallbackErr: any) {
-        console.error(`[XUI] Full-update fallback failed for ${email}: ${fallbackErr.message}`);
-        throw error;
-      }
-    }
+    // New 3x-ui removed /panel/api/inbounds/addClient; the proven path is the full inbound update.
+    return await this.addClientViaFullUpdate(email, uuid, inboundId, expiryTime, limitBytes);
   }
 
   private async addClientViaFullUpdate(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0): Promise<string> {
@@ -490,12 +430,25 @@ export class XUIService {
     };
 
     try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/updateClient/${effectiveUuid}`;
-      const response = await axios.post(url, clientData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      // New 3x-ui client API: POST /panel/api/clients/update/:email
+      const client = {
+        id: effectiveUuid,
+        flow,
+        email,
+        limitIp: 0,
+        totalGB: limitBytes,
+        expiryTime,
+        enable: true,
+        tgId: 0,
+        subId: ''
+      };
+      const updUrl = `${this.host}${this.basePath}/panel/api/clients/update/${encodeURIComponent(email)}?inboundIds=${effectiveInboundId}`;
+      const response = await axios.post(updUrl, client, getRequestConfig(updUrl, this.authHeaders({ 'Content-Type': 'application/json' })));
       if (response.data?.success) {
-        console.log(`✅ [XUI] Client ${email} updated on ${this.host}`);
+        console.log(`вњ… [XUI] Client ${email} updated on ${this.host}`);
         return true;
       }
+      console.warn(`вљ пёЏ [XUI] updateClient failed for ${email}: ${response.data?.msg}`);
       return false;
     } catch (error: any) {
       if (error.response?.status === 401) {
@@ -503,11 +456,27 @@ export class XUIService {
         await this.login(true);
         return this.updateClient(email, uuid, inboundId, expiryTime, limitBytes);
       }
-      console.error(`❌ [XUI] updateClient error: ${error.message}`);
-      return false;
+      console.error(`вќЊ [XUI] updateClient error: ${error.message}`);
+      // Fallback: full inbound update (proven path for older panels)
+      try {
+        const getUrl = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
+        const getResp = await axios.get(getUrl, getRequestConfig(getUrl, this.authHeaders()));
+        const inbound = getResp.data?.obj;
+        const settings = this.parseJson<Record<string, any>>(inbound?.settings, {});
+        const clients = Array.isArray(settings.clients) ? settings.clients : [];
+        const idx = clients.findIndex((cl: any) => cl.id === effectiveUuid || cl.email === email);
+        if (idx < 0) return false;
+        clients[idx] = { ...clients[idx], totalGB: limitBytes, expiryTime, enable: true };
+        const payload = { ...inbound, settings: JSON.stringify(settings) };
+        const putUrl = `${this.host}${this.basePath}/panel/api/inbounds/update/${effectiveInboundId}`;
+        const putResp = await axios.post(putUrl, payload, getRequestConfig(putUrl, this.authHeaders({ 'Content-Type': 'application/json' })));
+        return !!putResp.data?.success;
+      } catch (fallbackErr: any) {
+        console.error(`вќЊ [XUI] updateClient fallback failed: ${fallbackErr.message}`);
+        return false;
+      }
     }
   }
-
   async deleteInbound(inboundId: number): Promise<void> {
     await this.login();
     try {
@@ -527,8 +496,24 @@ export class XUIService {
   async deleteClient(uuid: string, email?: string) {
     if (!this.sessionCookie) await this.login();
 
-    // New 3x-ui removed /panel/api/inbounds/deleteClient/{uuid}.
-    // Client deletion now goes through the full inbound update route.
+    // New 3x-ui client API: POST /panel/api/clients/del/:email (deletes across inbounds)
+    try {
+      const delUrl = `${this.host}${this.basePath}/panel/api/clients/del/${encodeURIComponent(email || uuid)}`;
+      const delResp = await axios.post(delUrl, {}, getRequestConfig(delUrl, this.authHeaders()));
+      if (delResp.data?.success) {
+        console.log(`вњ… [XUI] Client ${email || uuid} deleted from ${this.host}`);
+        return;
+      }
+      console.warn(`вљ пёЏ [XUI] clients/del failed for ${email || uuid}: ${delResp.data?.msg} - falling back to full inbound update`);
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.deleteClient(uuid, email);
+      }
+      console.warn(`вљ пёЏ [XUI] clients/del error for ${email || uuid}: ${error.message} - falling back to full inbound update`);
+    }
+    // Fallback: delete via full inbound update
     const inbounds = await this.getInbounds();
     for (const inbound of inbounds) {
       const settings = this.parseJson<Record<string, any>>(inbound.settings, {});
@@ -551,17 +536,31 @@ export class XUIService {
 
   async getClientTraffic(email: string) {
     if (!this.sessionCookie) await this.login();
-    // New 3x-ui removed /panel/api/inbounds/getClientTraffics/{email}.
-    // Client stats now come embedded in the /list payload (clientStats per inbound).
-    const inbounds = await this.getInbounds();
-    for (const inbound of inbounds) {
-      const clientStats = Array.isArray(inbound.clientStats) ? inbound.clientStats : [];
-      const stats = clientStats.find((s: any) => s.email === email || s.email === `izinet_${email}`);
-      if (stats) {
+    // New 3x-ui client API: GET /panel/api/clients/traffic/:email
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/clients/traffic/${encodeURIComponent(email)}`;
+      const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
+      if (resp.data?.success && resp.data?.obj) {
+        const stats = resp.data.obj;
         return { up: stats.up || 0, down: stats.down || 0, used: (stats.up || 0) + (stats.down || 0), limit: stats.total || 0 };
       }
+      return null;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.sessionCookie = null;
+        return this.getClientTraffic(email);
+      }
+      // Fallback: stats embedded in the /list payload (clientStats per inbound)
+      const inbounds = await this.getInbounds();
+      for (const inbound of inbounds) {
+        const clientStats = Array.isArray(inbound.clientStats) ? inbound.clientStats : [];
+        const stats = clientStats.find((s: any) => s.email === email || s.email === `izinet_${email}`);
+        if (stats) {
+          return { up: stats.up || 0, down: stats.down || 0, used: (stats.up || 0) + (stats.down || 0), limit: stats.total || 0 };
+        }
+      }
+      return null;
     }
-    return null;
   }
 
   async getSettings(): Promise<XuiSettings> {
