@@ -122,3 +122,39 @@ serverNames: ['www.microsoft.com', 'microsoft.com']
 target: host.docker.internal:3443
 flow: xtls-rprx-vision
 ```
+
+---
+
+## 🚀 AI STUDIO MIGRATION (24 августа 2026)
+
+- [x] [2026-08-24 02:33] **SYS/DEV-SERVER-002**: Исправление запуска dev-сервера (non-blocking boot):
+  - `server/src/index.ts`: Вызов `app.listen` и монтирование Vite middleware перенесены в начало функции `start()`, чтобы сервер немедленно открывал порт 3000. Фоновые проверки Supabase и сервисов вынесены в асинхронную задачу без блокировки и без вызова `process.exit(1)`.
+  - `server/src/services/supabase.ts`: Добавлена мгновенная проверка на пустой/placeholder `VITE_SUPABASE_URL`, исключающая ожидание таймаутов сетевых запросов при инициализации.
+- [x] [2026-08-24 02:45] **SYS/DEV-SERVER-003**: Исправление конфликта портов и инициализации Supabase URL:
+  - `server/src/index.ts`: Порт жестко зафиксирован на `3000` (переменная `PORT` из Cloud Run окружения передавала `8080`, что вызывало `EADDRINUSE`).
+  - `server/src/services/supabase.ts` & `src/lib/supabase.ts`: Добавлены санитайзеры `sanitizeUrl` и `sanitizeKey`, исключающие выброс `Invalid supabaseUrl` при наличии плейсхолдеров/комментариев в переменных окружения.
+- [x] [2026-08-24 10:15] **SYS/CLEANUP-001**: Очистка тестового мусора и структурирование вспомогательных скриптов:
+  - Удалены тестовые артефакты: `src/pages/check_users.ts`, директории `app/` и `workspaces/`, `bun.lock`, `vercel.json`.
+  - Разовые и устаревшие `.sh` скрипты ручной починки сервера перемещены из корня проекта в директорию `scripts/legacy_fixes/`.
+  - Боевые файлы инфраструктуры (`install.sh`, `update.sh`, `xui_bootstrap.py`, `repair_xui.py`, `x3-ui-entrypoint.sh`), вся документация (`.md`) и ядро приложения сохранены в неизменном виде.
+- [x] [2026-08-24 10:27] **SYS/MULTI-AGENT-SYNC-001**: Внедрение мульти-агентной системы координации и защиты протоколов:
+  - Созданы входные инструкции: `CLAUDE.md`, `.cursorrules`, `GEMINI.md` со ссылкой на единый источник правды `AGENTS.md`.
+  - Создан документ `docs/ARCHITECTURE.md` с описанием сетевой топологии (Xray Reality 443 ⇄ Nginx 3443 ⇄ Hysteria2 UDP 443 ⇄ Express API 3000) и регламентом обновлений.
+  - Создан `docs/MULTI_AGENT_GUIDE.md` для согласованной работы разных AI-моделей и разработчиков без конфликтов и удаления чужого кода.
+- [x] [2026-08-24 10:45] **SYS/IMPROVEMENTS-001**: Реализация системных улучшений по итогам аудита:
+  - `server/src/services/xui.service.ts`: Полная инкапсуляция автоопределения Reality `inbound_id` на порту 443 в методе `addClient`. Если `inbound_id` равен 0, сервис автоматически находит рабочий инбаунд панели без сбоев провижининга.
+  - `src/pages/Admin/Servers.tsx`: Кнопка «Проверить соединение» подключена к расширенной комплексной диагностике (`client-check`), проверяющей не только доступ к веб-панели 3x-ui, но и доступность TCP 443, валидность Reality PBK, SID, SNI и отсутствие проксирования Cloudflare.
+  - `migrations/000_full_schema.sql`: Сформирован единый мастер-скрипт полной схемы PostgreSQL/Supabase со всеми связями, внешними ключами и уникальными индексами.
+  - `scripts/backup_all.sh`: Создан скрипт резервного копирования одной командой (архивация SQLite `x-ui.db`, `config.yaml` Hysteria и `.env`).
+- [x] [2026-08-24 11:12] **SYS/UI-BACKUP-001**: Внедрение резервного копирования VPS в 1 клик прямо из панели управления UI:
+  - `server/src/routes/admin.ts`: Созданы эндпоинты `/api/admin/system/backup` (создание архива), `/api/admin/system/backups` (список архивов), `/api/admin/system/backups/:filename/download` (скачивание в браузер) и удаление.
+  - `src/pages/Admin/Settings.tsx`: Добавлен интерактивный блок «Резервное копирование VPS в 1 клик» с индикацией процесса, списком созданных архивов с датой/размером и кнопкой прямого скачивания файла на компьютер администратора.
+- [x] [2026-08-24 11:19] **SYS/PORT-BIND-001**: Исправление несоответствия портов между Docker Compose/Nginx (3005) и Node Express (3000):
+  - `server/src/index.ts`: Настройка `PORT = process.env.PORT || (process.env.NODE_ENV === 'production' || process.env.IS_DOCKER ? 3005 : 3000)`.
+  - Устранена ошибка `502 Bad Gateway` в Nginx при развёртывании через Docker на VPS.
+- [x] [2026-08-24 11:46] **SYS/REALITY-PARSE-001**: Исправление парсинга `streamSettings` в проверке соединения `/api/admin/servers/:id/client-check`:
+  - `server/src/routes/admin.ts`: Безопасная обработка `streamSettings` (объект или JSON-строка) при получении из 3x-ui API. Устранена ложная ошибка `NO_REALITY_INBOUND_ON_443`.
+
+
+
+

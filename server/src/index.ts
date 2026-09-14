@@ -24,7 +24,7 @@ import { authenticateUser } from './utils/auth';
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = parseInt(process.env.PORT || '3005');
+const PORT = Number(process.env.PORT) || (process.env.NODE_ENV === 'production' || process.env.IS_DOCKER ? 3005 : 3000);
 
 app.use(cors());
 app.use(express.json());
@@ -69,6 +69,7 @@ app.use('/api', generalLimiter);
 app.use('/api', userRoutes);
 app.use('/api', configRoutes);
 app.use('/api/subscription', configRoutes);
+app.use('/sub', configRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/pay', paymentRoutes);
 
@@ -119,14 +120,6 @@ async function supabaseProxyHandler(req: any, res: any) {
     res.status(500).json({ error: err.message });
   }
 }
-
-const distPath = path.join(process.cwd(), 'dist');
-app.use(express.static(distPath));
-
-app.get('*', (req, res) => {
-  if (req.url.startsWith('/api')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(distPath, 'index.html'));
-});
 
 async function regenerateAllVlessLinks() {
   try {
@@ -236,17 +229,46 @@ async function autoDetectServerFields() {
 }
 
 async function start() {
-  console.log('🚀 [BOOT] Проверка Supabase...');
-  const dbOk = await checkDatabase();
-  if (dbOk) {
-    botService.init();
-    MaintenanceService.init();
-    autoDetectServerFields().catch(e => console.error('❌ [BOOT] autoDetect failed:', e.message));
-    RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
-    setTimeout(() => regenerateAllVlessLinks(), 15000);
+  // Vite middleware for development, static dist for production
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      if (req.url.startsWith('/api')) return res.status(404).json({ error: 'Not found' });
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
-  app.listen(PORT, '0.0.0.0', () => console.log('✅ [BOOT] Сервер запущен на порту ' + PORT));
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log('✅ [BOOT] Сервер запущен на http://0.0.0.0:' + PORT);
+
+    // Background initialization tasks
+    (async () => {
+      try {
+        console.log('🚀 [BOOT] Проверка Supabase...');
+        const dbOk = await checkDatabase();
+        if (dbOk) {
+          botService.init();
+          MaintenanceService.init();
+          autoDetectServerFields().catch(e => console.error('❌ [BOOT] autoDetect failed:', e.message));
+          RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
+          setTimeout(() => regenerateAllVlessLinks(), 15000);
+        }
+      } catch (err: any) {
+        console.warn('⚠️ [BOOT] Background initialization error:', err?.message);
+      }
+    })();
+  });
 }
 
-start().catch(err => process.exit(1));
+start().catch(err => {
+  console.error('🔥 [BOOT] Critical error in start():', err);
+});
 
