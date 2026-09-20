@@ -676,7 +676,7 @@ export class XUIService {
   async resetClientTraffic(inboundId: number, email: string): Promise<void> {
     try {
       await this.login();
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/${inboundId}/resetClientTraffic/${encodeURIComponent(email)}`;
+      const url = `${this.host}${this.basePath}/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`;
       await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       console.log(`✅ [XUI] Traffic reset for ${email}`);
     } catch (err: any) {
@@ -687,7 +687,7 @@ export class XUIService {
   async getOnlines(): Promise<string[]> {
     if (!this.sessionCookie) await this.login();
     try {
-      const url = `${this.host}${this.basePath}/panel/api/inbounds/onlines`;
+      const url = `${this.host}${this.basePath}/panel/api/clients/onlines`;
       const response = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       if (response.data?.success && Array.isArray(response.data.obj)) {
         const uniqueOnlines = [...new Set((response.data.obj as any[]).map((item: any) => typeof item === 'string' ? item : item.email).filter(Boolean))];
