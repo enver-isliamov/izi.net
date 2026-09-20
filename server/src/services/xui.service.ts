@@ -566,7 +566,7 @@ export class XUIService {
   async getSettings(): Promise<XuiSettings> {
     if (!this.sessionCookie) await this.login();
     try {
-      const url = `${this.host}${this.basePath}/panel/setting/all`;
+      const url = `${this.host}${this.basePath}/panel/api/setting/all`;
       const resp = await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
       return resp.data.obj;
     } catch (e: any) {
@@ -582,7 +582,7 @@ export class XUIService {
   async updateSettings(settings: XuiSettings): Promise<void> {
     if (!this.sessionCookie) await this.login();
     try {
-      const url = `${this.host}${this.basePath}/panel/setting/update`;
+      const url = `${this.host}${this.basePath}/panel/api/setting/update`;
       const encodedData = new URLSearchParams();
       for (const key in settings) {
         const value = (settings as any)[key];
@@ -606,7 +606,7 @@ export class XUIService {
   async restartPanel(): Promise<void> {
     if (!this.sessionCookie) await this.login();
     try {
-      const url = `${this.host}${this.basePath}/panel/setting/restartPanel`;
+      const url = `${this.host}${this.basePath}/panel/api/setting/restartPanel`;
       await axios.post(url, {}, getRequestConfig(url, this.authHeaders()));
     } catch (e) {}
   }
