@@ -41,11 +41,59 @@ export interface AwgPeer {
   created_at?: string;
 }
 
+const AWG_CONTAINER = process.env.AWG_CONTAINER || "izinet-awg";
+
+function runLocal(command: string, timeout = 20000): string {
+  return execSync(command, { timeout, stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
+}
+
+/** Команды awg: в контейнере (userspace, без модуля ядра) или на хосте (модуль ядра). */
+function awgExec(command: string, timeout = 20000): string {
+  try {
+    const running = runLocal(`docker inspect -f "{{.State.Running}}" ${AWG_CONTAINER} 2>/dev/null || echo false`);
+    if (running === "true") {
+      return runLocal(`docker exec ${AWG_CONTAINER} sh -c ${shq(command)}`, timeout);
+    }
+  } catch (e) {}
+  return hostExec(command, timeout);
+}
+
+/** Полная конфигурация интерфейса: [Interface] + пиры из нашего реестра. */
+function buildInterfaceConf(server: AwgServer, peers: AwgPeer[], privateKey?: string): string {
+  const lines = [
+    "[Interface]",
+    `Address = ${server.subnet}.1/24`,
+    `ListenPort = ${server.port}`,
+  ];
+  if (privateKey) lines.push(`PrivateKey = ${privateKey}`);
+  lines.push(
+    "MTU = 1280",
+    `Jc = ${server.jc}`,
+    `Jmin = ${server.jmin}`,
+    `Jmax = ${server.jmax}`,
+    `S1 = ${server.s1}`,
+    `S2 = ${server.s2}`,
+    `H1 = ${server.h1}`,
+    `H2 = ${server.h2}`,
+    `H3 = ${server.h3}`,
+    `H4 = ${server.h4}`,
+    ""
+  );
+  for (const peer of peers) {
+    lines.push("[Peer]", `PublicKey = ${peer.public_key}`, `AllowedIPs = ${peer.address}/32`, "");
+  }
+  return lines.join("\n");
+}
+
+function writeInterfaceConf(conf: string): void {
+  const b64 = Buffer.from(conf, "utf8").toString("base64");
+  hostExec(`printf %s ${shq(b64)} | base64 -d > ${AWG_DIR}/${IFACE}.conf && chmod 600 ${AWG_DIR}/${IFACE}.conf`);
+}
 export class AwgService {
   /** Доступен ли сервер AmneziaWG: установлены ли инструменты и поднят ли интерфейс. */
   static status(): { available: boolean; message: string; port?: number; peers?: number } {
     try {
-      const out = hostExec(`command -v awg >/dev/null 2>&1 && awg show ${IFACE} >/dev/null 2>&1 && echo YES || echo NO`, 20000);
+      const out = awgExec(`awg show ${IFACE} >/dev/null 2>&1 && echo YES || echo NO`, 20000);
       if (out !== 'YES') {
         return {
           available: false,
@@ -87,8 +135,8 @@ export class AwgService {
   }
 
   private static genKeypair(): { priv: string; pub: string } {
-    const priv = hostExec('awg genkey');
-    const pub = hostExec(`printf %s ${shq(priv)} | awg pubkey`);
+    const priv = awgExec('awg genkey');
+    const pub = awgExec(`printf %s ${shq(priv)} | awg pubkey`);
     return { priv, pub };
   }
 
@@ -116,7 +164,7 @@ export class AwgService {
   static listPeerStats(): Record<string, { rx: number; tx: number; lastHandshake: number }> {
     const stats: Record<string, { rx: number; tx: number; lastHandshake: number }> = {};
     try {
-      const dump = hostExec(`awg show ${IFACE} dump`, 15000);
+      const dump = awgExec(`awg show ${IFACE} dump`, 15000);
       const lines = dump.split('\n').map((l) => l.trim()).filter(Boolean);
       for (const line of lines.slice(1)) {
         const p = line.split('\t');
@@ -195,12 +243,14 @@ export class AwgService {
     const { priv, pub } = this.genKeypair();
     const address = this.nextAddress(peers, server.subnet);
 
-    hostExec(`awg set ${IFACE} peer ${shq(pub)} allowed-ips ${shq(address + '/32')}`);
-    hostExec(`awg-quick save ${IFACE}`);
+    const privForConf = (server as any).private_key || undefined;
+    try { awgExec(`awg set ${IFACE} peer ${shq(pub)} allowed-ips ${shq(address + '/32')}`); } catch (e: any) { console.warn(`[AWG] peer set: ${e.message}`); }
 
     const peer: AwgPeer = { name, public_key: pub, address, created_at: new Date().toISOString() };
     peers.push(peer);
     this.writePeers(peers);
+    try { writeInterfaceConf(buildInterfaceConf(server, peers, (server as any).private_key)); } catch (e: any) { console.warn(`[AWG] conf write: ${e.message}`); }
+    try { awgExec(`awg-quick save ${IFACE}`); } catch (e: any) { /* в контейнерном режиме не требуется */ }
 
     const endpoint = await this.endpointHost();
     const conf = this.buildConf({ ...peer, private_key: priv } as any, server, endpoint);
@@ -211,12 +261,15 @@ export class AwgService {
   static removePeer(publicKey: string): void {
     if (!publicKey) return;
     try {
-      hostExec(`awg set ${IFACE} peer ${shq(publicKey)} remove`);
-      hostExec(`awg-quick save ${IFACE}`);
+      awgExec(`awg set ${IFACE} peer ${shq(publicKey)} remove`);
     } catch (e: any) {
       console.warn(`[AWG] peer remove failed: ${e.message}`);
     }
     const peers = this.readPeers().filter((p) => p.public_key !== publicKey);
     try { this.writePeers(peers); } catch (e: any) { console.warn(`[AWG] peers save failed: ${e.message}`); }
+    try {
+      const server = this.readServer();
+      if (server) writeInterfaceConf(buildInterfaceConf(server, peers, (server as any).private_key));
+    } catch (e: any) { console.warn(`[AWG] conf rebuild: ${e.message}`); }
   }
 }
