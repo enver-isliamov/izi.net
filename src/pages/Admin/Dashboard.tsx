@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { toast } from 'sonner';
 import { AdminServersList } from './Servers';
 
@@ -49,6 +50,7 @@ export default function AdminDashboard() {
     return (
       <div className="space-y-6 animate-in fade-in duration-500">
         <AdminNav />
+        <AdminPageHeader title="Обзор" description="Ключевые показатели сервиса" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => (
             <div key={i} className="p-6 bg-secondary/30 rounded-2xl border border-white/5 space-y-4">
@@ -74,6 +76,7 @@ export default function AdminDashboard() {
     <div className="space-y-6">
 
       <AdminNav />
+      <AdminPageHeader title="Обзор" description="Ключевые показатели сервиса" />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {cards.map((card, i) => (

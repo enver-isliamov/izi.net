@@ -14,6 +14,7 @@ import axios from 'axios';
 import { checkDatabase } from './services/supabase';
 import { botService } from './services/bot.service';
 import { MaintenanceService } from './services/maintenance.service';
+import { NotificationService } from './services/notification.service';
 import { RoutingService } from './services/routing.service';
 
 import adminRoutes from './routes/admin';
@@ -259,6 +260,7 @@ async function start() {
         if (dbOk) {
           botService.init();
           MaintenanceService.init();
+NotificationService.init();
           autoDetectServerFields().catch(e => console.error('❌ [BOOT] autoDetect failed:', e.message));
           RoutingService.restoreAllPanelsFromBackup().catch(e => console.error('❌ [BOOT] Restore failed:', e.message));
           setTimeout(() => regenerateAllVlessLinks(), 15000);

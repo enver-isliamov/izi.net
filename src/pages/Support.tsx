@@ -6,14 +6,14 @@ import {
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/lib/supabase';
+import axios from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { useAppConfig } from '@/hooks/useAppConfig';
 import { TicketChatView } from '@/components/TicketChatView';
 
 export default function Support() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { telegramBotName } = useAppConfig();
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
@@ -24,13 +24,9 @@ export default function Support() {
     if (!user) return;
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false });
-      
-      if (error) throw error;
+      const { data } = await axios.get('/api/user/support/tickets', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
       
       // Select the first non-closed ticket as active, or the most recent one
       if (data && data.length > 0) {
@@ -53,15 +49,12 @@ export default function Support() {
 
     setIsSending(true);
     try {
-      const { data, error } = await supabase.from('support_tickets').insert({
-        user_id: user.id,
+      await axios.post('/api/user/support/tickets', {
         subject: 'Поддержка izinet',
-        message: message.trim(),
-        status: 'open',
-        priority: 'medium'
-      }).select().single();
-
-      if (error) throw error;
+        message: message.trim()
+      }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
       
       setMessage('');
       fetchSupportData();

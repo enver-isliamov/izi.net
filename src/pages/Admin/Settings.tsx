@@ -4,6 +4,7 @@ import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cl
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
 import { toast } from 'sonner';
 
@@ -339,15 +340,11 @@ bash update.sh`;
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div></div>
-        <button
-          onClick={fetchSettings}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors font-medium text-xs text-muted-foreground"
-        >
-          <RefreshCw size={14} /> Обновить
-        </button>
-      </div>
+      <AdminPageHeader
+        title="Настройки"
+        description="Тарифы, платёжные параметры и системные значения"
+        onRefresh={fetchSettings}
+      />
 
       <AdminNav />
 

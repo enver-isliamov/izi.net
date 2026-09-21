@@ -16,7 +16,7 @@ export function AdminNav() {
   ];
 
   return (
-    <div className="flex items-center gap-2 p-1 bg-white/5 rounded-xl border border-white/5 mb-8 overflow-x-auto scrollbar-hide no-scrollbar">
+    <div className="mb-6 grid grid-cols-2 gap-1 p-1 bg-white/5 rounded-xl border border-white/5 sm:flex sm:items-stretch sm:gap-2">
       {navItems.map((item) => {
         const isActive = location.pathname === item.path;
         return (
@@ -24,7 +24,7 @@ export function AdminNav() {
             key={item.path}
             to={item.path}
             className={cn(
-              "flex-1 basis-0 min-w-[124px] justify-center flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
+              "flex items-center justify-center gap-2 px-2 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap sm:flex-1 sm:basis-0 sm:min-w-[124px]",
               isActive 
                 ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" 
                 : "text-muted-foreground hover:text-white hover:bg-white/5"

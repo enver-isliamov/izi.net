@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { cn } from '@/lib/utils';
 
 type TestStatus = 'ok' | 'warn' | 'fail';
@@ -91,30 +92,12 @@ export default function AdminTests() {
     <div className="space-y-6">
       <AdminNav />
 
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-white flex items-center gap-2">
-            <FlaskConical size={22} className="text-blue-400" />
-            Тесты панели
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Самодиагностика: серверы, инбаунды, порты, клиенты, статистика, маршрутизация.
-          </p>
-        </div>
-        <button
-          onClick={() => void run()}
-          disabled={loading || !session?.access_token}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-            loading
-              ? 'bg-blue-500/50 text-white/70 cursor-wait'
-              : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-          )}
-        >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          {loading ? 'Проверяем…' : 'Запустить проверки'}
-        </button>
-      </div>
+      <AdminPageHeader
+        title="Тесты панели"
+        description="Серверы, инбаунды, порты, клиенты, статистика, маршрутизация, гео и утечки."
+        onRefresh={() => void run()}
+        refreshing={loading}
+      />
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 
 export function AdminServersList() {
   const { session } = useAuth();
@@ -240,11 +241,10 @@ export function AdminServersList() {
 
   return (
     <div className="space-y-6">
+      <AdminPageHeader title="Управление серверами" description="Синхронизация, диагностика и добавление нод" />
+
       <div className="flex flex-col sm:flex-row justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
-            <Server size={20} className="text-blue-400" /> Управление серверами
-          </h2>
           <div className="text-[11px] text-muted-foreground mt-2 max-w-2xl space-y-2">
             <div>
               <p className="text-white/70"><b><RefreshCw size={10} className="inline mr-1" /> Синхронизировать юзеров:</b> Принудительная выгрузка всех клиентов из БД изинет во все активные сервера 3x-ui.</p>

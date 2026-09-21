@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
+import axios from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Send, Clock, User, MessageCircle } from 'lucide-react';
@@ -21,7 +21,7 @@ interface TicketChatViewProps {
 }
 
 export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -39,18 +39,10 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
 
   const fetchMessages = async () => {
     try {
-      const { data, error } = await supabase
-        .from('support_messages')
-        .select('*')
-        .eq('ticket_id', ticket.id)
-        .order('created_at', { ascending: true });
-        
-      if (error && error.code !== 'PGRST205') { // Ignore if table missing temporarily
-        console.error(error);
-      }
-      if (data) {
-        setMessages(data);
-      }
+      const { data } = await axios.get(`/api/user/support/messages/${ticket.id}`, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (Array.isArray(data)) setMessages(data);
     } catch(e) {
       console.error(e);
     } finally {
@@ -64,27 +56,8 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
     // Fallback polling for updates in case Supabase Realtime isn't configured
     const pollInterval = setInterval(fetchMessages, 5000);
 
-    // Subscribe to new messages
-    const subscription = supabase
-      .channel(`chat_${ticket.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_messages'
-      }, (payload) => {
-        const newMsg = payload.new as Message;
-        if (newMsg.ticket_id === ticket.id) {
-          setMessages((prev) => {
-            if (prev.some(m => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
-        }
-      })
-      .subscribe();
-
     return () => {
       clearInterval(pollInterval);
-      supabase.removeChannel(subscription);
     };
   }, [ticket.id]);
 
@@ -97,19 +70,13 @@ export function TicketChatView({ ticket, onClose }: TicketChatViewProps) {
     
     setSending(true);
     try {
-      const { data, error } = await supabase.from('support_messages').insert({
+      const { data } = await axios.post('/api/user/support/messages', {
         ticket_id: ticket.id,
-        sender: 'user',
         content: inputText.trim()
-      }).select().single();
-
-      if (error) {
-        if (error.code === 'PGRST205') {
-            toast.error('Администратор еще не обновил базу данных для чата. Сообщение не отправлено.');
-        } else {
-            throw error;
-        }
-      } else {
+      }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (true) {
         setInputText('');
         if (data) {
           setMessages(prev => {

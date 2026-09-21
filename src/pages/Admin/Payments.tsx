@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { toast } from 'sonner';
 import { Search, Filter, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw, Check, HelpCircle, ShieldAlert } from 'lucide-react';
 import { format } from 'date-fns';
@@ -122,19 +123,12 @@ export default function AdminPayments() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Платежи</h1>
-          <p className="text-sm text-muted-foreground mt-1">Подтверждение платежей и история пополнений</p>
-        </div>
-        <button 
-          onClick={fetchPayments}
-          className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5 text-sm hover:bg-white/10 transition-colors shrink-0"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Обновить
-        </button>
-      </div>
+      <AdminPageHeader
+        title="Платежи"
+        description="Подтверждение платежей и история пополнений"
+        onRefresh={fetchPayments}
+        refreshing={loading}
+      />
 
       <AdminNav />
 

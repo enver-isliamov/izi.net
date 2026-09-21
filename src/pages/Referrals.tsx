@@ -16,12 +16,13 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import axios from 'axios';
 import { toast } from 'sonner';
 import { useAppConfig } from '@/hooks/useAppConfig';
 import { useNavigate } from 'react-router-dom';
 
 export default function Referrals() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const navigate = useNavigate();
   const { telegramBotName } = useAppConfig();
   const [userData, setUserData] = useState<any>(null);
@@ -52,16 +53,15 @@ export default function Referrals() {
 
         let currentUserData = userRes;
 
-        // If user document exists but has no referral code, generate one
+        // Реферальный код выдаёт сервер: клиентская запись в users блокировалась RLS
         if (currentUserData && !currentUserData.referral_code) {
-          const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          const { error: updateErr } = await supabase
-            .from('users')
-            .update({ referral_code: newCode })
-            .eq('id', user.id);
-            
-          if (!updateErr) {
-            currentUserData.referral_code = newCode;
+          try {
+            const { data: ensureRes } = await axios.post('/api/user/referral/ensure', {}, {
+              headers: { Authorization: `Bearer ${session?.access_token}` }
+            });
+            if (ensureRes?.referral_code) currentUserData.referral_code = ensureRes.referral_code;
+          } catch (e) {
+            console.warn('Не удалось выдать реферальный код', e);
           }
         }
 

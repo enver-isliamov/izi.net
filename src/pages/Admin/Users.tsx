@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { cn, copyToClipboard } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { UserHistoryModal } from '@/components/admin/UserHistoryModal';
 import { CreateUserModal } from '@/components/admin/CreateUserModal';
 import { QRCodeSVG } from 'qrcode.react';
@@ -250,37 +251,39 @@ export default function AdminUsers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div></div>
-        <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+      <AdminPageHeader
+        title="Пользователи"
+        description="Подписки, балансы, устройства и продление"
+      >
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <select
             value={sortRule}
             onChange={(e) => setSortRule(e.target.value)}
-            className="bg-secondary/30 border border-white/5 rounded-xl py-2 px-3 text-sm focus:border-blue-500/50 outline-none transition-all"
+            className="h-10 bg-secondary/30 border border-white/5 rounded-xl px-3 text-sm focus:border-blue-500/50 outline-none transition-all"
           >
             <option value="newest">Сначала новые</option>
             <option value="balance_desc">Баланс (убыв)</option>
             <option value="balance_asc">Баланс (возр)</option>
             <option value="role">По роли</option>
           </select>
-          <div className="relative w-full md:w-80">
+          <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
             <input
               placeholder="Email, Имя или Telegram ID..."
-              className="w-full bg-secondary/30 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm focus:border-blue-500/50 outline-none transition-all"
+              className="w-full h-10 bg-secondary/30 border border-white/5 rounded-xl pl-10 pr-4 text-sm focus:border-blue-500/50 outline-none transition-all"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           <button
             onClick={() => setIsCreateOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 rounded-xl transition-colors shrink-0 whitespace-nowrap text-sm font-bold border border-blue-500/20"
+            className="flex items-center justify-center gap-2 h-10 px-4 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 rounded-xl transition-colors shrink-0 whitespace-nowrap text-sm font-bold border border-blue-500/20"
           >
             <UserPlus size={16} /> {/* don't forget to import UserPlus */}
             Создать юзера
           </button>
         </div>
-      </div>
+      </AdminPageHeader>
 
       <AdminNav />
 

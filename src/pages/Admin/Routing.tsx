@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { toast } from 'sonner';
 import { RefreshCw, Plus, Trash2, Edit2, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -141,10 +142,7 @@ export default function AdminRouting() {
     <div className="space-y-6">
       <AdminNav />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-muted-foreground text-sm">Управление исключениями и блоками доменов/IP</p>
-        </div>
+      <AdminPageHeader title="Маршрутизация" description="Управление исключениями и блоками доменов/IP">
         <Button 
           onClick={syncToServers}
           disabled={isSyncing}
@@ -153,7 +151,7 @@ export default function AdminRouting() {
           <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
           {isSyncing ? 'Синхронизация...' : 'Вшить в XUI'}
         </Button>
-      </div>
+      </AdminPageHeader>
 
       <Card className="glass-card border-white/10">
         <CardHeader>

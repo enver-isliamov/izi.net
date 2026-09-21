@@ -25,11 +25,12 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import axios from 'axios';
 import { toast } from 'sonner';
 import { useAppConfig } from '@/hooks/useAppConfig';
 
 export default function Profile() {
-  const { user, signOut } = useAuth();
+  const { user, session, signOut } = useAuth();
   const { telegramBotName } = useAppConfig();
   const [userData, setUserData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
@@ -99,6 +100,19 @@ export default function Profile() {
           console.error('Error fetching user:', userErr);
         } else {
           setUserData(userRes);
+          // Реферальный код выдаёт сервер: клиентская запись в users блокировалась RLS
+          if (userRes && !userRes.referral_code) {
+            try {
+              const { data: ensureRes } = await axios.post('/api/user/referral/ensure', {}, {
+                headers: { Authorization: `Bearer ${session?.access_token}` }
+              });
+              if (ensureRes?.referral_code) {
+                setUserData((prev: any) => ({ ...(prev || userRes), referral_code: ensureRes.referral_code }));
+              }
+            } catch (e) {
+              console.warn('Не удалось выдать реферальный код', e);
+            }
+          }
         }
 
         if (settingsErr && settingsErr.code !== 'PGRST116') {
@@ -143,11 +157,9 @@ export default function Profile() {
     setSettings((prev: any) => ({ ...prev, [key]: value }));
     
     try {
-      const { error } = await supabase
-        .from('notification_settings')
-        .upsert({ user_id: user.id, [key]: value }, { onConflict: 'user_id' });
-        
-      if (error) throw error;
+      await axios.put('/api/user/notification-settings', { [key]: value }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
       toast.success('Настройки сохранены');
     } catch (error) {
       console.error('Error updating settings:', error);
@@ -164,25 +176,13 @@ export default function Profile() {
     const toastId = toast.loading('Генерация ссылки для привязки...');
     
     try {
-      // 1. Generate a random 16-char token
-      const token = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-      
-      console.log('Attempting to create linking token for user:', user.id);
-      
-      // 2. Save token to DB
-      const { error } = await supabase.from('telegram_linking_tokens').insert({
-        token,
-        user_id: user.id
+      // 1-2. Токен создаёт сервер (SERVICE ROLE): клиентская вставка не проходила
+      const { data: tokenRes } = await axios.post('/api/user/telegram/link-token', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
       });
-      
-      if (error) {
-        console.error('Supabase error creating token:', error);
-        if (error.code === 'PGRST204' || error.code === 'PGRST205') {
-          throw new Error('Таблица telegram_linking_tokens не найдена. Пожалуйста, выполните SQL скрипт создания таблиц.');
-        }
-        throw error;
-      }
-      
+      const token = tokenRes?.token;
+      if (!token) throw new Error('Сервер не вернул токен привязки');
+
       // 3. Open Telegram
       const botName = telegramBotName;
       const link = `https://t.me/${botName}?start=link_${token}`;

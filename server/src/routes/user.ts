@@ -528,4 +528,262 @@ router.get('/transactions', authenticateUser, async (req: any, res) => {
   }
 });
 
+// ============================================================================
+// USER-FLOWS: серверные эндпоинты для сценариев личного кабинета.
+// Раньше фронтенд писал в Supabase напрямую и падал: RLS (403/42501) и
+// NOT NULL (telegram_linking_tokens.token). Теперь пишет сервер под service-role.
+// ============================================================================
+
+function parseJsonDevices(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object') return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Свежий расход трафика по устройствам подписки (сумма up+down из панели). */
+async function refreshTrafficUsed(sub: any): Promise<number> {
+  const devices = parseJsonDevices(sub?.v2ray_config);
+  let totalBytes = 0;
+  let anyOk = false;
+  for (const device of devices) {
+    if (!device?.email || !device?.serverId) continue;
+    try {
+      const { instance } = await getXuiForServer(device.serverId);
+      const traffic: any = await instance.getClientTraffic(device.email);
+      if (traffic) {
+        totalBytes += Number(traffic.up || 0) + Number(traffic.down || 0);
+        anyOk = true;
+      }
+    } catch (e: any) {
+      console.warn(`[User] traffic refresh failed for ${device.email}: ${e.message}`);
+    }
+  }
+  const stored = Number(sub?.traffic_used_mb || 0);
+  if (!anyOk) return stored;
+  const freshMb = Math.max(0, Math.round(totalBytes / (1024 * 1024)));
+  if (freshMb !== stored) {
+    try {
+      await supabase.from('subscriptions').update({ traffic_used_mb: freshMb, updated_at: new Date().toISOString() }).eq('id', sub.id);
+    } catch (e: any) {
+      console.warn(`[User] traffic save failed: ${e.message}`);
+    }
+  }
+  return freshMb;
+}
+
+// 1. Сводка личного кабинета: пользователь, подписка (трафик + срок), настройки
+router.get('/profile-summary', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const [{ data: user }, { data: sub }, { data: settings }] = await Promise.all([
+      supabase.from('users').select('*').eq('id', userId).maybeSingle(),
+      supabase.from('subscriptions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle()
+    ]);
+
+    let trafficUsedMb = Number(sub?.traffic_used_mb || 0);
+    if (sub) trafficUsedMb = await refreshTrafficUsed(sub);
+
+    const limitMb = Number(sub?.traffic_limit_mb || 102400);
+    const expiresAt = sub?.expires_at || null;
+    const daysLeft = expiresAt ? Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000)) : null;
+    const devices = parseJsonDevices(sub?.v2ray_config);
+
+    res.json({
+      user: {
+        id: userId,
+        email: user?.email || req.user.email || null,
+        name: user?.name || null,
+        referral_code: user?.referral_code || null,
+        telegram_id: user?.telegram_id || null,
+        telegram_linked: Boolean(user?.telegram_linked),
+        balance: Number(user?.balance || 0),
+        role: user?.role || 'user'
+      },
+      subscription: sub
+        ? {
+            id: sub.id,
+            status: sub.status,
+            expires_at: expiresAt,
+            days_left: daysLeft,
+            traffic_used_mb: trafficUsedMb,
+            traffic_limit_mb: limitMb,
+            traffic_used_gb: Number((trafficUsedMb / 1024).toFixed(2)),
+            traffic_limit_gb: Number((limitMb / 1024).toFixed(1)),
+            traffic_percent: limitMb > 0 ? Math.min(100, Math.round((trafficUsedMb / limitMb) * 100)) : 0,
+            device_limit: Number(sub.device_limit || 0),
+            devices_count: devices.length,
+            is_expired: expiresAt ? new Date(expiresAt).getTime() < Date.now() : false
+          }
+        : null,
+      devices: devices.map((d: any) => ({
+        id: d.id,
+        label: d.label,
+        email: d.email,
+        expiresAt: d.expiresAt || expiresAt,
+        trafficUsedBytes: Number(d.trafficUsedBytes || 0)
+      })),
+      settings: settings || null
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Реферальный код: выдать, если ещё не выдан (клиентская запись блокировалась RLS)
+router.post('/referral/ensure', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: user } = await supabase.from('users').select('referral_code').eq('id', userId).maybeSingle();
+    if (user?.referral_code) return res.json({ referral_code: user.referral_code, created: false });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = crypto.randomBytes(4).toString('hex');
+      const { error } = await supabase.from('users').update({ referral_code: code }).eq('id', userId);
+      if (!error) return res.json({ referral_code: code, created: true });
+      if (!/duplicate|unique|referral_code/i.test(error.message || '')) throw error;
+    }
+    throw new Error('Не удалось подобрать уникальный реферальный код');
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Токен привязки Telegram (раньше вставка с клиента не проходила: токен не доходил)
+router.post('/telegram/link-token', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const token = crypto.randomBytes(8).toString('hex');
+    const { error } = await supabase.from('telegram_linking_tokens').insert({ token, user_id: userId });
+    if (error) throw error;
+    res.json({ token });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Настройки уведомлений (раньше upsert блокировал RLS)
+const NOTIFICATION_KEYS = ['subscription_expiring', 'subscription_expired', 'payment_success', 'news', 'promo'];
+
+router.get('/notification-settings', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data } = await supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle();
+    res.json(data || { user_id: userId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/notification-settings', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const patch: Record<string, any> = { user_id: userId };
+    for (const key of NOTIFICATION_KEYS) {
+      if (typeof req.body?.[key] === 'boolean') patch[key] = req.body[key];
+    }
+    if (Object.keys(patch).length === 1) return res.status(400).json({ error: 'Нет настроек для сохранения' });
+
+    const { data: existing } = await supabase.from('notification_settings').select('id').eq('user_id', userId).maybeSingle();
+    if (existing) {
+      const { error } = await supabase.from('notification_settings').update(patch).eq('user_id', userId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('notification_settings').insert(patch);
+      if (error) throw error;
+    }
+    const { data: saved } = await supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle();
+    res.json(saved || patch);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Поддержка: тикеты и сообщения (клиентские вставки блокировал RLS)
+router.get('/support/tickets', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/support/tickets', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const message = String(req.body?.message || '').trim();
+    if (!message) return res.status(400).json({ error: 'Пустое сообщение' });
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .insert({
+        user_id: userId,
+        subject: String(req.body?.subject || 'Поддержка izinet').slice(0, 200),
+        message: message.slice(0, 4000),
+        status: 'open',
+        priority: 'medium'
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/support/messages/:ticketId', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: ticket } = await supabase.from('support_tickets').select('id, user_id').eq('id', req.params.ticketId).maybeSingle();
+    if (!ticket || ticket.user_id !== userId) return res.status(403).json({ error: 'Тикет не найден' });
+    const { data, error } = await supabase
+      .from('support_messages')
+      .select('*')
+      .eq('ticket_id', req.params.ticketId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/support/messages', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const ticketId = String(req.body?.ticket_id || '').trim();
+    const content = String(req.body?.content || '').trim();
+    if (!ticketId || !content) return res.status(400).json({ error: 'Нужны ticket_id и content' });
+
+    const { data: ticket } = await supabase.from('support_tickets').select('id, user_id').eq('id', ticketId).maybeSingle();
+    if (!ticket || ticket.user_id !== userId) return res.status(403).json({ error: 'Тикет не найден' });
+
+    const { data, error } = await supabase
+      .from('support_messages')
+      .insert({ ticket_id: ticketId, sender: 'user', content: content.slice(0, 4000) })
+      .select()
+      .single();
+    if (error) throw error;
+    try {
+      await supabase.from('support_tickets').update({ updated_at: new Date().toISOString(), status: 'open' }).eq('id', ticketId);
+    } catch (e: any) {}
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
