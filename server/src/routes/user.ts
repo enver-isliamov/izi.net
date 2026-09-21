@@ -584,7 +584,7 @@ async function refreshTrafficUsed(sub: any): Promise<number> {
 }
 
 // 1. Сводка личного кабинета: пользователь, подписка (трафик + срок), настройки
-router.get('/profile-summary', authenticateUser, async (req: any, res) => {
+router.get('/user/profile-summary', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const [{ data: user }, { data: sub }, { data: settings }] = await Promise.all([
@@ -643,7 +643,7 @@ router.get('/profile-summary', authenticateUser, async (req: any, res) => {
 });
 
 // 2. Реферальный код: выдать, если ещё не выдан (клиентская запись блокировалась RLS)
-router.post('/referral/ensure', authenticateUser, async (req: any, res) => {
+router.post('/user/referral/ensure', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data: user } = await supabase.from('users').select('referral_code').eq('id', userId).maybeSingle();
@@ -662,7 +662,7 @@ router.post('/referral/ensure', authenticateUser, async (req: any, res) => {
 });
 
 // 3. Токен привязки Telegram (раньше вставка с клиента не проходила: токен не доходил)
-router.post('/telegram/link-token', authenticateUser, async (req: any, res) => {
+router.post('/user/telegram/link-token', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const token = crypto.randomBytes(8).toString('hex');
@@ -677,7 +677,7 @@ router.post('/telegram/link-token', authenticateUser, async (req: any, res) => {
 // 4. Настройки уведомлений (раньше upsert блокировал RLS)
 const NOTIFICATION_KEYS = ['subscription_expiring', 'subscription_expired', 'payment_success', 'news', 'promo'];
 
-router.get('/notification-settings', authenticateUser, async (req: any, res) => {
+router.get('/user/notification-settings', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data } = await supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle();
@@ -687,7 +687,7 @@ router.get('/notification-settings', authenticateUser, async (req: any, res) => 
   }
 });
 
-router.put('/notification-settings', authenticateUser, async (req: any, res) => {
+router.put('/user/notification-settings', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const patch: Record<string, any> = { user_id: userId };
@@ -712,7 +712,7 @@ router.put('/notification-settings', authenticateUser, async (req: any, res) => 
 });
 
 // 5. Поддержка: тикеты и сообщения (клиентские вставки блокировал RLS)
-router.get('/support/tickets', authenticateUser, async (req: any, res) => {
+router.get('/user/support/tickets', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data, error } = await supabase
@@ -727,7 +727,7 @@ router.get('/support/tickets', authenticateUser, async (req: any, res) => {
   }
 });
 
-router.post('/support/tickets', authenticateUser, async (req: any, res) => {
+router.post('/user/support/tickets', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const message = String(req.body?.message || '').trim();
@@ -750,7 +750,7 @@ router.post('/support/tickets', authenticateUser, async (req: any, res) => {
   }
 });
 
-router.get('/support/messages/:ticketId', authenticateUser, async (req: any, res) => {
+router.get('/user/support/messages/:ticketId', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data: ticket } = await supabase.from('support_tickets').select('id, user_id').eq('id', req.params.ticketId).maybeSingle();
@@ -767,7 +767,7 @@ router.get('/support/messages/:ticketId', authenticateUser, async (req: any, res
   }
 });
 
-router.post('/support/messages', authenticateUser, async (req: any, res) => {
+router.post('/user/support/messages', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const ticketId = String(req.body?.ticket_id || '').trim();
@@ -792,9 +792,52 @@ router.post('/support/messages', authenticateUser, async (req: any, res) => {
   }
 });
 
+// ===== Вход через Telegram (публичные эндпоинты, без авторизации) =====
+// start → создаёт одноразовый токен; verify → когда бот проставил chat_id,
+// выдаёт одноразовый token_hash для supabase.auth.verifyOtp на клиенте.
+
+router.post('/user/auth/telegram/start', async (_req, res) => {
+  try {
+    const token = `auth_${crypto.randomBytes(16).toString('hex')}`;
+    const { error } = await supabase.from('telegram_linking_tokens').insert({ token, user_id: null });
+    if (error) throw error;
+    res.json({ token });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/user/auth/telegram/verify', async (req: any, res) => {
+  try {
+    const token = String(req.query.token || '').trim();
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const { data: row } = await supabase.from('telegram_linking_tokens').select('*').eq('token', token).maybeSingle();
+    if (!row) return res.json({ status: 'unknown' });
+    if (!row.user_id) return res.json({ status: 'pending' });
+
+    const chatId = String(row.user_id);
+    const { data: user } = await supabase.from('users').select('id, email, telegram_id').eq('telegram_id', chatId).maybeSingle();
+    if (!user?.email) {
+      return res.json({ status: 'no_user', hint: 'Telegram не привязан к аккаунту. Войдите по email и привяжите Telegram в профиле.' });
+    }
+
+    const { data: link, error } = await supabase.auth.admin.generateLink({ type: 'magiclink', email: user.email });
+    if (error) throw error;
+    const properties: any = (link as any)?.properties || {};
+    const tokenHash = properties.hashed_token || properties.hashedToken || null;
+    if (!tokenHash) throw new Error('Supabase не вернул token_hash');
+
+    await supabase.from('telegram_linking_tokens').delete().eq('token', token);
+    res.json({ status: 'linked', email: user.email, tokenHash, actionLink: properties.action_link || null });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ===== AmneziaWG: файл-конфиг как альтернатива ссылке (кабинет) =====
 
-router.get('/awg/status', authenticateUser, async (_req, res) => {
+router.get('/user/awg/status', authenticateUser, async (_req, res) => {
   try {
     res.json(AwgService.status());
   } catch (err: any) {
@@ -803,7 +846,7 @@ router.get('/awg/status', authenticateUser, async (_req, res) => {
 });
 
 // Создать AmneziaWG-устройство (для роутера, ТВ-приставки): файл вместо ссылки
-router.post('/awg/devices', authenticateUser, async (req: any, res) => {
+router.post('/user/awg/devices', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const label = String(req.body?.label || 'Роутер (AmneziaWG)').slice(0, 60);
@@ -850,7 +893,7 @@ router.post('/awg/devices', authenticateUser, async (req: any, res) => {
 });
 
 // Скачать готовый файл конфигурации
-router.get('/awg/devices/:deviceId/config', authenticateUser, async (req: any, res) => {
+router.get('/user/awg/devices/:deviceId/config', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle();
@@ -871,7 +914,7 @@ router.get('/awg/devices/:deviceId/config', authenticateUser, async (req: any, r
 });
 
 // Пересоздать ключи AmneziaWG-устройства (старый peer снимается)
-router.post('/awg/devices/:deviceId/rotate', authenticateUser, async (req: any, res) => {
+router.post('/user/awg/devices/:deviceId/rotate', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle();

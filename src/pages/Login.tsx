@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { ShieldCheck, Mail, Lock, ArrowRight, Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -156,50 +157,46 @@ export default function Login() {
   };
 
   const handleTelegramLogin = async () => {
-    // We'll use a bot-redirect flow because it's more reliable in iframes
-    // than the official widget which often has domain validation issues
     setIsLoading(true);
     const toastId = toast.loading('Подготовка входа через Telegram...');
-    
     try {
-      // 1. Generate a login session token
-      const loginToken = Math.random().toString(36).substring(2, 15);
-      
-      // 2. Create the login request in DB
-      const { error } = await supabase.from('telegram_linking_tokens').insert({
-        token: `auth_${loginToken}`,
-        user_id: null // Login requests don't have a user_id yet
-      });
-      
-      if (error) throw error;
-      
-      // 3. Open bot
-      const botName = telegramBotName;
-      const link = `https://t.me/${botName}?start=auth_${loginToken}`;
-      
+      // 1. Токен создаёт сервер (клиентская вставка блокировалась политиками базы)
+      const { data: startRes } = await axios.post('/api/user/auth/telegram/start', {});
+      const token = startRes?.token;
+      if (!token) throw new Error('Сервер не вернул токен входа');
+
+      // 2. Открываем бота со ссылкой подтверждения
+      const link = `https://t.me/${telegramBotName}?start=${token}`;
       toast.success('Переходим в Telegram для подтверждения...', { id: toastId });
-      
-      // 4. Start polling for the chat_id in that token
-      const pollInterval = setInterval(async () => {
-        const { data, error: pollErr } = await supabase
-          .from('telegram_linking_tokens')
-          .select('user_id') // We'll hijack user_id to store the chat_id temporarily or use a dedicated column
-          .eq('token', `auth_${loginToken}`)
-          .single();
-          
-        if (data?.user_id) {
-          clearInterval(pollInterval);
-          // Token now contains the chat_id (or user is linked). 
-          // Let's call our verify endpoint to get a session
-          // For simplicity in this demo, we'll guide the user to the bot.
+      window.open(link, '_blank');
+
+      // 3. Опрашиваем сервер до 2 минут: подтвердил ли пользователь вход в боте
+      const startedAt = Date.now();
+      const timer = window.setInterval(async () => {
+        try {
+          if (Date.now() - startedAt > 120000) {
+            window.clearInterval(timer);
+            toast.error('Вход не подтверждён. Попробуйте снова или войдите по email.', { id: toastId });
+            return;
+          }
+          const { data } = await axios.get(`/api/user/auth/telegram/verify?token=${token}`);
+          if (data?.status === 'linked' && data?.tokenHash) {
+            window.clearInterval(timer);
+            const { error } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: data.tokenHash });
+            if (error) throw error;
+            toast.success('Вход выполнен!', { id: toastId });
+            navigate('/dashboard');
+          } else if (data?.status === 'no_user') {
+            window.clearInterval(timer);
+            toast.error(data.hint || 'Telegram не привязан к аккаунту.', { id: toastId });
+          }
+        } catch (e) {
+          // сетевые сбои не прерывают опрос
         }
       }, 3000);
-      
-      window.open(link, '_blank');
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error('Telegram login error:', error);
-      toast.error('Ошибка входа через Telegram', { id: toastId });
+      toast.error(error.message || 'Ошибка входа через Telegram', { id: toastId });
     } finally {
       setIsLoading(false);
     }
