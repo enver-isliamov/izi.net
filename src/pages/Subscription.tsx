@@ -401,7 +401,7 @@ export default function Subscription() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="text-xl">Мои устройства</CardTitle>
-                <CardDescription>Управление VPN-ключами</CardDescription>
+                <CardDescription>Управление VPN-ключами</CardDescription><CardDescription className="text-[11px] text-muted-foreground/80 mt-1">Ссылка — для телефона и компьютера (одно нажатие, профиль подтянется в Hiddify). Файл AmneziaWG — для роутера или ТВ-приставки: скачиваете файл и импортируете его в приложение.</CardDescription>
               </div>
               {deviceCount < deviceLimit && (
                 <div className="flex flex-col sm:flex-row gap-2">
