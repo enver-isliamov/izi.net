@@ -1226,6 +1226,53 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ADMIN-015: гарантированно развести всех клиентов по всем инбаундам (ручной запуск)
+router.post('/system/sync-clients-all-inbounds', adminOnly, async (_req, res) => {
+  try {
+    const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+    const report: Array<{ server: string; device: string; inboundCount: number; added: number[]; existing: number[]; failed: number[] }> = [];
+
+    for (const server of (servers || [])) {
+      let targetCount = 0;
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        targetCount = (await instance.getClientInbounds()).length;
+        for (const sub of (subs || [])) {
+          const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+          const limitBytes = (Number(sub.traffic_limit_mb) || 102400) * 1024 * 1024;
+          const expiryTime = new Date(sub.expires_at).getTime();
+          for (const device of devices) {
+            if (!device.email) continue;
+            if (device.serverId && device.serverId !== server.id) continue;
+            try {
+              const result = await instance.ensureClientInAllInbounds(device.email, device.uuid, expiryTime, limitBytes);
+              report.push({
+                server: String(server.name || server.id),
+                device: device.email,
+                inboundCount: targetCount,
+                added: result.added,
+                existing: result.existing,
+                failed: result.failed.map((f: any) => f.inboundId)
+              });
+            } catch (e: any) {
+              report.push({ server: String(server.name || server.id), device: device.email, inboundCount: targetCount, added: [], existing: [], failed: [-1] });
+            }
+          }
+        }
+      } catch (e: any) {
+        console.warn('[Admin] Все инбаунды: сервер ' + (server.name || server.id) + ' недоступен: ' + e.message);
+      }
+    }
+
+    const addedTotal = report.reduce((s, r) => s + r.added.length, 0);
+    const failedTotal = report.reduce((s, r) => s + r.failed.length, 0);
+    res.json({ success: true, devices: report.length, addedTotal, failedTotal, report });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stats', adminOnly, async (req, res) => {
   try {
     const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });

@@ -309,24 +309,21 @@ export class MaintenanceService {
           for (const server of activeServers) {
             const { instance, server: serverData } = await getXuiForServer(server.id);
 
-            let inboundId = serverData.inbound_id || defaultInboundId;
-            if (!inboundId || inboundId <= 0) {
-              try {
-                const inbounds = await instance.getInbounds();
-                const realityInbound = inbounds.find((ib: any) => {
-                  try {
-                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                    return ss.security === 'reality' && ib.port === 443;
-                  } catch { return false; }
-                });
-                if (realityInbound) inboundId = realityInbound.id;
-              } catch (e) {}
-            }
-
             for (const dev of devices) {
-              await instance.addClient(dev.email, dev.uuid, inboundId, expiryTime, limitBytes).catch(e => {
-                console.warn(`⚠️ [Sync] Failed to sync ${dev.email} to ${server.name}: ${e.message}`);
-              });
+              const result = await instance
+                .ensureClientInAllInbounds(dev.email, dev.uuid, expiryTime, limitBytes)
+                .catch((e: any) => {
+                  console.warn('⚠️ [Sync] Failed to sync ' + dev.email + ' to ' + server.name + ': ' + e.message);
+                  return null;
+                });
+              if (result && (result.added.length > 0 || result.failed.length > 0)) {
+                console.log(
+                  '[Sync] ' + dev.email + ' @ ' + server.name +
+                  ': добавлено в инбаунды [' + (result.added.join(', ') || '—') + ']' +
+                  ', уже были в [' + (result.existing.join(', ') || '—') + ']' +
+                  (result.failed.length ? ', ошибки: [' + result.failed.map((f: any) => f.inboundId).join(', ') + ']' : '')
+                );
+              }
             }
           }
         } catch (e) {}

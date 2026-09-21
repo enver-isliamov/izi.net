@@ -279,7 +279,7 @@ export class XUIService {
     } catch (e) {}
 
     // New 3x-ui removed /panel/api/inbounds/addClient; the proven path is the full inbound update.
-    return await this.addClientViaFullUpdate(email, uuid, inboundId, expiryTime, limitBytes);
+    return await this.addClientViaFullUpdate(email, uuid, effectiveInboundId, expiryTime, limitBytes);
   }
 
   private async addClientViaFullUpdate(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0): Promise<string> {
@@ -477,6 +477,52 @@ export class XUIService {
       }
     }
   }
+  /** Инбаунды, в которые можно добавлять клиентов (кроме служебного api и dokodemo-door). */
+  async getClientInbounds(): Promise<Array<{ id: number; port: number; protocol: string; network: string }>> {
+    const inbounds = (await this.getInbounds()) as any[];
+    const result: Array<{ id: number; port: number; protocol: string; network: string }> = [];
+    for (const ib of inbounds || []) {
+      if (ib.enable === false) continue;
+      const protocol = String(ib.protocol || '').toLowerCase();
+      if (!protocol || protocol === 'dokodemo-door' || protocol === 'tunnel') continue;
+      if (ib.tag === 'api') continue;
+      const settings = this.parseJson<any>(ib.settings, {});
+      const hasClients = Array.isArray(settings?.clients);
+      const supportsClients = ['vless', 'vmess', 'trojan', 'shadowsocks'].includes(protocol);
+      if (!hasClients && !supportsClients) continue;
+      const stream = this.parseJson<any>(ib.streamSettings, {});
+      result.push({ id: ib.id, port: Number(ib.port || 0), protocol, network: String(stream?.network || 'tcp') });
+    }
+    return result;
+  }
+
+  /**
+   * Гарантирует, что клиент есть во ВСЕХ инбаундах сервера, чтобы работали все транспорты.
+   * Существующих клиентов не перезаписывает (это предотвращает разрыв активных соединений).
+   */
+  async ensureClientInAllInbounds(email: string, uuid: string, expiryTime: number, limitBytes: number) {
+    const added: number[] = [];
+    const existing: number[] = [];
+    const failed: Array<{ inboundId: number; error: string }> = [];
+    const targets = await this.getClientInbounds();
+    for (const target of targets) {
+      try {
+        const current = await this.getClientByEmail(target.id, email);
+        if (current?.id) { existing.push(target.id); continue; }
+        await this.addClient(email, uuid, target.id, expiryTime, limitBytes);
+        added.push(target.id);
+      } catch (e: any) {
+        failed.push({ inboundId: target.id, error: e.message });
+      }
+    }
+    return {
+      added,
+      existing,
+      failed,
+      targets: targets.map((t) => ({ id: t.id, port: t.port, network: t.network }))
+    };
+  }
+
   async deleteInbound(inboundId: number): Promise<void> {
     await this.login();
     try {

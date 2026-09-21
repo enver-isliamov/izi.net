@@ -304,6 +304,32 @@ bash update.sh`;
     }
   };
 
+  const [isSyncingInbounds, setIsSyncingInbounds] = useState(false);
+
+  const handleSyncAllInbounds = async () => {
+    try {
+      setIsSyncingInbounds(true);
+      setSystemLogs(['[Старт] Развожу клиентов по всем включённым инбаундам...']);
+      const { data } = await axios.post('/api/admin/system/sync-clients-all-inbounds', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      const lines = [
+        `[Готово] Устройств обработано: ${data.devices}, добавлено клиентов в инбаунды: ${data.addedTotal}, ошибок: ${data.failedTotal}`
+      ];
+      (data.report || []).slice(0, 12).forEach((r: any) => {
+        lines.push(`[${r.server}] ${r.device}: добавлено [${r.added.join(', ') || '—'}], уже было [${r.existing.join(', ') || '—'}]`);
+      });
+      setSystemLogs(lines);
+      toast.success('Клиенты разведены по всем инбаундам');
+    } catch (e: any) {
+      const msg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${msg}`]);
+      toast.error('Не удалось развести клиентов: ' + msg);
+    } finally {
+      setIsSyncingInbounds(false);
+    }
+  };
+
   const handleRegenerateLinks = async () => {
     try {
       setIsRegenerating(true);
@@ -805,6 +831,25 @@ bash update.sh`}
                 <Activity size={12} />
                 Открыть раздел «Тесты»
               </a>
+            </div>
+
+            {/* All Inbounds Card */}
+            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Клиенты во все инбаунды</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Разводит каждого клиента по всем включённым инбаундам сервера (tcp / grpc / xhttp), чтобы работали все транспорты подписки. Уже существующих клиентов не перезаписывает. Автоматически выполняется каждый час.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isSyncingInbounds}
+                onClick={handleSyncAllInbounds}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-emerald-500/20"
+              >
+                {isSyncingInbounds ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                Развести по всем инбаундам
+              </button>
             </div>
 
             {/* Regenerate All VPN Links Card */}
