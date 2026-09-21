@@ -4,6 +4,7 @@ import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cl
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
 import { toast } from 'sonner';
 
 interface Setting {
@@ -840,11 +841,11 @@ bash update.sh`}
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
                     Резервное копирование VPS в 1 клик
                     <span className="text-[10px] bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded-full border border-blue-500/30">
-                      3x-ui (x-ui.db) + конфиг Supabase
+                      3x-ui + Hysteria2 + .env + Supabase
                     </span>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Архив конфигурации (база 3x-ui + настройки Supabase) — перед обновлением или миграцией. Хранится в контейнере приложения: скачайте его на компьютер.
+                    Архив конфигурации: база 3x-ui, конфиг Hysteria2 (/etc/hysteria), .env и настройки Supabase. Хранится в контейнере приложения — скачайте его на компьютер.
                   </p>
                 </div>
               </div>
@@ -938,6 +939,9 @@ bash update.sh`}
             </div>
           </div>
         </motion.div>
+
+        {/* Hysteria2 Section */}
+        <Hysteria2Section />
 
         <div className="sticky bottom-6 flex justify-end">
           <button

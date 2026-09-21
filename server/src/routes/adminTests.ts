@@ -266,6 +266,17 @@ router.get('/geo', adminOnly, async (_req, res) => {
       ? 'у контейнера есть IPv6-выход — убедитесь, что клиенты не уходят по IPv6 напрямую'
       : 'IPv6-выход недоступен (утечки мимо туннеля нет)' + (v6Addrs.length ? `; адреса: ${v6Addrs.join(', ')}` : ''));
 
+  // 4b. Hysteria2 (UDP/443) — основной резервный протокол на хосте (systemd-юнит, вне Docker)
+  try {
+    const cmd = 'docker run --rm --privileged --pid=host alpine sh -c "nsenter -t 1 -m -u -n -i systemctl is-active hysteria2 2>/dev/null || nsenter -t 1 -m -u -n -i systemctl is-active hysteria-server 2>/dev/null || echo unknown"';
+    const out = execSync(cmd, { timeout: 20000 }).toString().trim();
+    const active = out === "active";
+    push("Утечки", "hysteria2", "Hysteria2 (UDP/443)", active ? "ok" : "warn",
+      active ? "сервис работает — протокол доступен клиентам" : `статус сервиса: ${out || "неизвестен"} (проверьте systemctl status hysteria2 на сервере)`);
+  } catch (e: any) {
+    push("Утечки", "hysteria2", "Hysteria2 (UDP/443)", "warn", "не удалось определить статус: " + e.message);
+  }
+
   // 5. Что проверяется на стороне клиента
   push('Клиент', 'client-hints', 'Что проверить в клиенте', 'ok',
     'DNS внутри туннеля (не системный), IPv6 выключен, без «Round robin» с мёртвыми прокси, QUIC в браузере выключен, часовой пояс и язык не российские');

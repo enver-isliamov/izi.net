@@ -76,19 +76,20 @@ POLICY_CONFIG = {
     }
 }
 
+# Резолверы без РФ (Яндекс DoH/DNS убраны). Только A-записи => нет IPv6-выхода и утечек мимо туннеля.
 DNS_CONFIG = {
     "servers": [
-        "localhost",
-        "https://dns.adguard-dns.com/dns-query",
-        "https://dns.yandex.ru/dns-query",
-        "94.140.14.14",
-        "77.88.8.8",
+        "https://1.1.1.1/dns-query",
+        "https://dns.quad9.net/dns-query",
+        "8.8.8.8",
         "9.9.9.9"
-    ]
+    ],
+    "queryStrategy": "UseIPv4",
+    "disableFallback": True
 }
 
 OUTBOUNDS_CONFIG = [
-    {"protocol": "freedom", "tag": "direct"},
+    {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIPv4"}},
     {"protocol": "blackhole", "tag": "blocked"}
 ]
 
