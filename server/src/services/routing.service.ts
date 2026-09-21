@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isUnroutableHost } from '../utils/vpn';
 import { getXuiForServer } from './xui.service';
 import { restartContainer } from '../utils/docker';
 
@@ -20,7 +21,8 @@ export class RoutingService {
       }
 
       const { data: rules } = await supabase.from('vpn_routing_rules').select('*').eq('is_active', true);
-      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true)
+        .then((r: any) => ({ ...r, data: (r.data || []).filter((s: any) => !isUnroutableHost(s.ip || s.public_host || s.domain)) }));
 
       if (!rules || !servers) return;
 
@@ -56,7 +58,9 @@ export class RoutingService {
           // --- DNS Configuration (only set if empty, don't overwrite bootstrap DNS) ---
           if (!xrayConfig.dns || !xrayConfig.dns.servers || xrayConfig.dns.servers.length === 0) {
             xrayConfig.dns = {
-              servers: ['8.8.8.8', '1.1.1.1', 'localhost']
+              servers: ['1.1.1.1', '8.8.8.8', '9.9.9.9'],
+          queryStrategy: 'UseIPv4',
+          disableFallback: true
             };
           }
 

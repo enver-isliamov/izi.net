@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
-import { parseVpnDevices, getPublishedVlessPorts } from '../utils/vpn';
+import { parseVpnDevices, getPublishedVlessPorts, isUnroutableHost } from '../utils/vpn';
 
 import { RoutingService } from './routing.service';
 
@@ -46,7 +46,8 @@ export class MaintenanceService {
    */
   static async syncRealityKeys() {
     try {
-      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true)
+        .then((r: any) => ({ ...r, data: (r.data || []).filter((s: any) => !isUnroutableHost(s.ip || s.public_host || s.domain)) }));
       if (!servers || servers.length === 0) return;
 
       for (const server of servers) {
@@ -149,7 +150,8 @@ export class MaintenanceService {
   static async healthCheckAllServers() {
     console.log('🏥 [Maintenance] Running health check on all servers...');
     try {
-      const { data: servers, error } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const { data: servers, error } = await supabase.from('vpn_servers').select('*').eq('is_active', true)
+        .then((r: any) => ({ ...r, data: (r.data || []).filter((s: any) => !isUnroutableHost(s.ip || s.public_host || s.domain)) }));
       if (error || !servers || servers.length === 0) return;
 
       const net = await import('net');
@@ -245,7 +247,8 @@ export class MaintenanceService {
 
       console.log(`🧹 [Maintenance] Found ${expiredSubs.length} expired subscriptions, cleaning up...`);
 
-      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true)
+        .then((r: any) => ({ ...r, data: (r.data || []).filter((s: any) => !isUnroutableHost(s.ip || s.public_host || s.domain)) }));
       if (!servers) return;
 
       for (const sub of expiredSubs) {
@@ -288,7 +291,8 @@ export class MaintenanceService {
 
     console.log('🔄 [Maintenance] Syncing all users to all active servers...');
     try {
-      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true)
+        .then((r: any) => ({ ...r, data: (r.data || []).filter((s: any) => !isUnroutableHost(s.ip || s.public_host || s.domain)) }));
       const { data: activeSubs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
 
       if (!activeServers || !activeSubs) return;

@@ -55,3 +55,21 @@ export async function getPublishedVlessPorts(): Promise<number[] | null> {
     return ports.length ? ports : null;
   } catch { return null; }
 }
+
+
+/** Адрес заведомо не может быть внешним VPN-сервером: docker-сеть или локальный диапазон. */
+export function isUnroutableHost(host?: string | null): boolean {
+  if (!host) return true;
+  const value = String(host).trim();
+  if (/^(localhost|x3-ui|izinet-app)$/i.test(value)) return true;
+  const m = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false; // доменное имя — считаем пригодным
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10 || a === 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 0) return true;
+  return false;
+}
