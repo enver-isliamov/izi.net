@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../services/supabase';
 import { authenticateUser } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
+import { AwgService } from '../services/awg.service';
 import { MaintenanceService } from '../services/maintenance.service';
 import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 import crypto from 'crypto';
@@ -499,6 +500,11 @@ router.post('/subscription/device/delete', authenticateUser, async (req: any, re
     const target = devices[targetIdx];
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
 
+    // AmneziaWG: снять peer с сервера перед удалением записи
+    if (String((target as any).serverType).toUpperCase() === 'AWG') {
+      try { AwgService.removePeer((target as any).uuid); } catch (e: any) { console.warn('[AWG] removePeer: ' + e.message); }
+    }
+
     // Удаление клиента со всех серверов для чистоты базы 3x-ui
     for (const server of (activeServers || [])) {
       try {
@@ -781,6 +787,109 @@ router.post('/support/messages', authenticateUser, async (req: any, res) => {
       await supabase.from('support_tickets').update({ updated_at: new Date().toISOString(), status: 'open' }).eq('id', ticketId);
     } catch (e: any) {}
     res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== AmneziaWG: файл-конфиг как альтернатива ссылке (кабинет) =====
+
+router.get('/awg/status', authenticateUser, async (_req, res) => {
+  try {
+    res.json(AwgService.status());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Создать AmneziaWG-устройство (для роутера, ТВ-приставки): файл вместо ссылки
+router.post('/awg/devices', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const label = String(req.body?.label || 'Роутер (AmneziaWG)').slice(0, 60);
+
+    const status = AwgService.status();
+    if (!status.available) return res.status(409).json({ error: status.message });
+
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Сначала оформите подписку' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const deviceLimit = Number(sub.device_limit || 2);
+    if (devices.length >= deviceLimit) {
+      return res.status(409).json({ error: `Достигнут лимит устройств: ${deviceLimit}. Удалите лишнее или попросите увеличить лимит.` });
+    }
+
+    const name = `awg_${userId.slice(0, 8)}_${crypto.randomBytes(3).toString('hex')}`;
+    const { peer, conf } = await AwgService.createPeer(name);
+
+    const device = {
+      id: `dev_awg_${Date.now()}`,
+      label,
+      config: conf,
+      email: name,
+      uuid: peer.public_key,
+      expiresAt: sub.expires_at,
+      serverType: 'AWG',
+      trafficUsedBytes: 0
+    };
+
+    devices.push(device as any);
+    await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+
+    res.json({ success: true, device });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Скачать готовый файл конфигурации
+router.get('/awg/devices/:deviceId/config', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Подписка не найдена' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const device = devices.find((d) => d.id === req.params.deviceId);
+    if (!device) return res.status(404).json({ error: 'Устройство не найдено' });
+    if (String((device as any).serverType).toUpperCase() !== 'AWG') return res.status(400).json({ error: 'Это не AmneziaWG-устройство' });
+
+    const safeName = String(req.user.email || 'izinet').replace(/[^a-zA-Z0-9._-]/g, '_');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="izinet-${safeName}.conf"`);
+    res.send(device.config || '');
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Пересоздать ключи AmneziaWG-устройства (старый peer снимается)
+router.post('/awg/devices/:deviceId/rotate', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Подписка не найдена' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const idx = devices.findIndex((d) => d.id === req.params.deviceId);
+    if (idx === -1) return res.status(404).json({ error: 'Устройство не найдено' });
+
+    const old = devices[idx] as any;
+    if (String(old.serverType).toUpperCase() !== 'AWG') return res.status(400).json({ error: 'Это не AmneziaWG-устройство' });
+    if (old.uuid) AwgService.removePeer(old.uuid);
+
+    const { peer, conf } = await AwgService.createPeer(old.email || `awg_${userId.slice(0, 8)}`);
+    devices[idx] = { ...old, config: conf, uuid: peer.public_key, expiresAt: sub.expires_at } as any;
+    await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+
+    res.json({ success: true, device: devices[idx] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

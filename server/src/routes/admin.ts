@@ -5,6 +5,7 @@ import path from 'path';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
+import { AwgService } from '../services/awg.service';
 import { MaintenanceService } from '../services/maintenance.service';
 import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 
@@ -1268,6 +1269,68 @@ router.post('/system/sync-clients-all-inbounds', adminOnly, async (_req, res) =>
     const addedTotal = report.reduce((s, r) => s + r.added.length, 0);
     const failedTotal = report.reduce((s, r) => s + r.failed.length, 0);
     res.json({ success: true, devices: report.length, addedTotal, failedTotal, report });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== AmneziaWG из админки: устройство управляется как любое другое =====
+
+router.post('/users/:userId/awg/devices', adminOnly, async (req: any, res) => {
+  try {
+    const { userId } = req.params;
+    const label = String(req.body?.label || 'Роутер (AmneziaWG, админ)').slice(0, 60);
+
+    const status = AwgService.status();
+    if (!status.available) return res.status(409).json({ error: status.message });
+
+    const { data: sub, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!sub) return res.status(404).json({ error: 'У пользователя нет подписки' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const name = `awg_${userId.slice(0, 8)}_${crypto.randomBytes(3).toString('hex')}`;
+    const { peer, conf } = await AwgService.createPeer(name);
+
+    const device = {
+      id: `dev_awg_${Date.now()}`,
+      label,
+      config: conf,
+      email: name,
+      uuid: peer.public_key,
+      expiresAt: sub.expires_at,
+      serverType: 'AWG',
+      trafficUsedBytes: 0
+    };
+    devices.push(device as any);
+    await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+
+    res.json({ success: true, device, devicesCount: devices.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/users/:userId/awg/devices/:deviceId/config', adminOnly, async (req: any, res) => {
+  try {
+    const { userId, deviceId } = req.params;
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Подписка не найдена' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const device = devices.find((d) => d.id === deviceId) as any;
+    if (!device) return res.status(404).json({ error: 'Устройство не найдено' });
+    if (String(device.serverType).toUpperCase() !== 'AWG') return res.status(400).json({ error: 'Это не AmneziaWG-устройство' });
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${String(device.email || 'izinet')}.conf"`);
+    res.send(device.config || '');
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

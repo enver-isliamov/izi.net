@@ -1,18 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  ShieldCheck, 
-  Zap, 
-  Clock, 
-  Globe, 
-  Smartphone, 
-  Plus, 
-  RefreshCw,
-  AlertTriangle,
-  CheckCircle2,
-  Loader2,
-  Trash2,
-  Gift
-} from 'lucide-react';
+import { ShieldCheck, Zap, Clock, Globe, Smartphone, Plus, RefreshCw, AlertTriangle, CheckCircle2, Loader2, Trash2, Gift, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -174,6 +161,57 @@ export default function Subscription() {
     setWizardMode(mode);
     if (mode === 'new') setTargetDevice(undefined);
     setIsWizardOpen(true);
+  };
+
+  const [isAddingAwg, setIsAddingAwg] = useState(false);
+
+  const handleAddAwg = async () => {
+    try {
+      setIsAddingAwg(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/user/awg/devices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ label: 'Роутер (AmneziaWG)' })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Не удалось создать AmneziaWG-устройство');
+      toast.success('AmneziaWG готов — нажмите «Скачать файл»');
+      window.location.reload();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsAddingAwg(false);
+    }
+  };
+
+  const handleDownloadAwg = async (deviceId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/user/awg/devices/${deviceId}/config`, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || 'Не удалось получить файл');
+      }
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `izinet-${deviceId}.conf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Файл AmneziaWG скачан');
+    } catch (e: any) {
+      toast.error(e.message);
+    }
   };
 
   const handleDeleteDevice = async (deviceId: string, isPrimary: boolean) => {
@@ -366,14 +404,26 @@ export default function Subscription() {
                 <CardDescription>Управление VPN-ключами</CardDescription>
               </div>
               {deviceCount < deviceLimit && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="border-primary/50 hover:bg-primary/10 rounded-xl"
-                  onClick={() => openWizard('new')}
-                >
-                  <Plus className="mr-2 w-4 h-4" /> Добавить устройство
-                </Button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-primary/50 hover:bg-primary/10 rounded-xl"
+                    onClick={() => openWizard('new')}
+                  >
+                    <Plus className="mr-2 w-4 h-4" /> Ключ-ссылка
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isAddingAwg}
+                    className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 rounded-xl"
+                    onClick={handleAddAwg}
+                  >
+                    {isAddingAwg ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Download className="mr-2 w-4 h-4" />}
+                    Файл AmneziaWG (роутер)
+                  </Button>
+                </div>
               )}
             </CardHeader>
             <CardContent className="space-y-4">
@@ -390,7 +440,7 @@ export default function Subscription() {
                           <Smartphone className="w-5 h-5" />
                         </div>
                         <div>
-                          <div className="font-bold text-sm">{devLabel}</div>
+                          <div className="font-bold text-sm">{devLabel}{String(device.serverType || '').toUpperCase() === 'AWG' ? ' · AmneziaWG' : ''}</div>
                           <div className="text-[10px] text-muted-foreground flex gap-2">
                              <span>До {devExpiry.toLocaleDateString()}</span>
                              <span className={devDaysLeft > 0 ? "text-primary" : "text-destructive"}>
@@ -409,6 +459,15 @@ export default function Subscription() {
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
+                        {String(device.serverType || '').toUpperCase() === 'AWG' && (
+                          <Button
+                            size="sm"
+                            className="flex-1 sm:flex-none bg-emerald-500 text-black hover:bg-emerald-400 rounded-lg text-xs"
+                            onClick={() => handleDownloadAwg(device.id)}
+                          >
+                            Скачать файл
+                          </Button>
+                        )}
                         <Button 
                           size="sm" 
                           variant="secondary" 

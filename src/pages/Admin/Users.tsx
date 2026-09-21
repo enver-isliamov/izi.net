@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus, QrCode, RefreshCw, Copy, UserPlus, CalendarPlus } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus, QrCode, RefreshCw, Copy, UserPlus, CalendarPlus, Download } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -461,6 +461,30 @@ export default function AdminUsers() {
                                   </div>
 
                                   <div className="flex items-center gap-0.5 shrink-0 ml-1">
+                                    {String(device.serverType || '').toUpperCase() === 'AWG' && (
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const res = await fetch(`/api/admin/users/${user.id}/awg/devices/${device.id}/config`, {
+                                              headers: { Authorization: `Bearer ${session?.access_token}` }
+                                            });
+                                            if (!res.ok) throw new Error('Не удалось получить файл');
+                                            const text = await res.text();
+                                            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url; a.download = `${device.email || 'izinet'}.conf`;
+                                            document.body.appendChild(a); a.click(); a.remove();
+                                            URL.revokeObjectURL(url);
+                                            toast.success('Файл AmneziaWG скачан');
+                                          } catch (e: any) { toast.error(e.message); }
+                                        }}
+                                        className="text-muted-foreground hover:text-emerald-400 p-1 rounded-md hover:bg-white/10 transition-colors"
+                                        title="Скачать AmneziaWG"
+                                      >
+                                        <Download size={12} />
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => {
                                         const deviceSubUrl = `${window.location.origin}/api/sub/${sub.id}?deviceId=${device.id}`;
@@ -723,6 +747,30 @@ export default function AdminUsers() {
                                   </div>
 
                                   <div className="flex items-center gap-0.5 shrink-0 ml-1">
+                                    {String(device.serverType || '').toUpperCase() === 'AWG' && (
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const res = await fetch(`/api/admin/users/${user.id}/awg/devices/${device.id}/config`, {
+                                              headers: { Authorization: `Bearer ${session?.access_token}` }
+                                            });
+                                            if (!res.ok) throw new Error('Не удалось получить файл');
+                                            const text = await res.text();
+                                            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url; a.download = `${device.email || 'izinet'}.conf`;
+                                            document.body.appendChild(a); a.click(); a.remove();
+                                            URL.revokeObjectURL(url);
+                                            toast.success('Файл AmneziaWG скачан');
+                                          } catch (e: any) { toast.error(e.message); }
+                                        }}
+                                        className="text-muted-foreground hover:text-emerald-400 p-1 rounded-md hover:bg-white/10 transition-colors"
+                                        title="Скачать AmneziaWG"
+                                      >
+                                        <Download size={12} />
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => {
                                         const deviceSubUrl = `${window.location.origin}/api/sub/${sub.id}?deviceId=${device.id}`;
