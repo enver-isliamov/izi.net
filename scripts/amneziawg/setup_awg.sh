@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Установка AmneziaWG на izinet VPS. Что делает по шагам (и печатает это же):
-#   1) ставит awg-tools (3 пути: PPA → apt-репозиторий Amnezia → сборка из GitHub)
-#   2) проверяет модуль ядра; если он не собрался (частая проблема на Ubuntu 24.04)
-#      — автоматически переходит на userspace-реализацию amneziawg-go
-#   3) создаёт интерфейс awg0 с обфускацией, включает NAT/forward, открывает UFW
-#   4) сохраняет параметры сервера для нашего приложения
+# Установка AmneziaWG на izinet VPS (обфусцированный WireGuard).
+# Идемпотентно: чистит остатки прошлых попыток, сам выбирает свободную подсеть,
+# пересоздаёт конфигурацию интерфейса, поднимает awg0 и сохраняет параметры для приложения.
+#
+# Пути установки awg-tools: PPA amnezia/ppa → apt-репозиторий → сборка из GitHub.
+# Режимы: модуль ядра (быстро) или userspace amneziawg-go (если модуль не собрался).
+#
 # Запуск: bash scripts/amneziawg/setup_awg.sh
 # ============================================================================
 set -euo pipefail
@@ -13,10 +14,9 @@ set -euo pipefail
 AWG_DIR="/etc/amnezia/amneziawg"
 IFACE="awg0"
 PORT="${AWG_PORT:-51820}"
-SUBNET="10.9.0"
 SERVER_JSON="${AWG_DIR}/izinet-server.json"
 
-echo "=== 0/8 Подготовка системы ==="
+echo "=== 0/9 Подготовка системы ==="
 export DEBIAN_FRONTEND=noninteractive
 umask 077
 apt-get update -qq
@@ -53,63 +53,106 @@ install_tools() {
   command -v awg >/dev/null 2>&1
 }
 
+echo "=== 1/9 Установка awg-tools ==="
+if ! command -v awg >/dev/null 2>&1; then install_tools || true; else echo "  awg-tools уже установлены"; fi
 if ! command -v awg >/dev/null 2>&1; then
-  echo "=== 1/8 Устанавливаю awg-tools ==="
-  install_tools || true
-else
-  echo "=== 1/8 awg-tools уже установлены ==="
-fi
-if ! command -v awg >/dev/null 2>&1; then
-  echo "❌ Не удалось поставить awg-tools. Запустите по SSH:"
+  echo "❌ Не удалось поставить awg-tools. По SSH:"
   echo "   apt-get install -y build-essential git && git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git && cd amneziawg-tools/src && make && make install"
   exit 1
 fi
-echo "  awg на месте: $(awg --version 2>/dev/null || echo 'ok')"
+echo "  версия: $(awg --version 2>/dev/null || echo ok)"
 
-echo "=== 2/8 Модуль ядра AmneziaWG ==="
+echo "=== 2/9 Чистка остатков прошлых попыток ==="
+systemctl stop "awg-quick@${IFACE}" >/dev/null 2>&1 || true
+systemctl reset-failed "awg-quick@${IFACE}" >/dev/null 2>&1 || true
+if ip link show "${IFACE}" >/dev/null 2>&1; then
+  ip link delete "${IFACE}" >/dev/null 2>&1 && echo "  удалён старый интерфейс ${IFACE}"
+fi
+# освободить адрес, если он остался висеть на другом интерфейсе
+OLD_ADDR="$(ip -4 -o addr show | awk '/10\.(9|10|11|77|88)\.0\.1\// {print $2" "$4}')"
+if [ -n "${OLD_ADDR}" ]; then
+  echo "  найден висящий адрес: ${OLD_ADDR} — снимаю"
+  for pair in ${OLD_ADDR}; do :; done
+  echo "${OLD_ADDR}" | while read -r dev addr; do ip addr del "${addr}" dev "${dev}" >/dev/null 2>&1 || true; done
+fi
+
+echo "=== 3/9 Модуль ядра AmneziaWG ==="
 modprobe amneziawg 2>/dev/null || true
 if lsmod | grep -q '^amneziawg'; then
   echo "  модуль ядра загружен — режим: ядро (быстрый)"
+  USERSPACE=0
 else
-  echo "  модуль ядра НЕ загрузился (на Ubuntu 24.04 это известная проблема сборки)."
-  echo "  пробую собрать модуль под текущее ядро..."
+  echo "  модуль ядра не загрузился — пробую собрать под текущее ядро"
   apt-get install -y --no-install-recommends "linux-headers-$(uname -r)" >/dev/null 2>&1 || \
     apt-get install -y --no-install-recommends linux-headers-generic >/dev/null 2>&1 || true
   command -v dkms >/dev/null 2>&1 && dkms autoinstall >/dev/null 2>&1 || true
   modprobe amneziawg 2>/dev/null || true
-fi
-
-USERSPACE=0
-if ! lsmod | grep -q '^amneziawg'; then
-  USERSPACE=1
-  echo "  → перехожу на userspace-режим (amneziawg-go): работает без модуля ядра"
-  if ! command -v amneziawg-go >/dev/null 2>&1; then
-    apt-get install -y --no-install-recommends amneziawg-go >/dev/null 2>&1 || true
-  fi
-  if ! command -v amneziawg-go >/dev/null 2>&1; then
-    apt-get install -y --no-install-recommends golang-go git >/dev/null 2>&1 || true
-    local_tmp="$(mktemp -d)"
-    if git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git "${local_tmp}/awg-go" >/dev/null 2>&1; then
-      ( cd "${local_tmp}/awg-go" && make >/dev/null 2>&1 && make install >/dev/null 2>&1 ) || true
+  if lsmod | grep -q '^amneziawg'; then
+    echo "  модуль собран и загружен"
+    USERSPACE=0
+  else
+    USERSPACE=1
+    echo "  → перехожу на userspace-режим (amneziawg-go): работает без модуля ядра"
+    command -v amneziawg-go >/dev/null 2>&1 || apt-get install -y --no-install-recommends amneziawg-go >/dev/null 2>&1 || true
+    if ! command -v amneziawg-go >/dev/null 2>&1; then
+      apt-get install -y --no-install-recommends golang-go git >/dev/null 2>&1 || true
+      t="$(mktemp -d)"
+      if git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git "${t}/go" >/dev/null 2>&1; then
+        ( cd "${t}/go" && make >/dev/null 2>&1 && make install >/dev/null 2>&1 ) || true
+      fi
+      rm -rf "${t}"
     fi
-    rm -rf "${local_tmp}"
-  fi
-  if command -v amneziawg-go >/dev/null 2>&1; then
-    mkdir -p "/etc/systemd/system/awg-quick@${IFACE}.service.d"
-    cat > "/etc/systemd/system/awg-quick@${IFACE}.service.d/userspace.conf" <<'EOF'
+    if command -v amneziawg-go >/dev/null 2>&1; then
+      mkdir -p "/etc/systemd/system/awg-quick@${IFACE}.service.d"
+      cat > "/etc/systemd/system/awg-quick@${IFACE}.service.d/userspace.conf" <<'EOF'
 [Service]
 Environment=AWG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
 Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
 EOF
-    systemctl daemon-reload
-    echo "  userspace-реализация подключена (amneziawg-go)"
-  else
-    echo "  ⚠️ amneziawg-go поставить не удалось — интерфейс не поднимется без модуля ядра."
-    echo "     Вариант: обновить ядро и перезагрузиться (apt-get install -y linux-generic && reboot), затем повторить скрипт."
+      systemctl daemon-reload
+      echo "  userspace-реализация подключена"
+    else
+      echo "  ⚠️ amneziawg-go поставить не удалось"
+    fi
   fi
 fi
 
-echo "=== 3/8 Ключи и параметры обфускации ==="
+echo "=== 4/9 Свободная подсеть ==="
+PARAMS="$(python3 - "$SERVER_JSON" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+if os.path.exists(p):
+    try:
+        d = json.load(open(p))
+        print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (d.get("jc"), d.get("jmin"), d.get("jmax"), d.get("s1"), d.get("s2"), d.get("h1"), d.get("h2"), d.get("h3"), d.get("h4"), d.get("subnet","")))
+    except Exception:
+        print("|||||||||")
+else:
+    print("|||||||||")
+PY
+)"
+IFS='|' read -r P_JC P_JMIN P_JMAX P_S1 P_S2 P_H1 P_H2 P_H3 P_H4 P_SUBNET <<<"${PARAMS}"
+
+is_free() {
+  local net="$1"
+  ip route show | grep -q "${net}\." && return 1
+  ip -4 -o addr show | grep -q "inet ${net}\." && return 1
+  return 0
+}
+
+SUBNET=""
+for cand in "${P_SUBNET:-10.9.0}" 10.9.0 10.10.0 10.11.0 10.77.0 10.88.0 10.123.0; do
+  [ -z "${cand}" ] && continue
+  if is_free "${cand}"; then SUBNET="${cand}"; break; fi
+  echo "  подсеть ${cand}.0/24 занята — пробую следующую"
+done
+if [ -z "${SUBNET}" ]; then
+  echo "❌ Не нашёл свободную подсеть — проверьте: ip route show ; ip -4 addr show"
+  exit 1
+fi
+echo "  выбрана подсеть: ${SUBNET}.0/24"
+
+echo "=== 5/9 Ключи и обфускация ==="
 mkdir -p "${AWG_DIR}"; chmod 700 "${AWG_DIR}"
 if [ ! -f "${AWG_DIR}/server.key" ]; then
   (umask 077 && awg genkey > "${AWG_DIR}/server.key")
@@ -119,40 +162,60 @@ fi
 SERVER_PRIV="$(cat "${AWG_DIR}/server.key")"
 SERVER_PUB="$(cat "${AWG_DIR}/server.pub")"
 
-if [ ! -f "${SERVER_JSON}" ]; then
+if [ -z "${P_JC}" ]; then
   JC=$((3 + RANDOM % 7)); JMIN=$((40 + RANDOM % 50)); JMAX=$((JMIN + 500 + RANDOM % 500))
   S1=$((15 + RANDOM % 140)); S2=$((15 + RANDOM % 140))
   H1=$((100000000 + RANDOM % 800000000)); H2=$((H1 + 100000000 + RANDOM % 500000000))
   H3=$((H2 + 100000000 + RANDOM % 500000000)); H4=$((H3 + 100000000 + RANDOM % 500000000))
 else
-  eval "$(python3 - "$SERVER_JSON" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1]))
-print("JC=%s;JMIN=%s;JMAX=%s;S1=%s;S2=%s;H1=%s;H2=%s;H3=%s;H4=%s"%(d["jc"],d["jmin"],d["jmax"],d["s1"],d["s2"],d["h1"],d["h2"],d["h3"],d["h4"]))
-PY
-)"
+  JC="${P_JC}"; JMIN="${P_JMIN}"; JMAX="${P_JMAX}"; S1="${P_S1}"; S2="${P_S2}"
+  H1="${P_H1}"; H2="${P_H2}"; H3="${P_H3}"; H4="${P_H4}"
 fi
 
-echo "=== 4/8 Конфигурация интерфейса ==="
-cat > "${AWG_DIR}/${IFACE}.conf" <<EOF
-[Interface]
-Address = ${SUBNET}.1/24
-ListenPort = ${PORT}
-PrivateKey = ${SERVER_PRIV}
-MTU = 1280
-Jc = ${JC}
-Jmin = ${JMIN}
-Jmax = ${JMAX}
-S1 = ${S1}
-S2 = ${S2}
-H1 = ${H1}
-H2 = ${H2}
-H3 = ${H3}
-H4 = ${H4}
-EOF
+echo "=== 6/9 Конфигурация интерфейса ==="
+# Пиры сохраняем из реестра, чтобы не потерять выданных клиентов
+PEERS_BLOCK="$(
+python3 - "${AWG_DIR}/izinet-peers.json" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+if not os.path.exists(p):
+    print("")
+    sys.exit(0)
+try:
+    peers = json.load(open(p)).get("peers", [])
+except Exception:
+    peers = []
+out = []
+for peer in peers:
+    out.append("[Peer]")
+    out.append("PublicKey = %s" % peer.get("public_key", ""))
+    out.append("AllowedIPs = %s/32" % peer.get("address", ""))
+    out.append("")
+print("\n".join(out))
+PY
+)"
+
+{
+  echo "[Interface]"
+  echo "Address = ${SUBNET}.1/24"
+  echo "ListenPort = ${PORT}"
+  echo "PrivateKey = ${SERVER_PRIV}"
+  echo "MTU = 1280"
+  echo "Jc = ${JC}"
+  echo "Jmin = ${JMIN}"
+  echo "Jmax = ${JMAX}"
+  echo "S1 = ${S1}"
+  echo "S2 = ${S2}"
+  echo "H1 = ${H1}"
+  echo "H2 = ${H2}"
+  echo "H3 = ${H3}"
+  echo "H4 = ${H4}"
+  echo ""
+  [ -n "${PEERS_BLOCK}" ] && echo "${PEERS_BLOCK}"
+} > "${AWG_DIR}/${IFACE}.conf"
 chmod 600 "${AWG_DIR}/${IFACE}.conf"
 
-echo "=== 5/8 Форвардинг и NAT ==="
+echo "=== 7/9 Форвардинг и NAT ==="
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
 WAN="$(ip route show default | awk '/default/ {print $5; exit}')"
@@ -163,44 +226,42 @@ iptables -C FORWARD -i "${WAN}" -o ${IFACE} -m state --state RELATED,ESTABLISHED
   iptables -A FORWARD -i "${WAN}" -o ${IFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT
 command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
 echo "  NAT настроен (внешний интерфейс ${WAN})"
+command -v ufw >/dev/null && { ufw allow "${PORT}/udp" 2>/dev/null || true; ufw reload 2>/dev/null || true; }
+echo "  разрешён UDP ${PORT}"
 
-echo "=== 6/8 Порты UFW ==="
-if command -v ufw >/dev/null; then
-  ufw allow "${PORT}/udp" 2>/dev/null || true
-  ufw reload 2>/dev/null || true
-  echo "  разрешён UDP ${PORT}"
-fi
-
-echo "=== 7/8 Запуск интерфейса ==="
+echo "=== 8/9 Запуск интерфейса ==="
 systemctl enable "awg-quick@${IFACE}" >/dev/null 2>&1 || true
 if systemctl restart "awg-quick@${IFACE}"; then
   sleep 2
-  echo "  интерфейс поднят:"
+  echo "  ✅ интерфейс поднят:"
   awg show "${IFACE}" || true
+  RESULT="ok"
 else
-  echo "  ❌ интерфейс не поднялся. Диагностика:"
-  systemctl --no-pager status "awg-quick@${IFACE}" 2>&1 | tail -15 || true
-  echo "  Если видите 'No such device' — нет модуля ядра и не подхватился userspace."
-  echo "  Проверьте: lsmod | grep amneziawg ; command -v amneziawg-go ; journalctl -xeu awg-quick@${IFACE} -n 30"
-  echo "  Лечение: обновить ядро и перезагрузиться (apt-get install -y linux-generic && reboot), затем повторить скрипт."
+  echo "  ❌ интерфейс не поднялся. Что случилось (последние строки службы):"
+  journalctl -u "awg-quick@${IFACE}" -n 12 --no-pager 2>/dev/null | sed 's/^/    /' || true
+  echo "    Если снова 'Address already in use' — освободите адрес: ip -4 -o addr show | grep ${SUBNET}"
+  echo "    Если 'No such device' — нет модуля ядра и не подхватился userspace."
+  RESULT="fail"
 fi
 
-echo "=== 8/8 Параметры для приложения ==="
-if [ ! -f "${SERVER_JSON}" ]; then
-  python3 - "$SERVER_JSON" "$SERVER_PUB" "$PORT" "$SUBNET" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4" <<'PY'
-import json,sys
-out, pub, port, subnet, jc, jmin, jmax, s1, s2, h1, h2, h3, h4 = sys.argv[1:14]
+echo "=== 9/9 Параметры для приложения ==="
+python3 - "$SERVER_JSON" "$SERVER_PUB" "$PORT" "$SUBNET" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4" "$([ "${USERSPACE}" = "1" ] && echo container || echo kernel)" <<'PY'
+import json, sys
+out, pub, port, subnet, jc, jmin, jmax, s1, s2, h1, h2, h3, h4, mode = sys.argv[1:15]
 json.dump({
   "interface": "awg0", "public_key": pub, "port": int(port), "subnet": subnet,
   "jc": int(jc), "jmin": int(jmin), "jmax": int(jmax), "s1": int(s1), "s2": int(s2),
-  "h1": int(h1), "h2": int(h2), "h3": int(h3), "h4": int(h4),
+  "h1": int(h1), "h2": int(h2), "h3": int(h3), "h4": int(h4), "mode": mode,
 }, open(out, "w"), ensure_ascii=False, indent=2)
 PY
-  chmod 600 "${SERVER_JSON}"
-fi
+chmod 600 "${SERVER_JSON}"
 [ -f "${AWG_DIR}/izinet-peers.json" ] || { echo '{"peers":[]}' > "${AWG_DIR}/izinet-peers.json"; chmod 600 "${AWG_DIR}/izinet-peers.json"; }
 
 echo ""
-echo "Режим: $([ "${USERSPACE}" = "1" ] && echo 'userspace (amneziawg-go)' || echo 'ядро (amneziawg)')"
-echo "Проверка в приложении: админка → Настройки → «AmneziaWG» → «Проверить AmneziaWG»"
-echo "Проверка в консоли:    awg show ${IFACE}"
+echo "==============================================="
+echo " Итог: режим $([ "${USERSPACE}" = "1" ] && echo 'userspace (amneziawg-go)' || echo 'ядро (amneziawg)'), подсеть ${SUBNET}.0/24, UDP ${PORT}"
+echo " Интерфейс: $([ "${RESULT}" = "ok" ] && echo 'поднят ✅' || echo 'НЕ поднят ❌ (см. строки выше)')"
+echo " Проверка:  awg show ${IFACE}"
+echo " В кабинете: «Мои устройства» → «Файл AmneziaWG (роутер)» → «Скачать файл»"
+echo " В админке:  Настройки → «AmneziaWG» → «Проверить AmneziaWG»"
+echo "==============================================="
