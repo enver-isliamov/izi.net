@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Установка AmneziaWG-сервера на izinet VPS (обфусцированный WireGuard).
-# Что делает: ставит amneziawg (модуль ядра + awg-tools), создаёт интерфейс awg0
-# с обфускационными параметрами, включает NAT/forward, открывает UDP-порт в UFW,
-# запускает awg-quick@awg0 и сохраняет параметры сервера для нашего приложения.
+# Установка идёт по трём путям, пока не сработает один:
+#   1) PPA amnezia/ppa            2) apt-репозиторий repo.amnezia.org
+#   3) СБОРКА ИЗ ИСХОДНИКОВ с GitHub (работает, когда репозиторий Amnezia недоступен)
+# Затем: интерфейс awg0 с обфускацией, NAT/forward, UFW, автозапуск, параметры для приложения.
 # Запуск: bash scripts/amneziawg/setup_awg.sh
-# Выдача файла пользователю из CLI: bash scripts/amneziawg/new_awg_client.sh <имя>
 # ============================================================================
 set -euo pipefail
 
@@ -15,30 +15,99 @@ PORT="${AWG_PORT:-51820}"
 SUBNET="10.9.0"
 SERVER_JSON="${AWG_DIR}/izinet-server.json"
 
-echo "=== 1/7 Установка пакетов ==="
+echo "=== 0/8 Подготовка системы ==="
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y --no-install-recommends curl gnupg ca-certificates iptables
+apt-get install -y --no-install-recommends curl gnupg ca-certificates iptables software-properties-common >/dev/null 2>&1 || true
 
-# Официальный репозиторий Amnezia (amneziawg-tools + amneziawg-dkms)
-if ! command -v awg >/dev/null 2>&1; then
-  curl -fsSL https://repo.amnezia.org/amneziawg.deb.pub -o /etc/apt/keyrings/amneziawg.asc 2>/dev/null || true
-  if [ -s /etc/apt/keyrings/amneziawg.asc ]; then
-    . /etc/os-release
-    echo "deb [signed-by=/etc/apt/keyrings/amneziawg.asc] https://repo.amnezia.org/debian ${VERSION_CODENAME} main" \
-      > /etc/apt/sources.list.d/amneziawg.list
-    apt-get update -qq || true
-    apt-get install -y amneziawg amneziawg-tools || echo "ПРЕДУПРЕЖДЕНИЕ: пакеты AmneziaWG не установились автоматически — поставьте вручную (см. README)"
-  else
-    echo "ПРЕДУПРЕЖДЕНИЕ: ключ репозитория Amnezia недоступен — поставьте amneziawg/amneziawg-tools вручную"
+install_awg() {
+  # --- путь 1: PPA ---
+  if ! command -v awg >/dev/null 2>&1; then
+    echo "→ путь 1: PPA amnezia/ppa"
+    add-apt-repository -y ppa:amnezia/ppa >/dev/null 2>&1 || true
+    apt-get update -qq >/dev/null 2>&1 || true
+    apt-get install -y amneziawg amneziawg-tools >/dev/null 2>&1 || true
   fi
+
+  # --- путь 2: apt-репозиторий Amnezia ---
+  if ! command -v awg >/dev/null 2>&1; then
+    echo "→ путь 2: apt-репозиторий repo.amnezia.org"
+    mkdir -p /etc/apt/keyrings
+    if curl -fsSL --max-time 20 https://repo.amnezia.org/amneziawg.deb.pub -o /etc/apt/keyrings/amneziawg.asc 2>/dev/null && [ -s /etc/apt/keyrings/amneziawg.asc ]; then
+      . /etc/os-release
+      echo "deb [signed-by=/etc/apt/keyrings/amneziawg.asc] https://repo.amnezia.org/debian ${VERSION_CODENAME} main" \
+        > /etc/apt/sources.list.d/amneziawg.list
+      apt-get update -qq >/dev/null 2>&1 || true
+      apt-get install -y amneziawg amneziawg-tools >/dev/null 2>&1 || true
+    else
+      echo "   репозиторий Amnezia недоступен с сервера (это не ошибка вашей конфигурации)"
+    fi
+  fi
+
+  # --- путь 3: сборка из исходников (GitHub) ---
+  if ! command -v awg >/dev/null 2>&1; then
+    echo "→ путь 3: сборка из исходников с GitHub"
+    apt-get install -y --no-install-recommends git build-essential dkms >/dev/null 2>&1 || true
+    apt-get install -y "linux-headers-$(uname -r)" >/dev/null 2>&1 || \
+      apt-get install -y linux-headers-generic >/dev/null 2>&1 || true
+
+    local tmp
+    tmp="$(mktemp -d)"
+    for repo in amneziawg-linux-kernel-module awg-linux-kernel-module; do
+      if git clone --depth 1 "https://github.com/amnezia-vpn/${repo}.git" "${tmp}/kernel" >/dev/null 2>&1; then
+        echo "   кернел-модуль: ${repo}"
+        break
+      fi
+    done
+    if [ -d "${tmp}/kernel/src" ]; then
+      ( cd "${tmp}/kernel/src" && make >/dev/null 2>&1 && make install >/dev/null 2>&1 ) || echo "   сборка модуля не удалась (см. вывод выше)"
+    else
+      echo "   не удалось скачать исходники модуля с GitHub"
+    fi
+
+    if git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git "${tmp}/tools" >/dev/null 2>&1; then
+      ( cd "${tmp}/tools/src" && make >/dev/null 2>&1 && make install >/dev/null 2>&1 ) || echo "   сборка awg-tools не удалась"
+    else
+      echo "   не удалось скачать исходники amneziawg-tools с GitHub"
+    fi
+    rm -rf "${tmp}"
+  fi
+
+  command -v awg >/dev/null 2>&1
+}
+
+if ! command -v awg >/dev/null 2>&1; then
+  echo "=== 1/8 Установка AmneziaWG (3 пути) ==="
+  install_awg || true
+else
+  echo "=== 1/8 AmneziaWG уже установлен ==="
 fi
 
-command -v awg >/dev/null 2>&1 || { echo "awg-tools не найдены — установите amneziawg-tools и повторите"; exit 1; }
+if ! command -v awg >/dev/null 2>&1; then
+  cat <<'EOF'
+❌ Не удалось установить AmneziaWG автоматически.
 
-echo "=== 2/7 Обфускационные параметры и ключи ==="
+Что проверить и сделать вручную (по SSH):
+  1) Есть ли доступ в интернет:      curl -sI https://github.com | head -1
+  2) Пакеты ядра для сборки:         apt-get install -y build-essential dkms linux-headers-$(uname -r)
+  3) Собрать модуль вручную:
+       git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git
+       cd amneziawg-linux-kernel-module/src && make && make install
+       git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git
+       cd amneziawg-tools/src && make && make install
+       modprobe amneziawg && awg --version
+  4) Альтернатива без сборки — AmneziaVPN официальный установщик: https://docs.amnezia.org
+
+После появления команды awg повторите: bash scripts/amneziawg/setup_awg.sh
+EOF
+  exit 1
+fi
+
+echo "=== 2/8 Обфускационные параметры и ключи ==="
 mkdir -p "${AWG_DIR}"
 chmod 700 "${AWG_DIR}"
+modprobe amneziawg 2>/dev/null || true
+echo "amneziawg" > /etc/modules-load.d/amneziawg.conf
 
 if [ ! -f "${AWG_DIR}/server.key" ]; then
   awg genkey > "${AWG_DIR}/server.key"
@@ -48,10 +117,9 @@ fi
 SERVER_PRIV="$(cat "${AWG_DIR}/server.key")"
 SERVER_PUB="$(cat "${AWG_DIR}/server.pub")"
 
-# Параметры обфускации (генерируются один раз и сохраняются)
 if [ ! -f "${SERVER_JSON}" ]; then
-  JC=$((3 + RANDOM % 7))          # 3..9
-  JMIN=$((40 + RANDOM % 50))      # 40..89
+  JC=$((3 + RANDOM % 7))
+  JMIN=$((40 + RANDOM % 50))
   JMAX=$((JMIN + 500 + RANDOM % 500))
   S1=$((15 + RANDOM % 140))
   S2=$((15 + RANDOM % 140))
@@ -68,8 +136,8 @@ PY
 )"
 fi
 
-echo "=== 3/7 Конфигурация интерфейса ==="
-cat > "/etc/amnezia/amneziawg/${IFACE}.conf" <<EOF
+echo "=== 3/8 Конфигурация интерфейса ==="
+cat > "${AWG_DIR}/${IFACE}.conf" <<EOF
 [Interface]
 Address = ${SUBNET}.1/24
 ListenPort = ${PORT}
@@ -85,12 +153,12 @@ H2 = ${H2}
 H3 = ${H3}
 H4 = ${H4}
 
-# peers добавляет приложение (izinet-app) или скрипт new_awg_client.sh
-# учёт: /etc/amnezia/amneziawg/izinet-peers.json
+# клиентов добавляет приложение (izinet-app) или скрипт new_awg_client.sh
+# реестр: ${AWG_DIR}/izinet-peers.json
 EOF
-chmod 600 "/etc/amnezia/amneziawg/${IFACE}.conf"
+chmod 600 "${AWG_DIR}/${IFACE}.conf"
 
-echo "=== 4/7 Форвардинг и NAT ==="
+echo "=== 4/8 Форвардинг и NAT ==="
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
 WAN="$(ip route show default | awk '/default/ {print $5; exit}')"
@@ -102,19 +170,19 @@ iptables -C FORWARD -i "${WAN}" -o ${IFACE} -m state --state RELATED,ESTABLISHED
 command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
 echo "NAT настроен (wan=${WAN})"
 
-echo "=== 5/7 Порты UFW ==="
+echo "=== 5/8 Порты UFW ==="
 if command -v ufw >/dev/null; then
   ufw allow "${PORT}/udp" 2>/dev/null || true
   ufw reload 2>/dev/null || true
 fi
 
-echo "=== 6/7 Запуск интерфейса ==="
+echo "=== 6/8 Запуск интерфейса ==="
 systemctl enable "awg-quick@${IFACE}" >/dev/null 2>&1 || true
 systemctl restart "awg-quick@${IFACE}"
 sleep 2
 awg show "${IFACE}" || true
 
-echo "=== 7/7 Параметры для приложения ==="
+echo "=== 7/8 Параметры для приложения ==="
 if [ ! -f "${SERVER_JSON}" ]; then
   python3 - "$SERVER_JSON" "$SERVER_PUB" "$PORT" "$SUBNET" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4" <<'PY'
 import json,sys
@@ -128,19 +196,16 @@ json.dump({
 PY
   chmod 600 "${SERVER_JSON}"
 fi
-if [ ! -f "${AWG_DIR}/izinet-peers.json" ]; then
-  echo '{"peers":[]}' > "${AWG_DIR}/izinet-peers.json"
-  chmod 600 "${AWG_DIR}/izinet-peers.json"
-fi
+[ -f "${AWG_DIR}/izinet-peers.json" ] || { echo '{"peers":[]}' > "${AWG_DIR}/izinet-peers.json"; chmod 600 "${AWG_DIR}/izinet-peers.json"; }
 
+echo "=== 8/8 Готово ==="
 cat <<EOF
-
-Готово.
+  Версия:      $(awg --version 2>/dev/null || echo 'awg установлен')
   Интерфейс:   ${IFACE} (UDP ${PORT})
-  Публичный ключ сервера сохранён в ${SERVER_JSON}
-  Учёт клиентов: ${AWG_DIR}/izinet-peers.json
+  Ключ сервера: ${SERVER_JSON}
+  Реестр:      ${AWG_DIR}/izinet-peers.json
   Проверка:    awg show ${IFACE}
 
-Дальше: в приложении (админка → Пользователи → устройство → «AmneziaWG») или CLI:
+Дальше: кабинет → «Мои устройства» → «Файл AmneziaWG (роутер)», либо CLI:
   bash scripts/amneziawg/new_awg_client.sh test-user
 EOF

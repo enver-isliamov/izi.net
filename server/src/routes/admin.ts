@@ -1274,6 +1274,15 @@ router.post('/system/sync-clients-all-inbounds', adminOnly, async (_req, res) =>
   }
 });
 
+// ===== AmneziaWG: статус для админки =====
+router.get('/awg/status', adminOnly, async (_req, res) => {
+  try {
+    res.json(AwgService.fullStatus());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ===== AmneziaWG из админки: устройство управляется как любое другое =====
 
 router.post('/users/:userId/awg/devices', adminOnly, async (req: any, res) => {

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getXuiForServer } from './xui.service';
+import { AwgService } from './awg.service';
 import { parseVpnDevices, getPublishedVlessPorts, isUnroutableHost } from '../utils/vpn';
 
 import { RoutingService } from './routing.service';
@@ -30,6 +31,7 @@ export class MaintenanceService {
       await this.syncRealityKeys().catch(e => console.error('❌ [Maintenance] syncRealityKeys failed:', e.message));
       await this.cleanupExpiredSubscriptions().catch(e => console.error('❌ [Maintenance] cleanupExpired failed:', e.message));
       await this.syncTraffic().catch(e => console.error('❌ [Maintenance] syncTraffic failed:', e.message));
+      await this.syncAwgDevices().catch(e => console.error('❌ [Maintenance] syncAwgDevices failed:', e.message));
       await this.syncAllServers().catch(e => console.error('❌ [Maintenance] syncAllServers failed:', e.message));
       await RoutingService.syncAll().catch(e => console.error('❌ [Maintenance] Routing syncAll failed:', e.message));
 
@@ -333,6 +335,67 @@ export class MaintenanceService {
       console.error('❌ [Maintenance] Sync error:', err.message);
     } finally {
       this.isSyncingServers = false;
+    }
+  }
+
+  /**
+   * AmneziaWG: учёт трафика по клиентам и автоотзыв конфигов у истёкших подписок.
+   * Безопасно: работает только с устройствами serverType='AWG'.
+   */
+  static async syncAwgDevices() {
+    try {
+      const status = AwgService.status();
+      if (!status.available) return;
+
+      const stats = AwgService.listPeerStats();
+      const { data: subs } = await supabase.from('subscriptions').select('*');
+      let updatedSubs = 0;
+      let revoked = 0;
+
+      for (const sub of (subs || []) as any[]) {
+        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type) as any[];
+        const awgDevices = devices.filter((d) => String(d.serverType).toUpperCase() === 'AWG' && d.uuid);
+        if (awgDevices.length === 0) continue;
+
+        const expired = sub.expires_at ? new Date(sub.expires_at).getTime() < Date.now() : false;
+        let changed = false;
+
+        for (const device of awgDevices) {
+          if (expired) {
+            try {
+              AwgService.removePeer(device.uuid);
+              revoked++;
+            } catch (e: any) {
+              console.warn(`[AWG] revoke failed for ${device.email}: ${e.message}`);
+            }
+            device.config = '';
+            changed = true;
+          } else {
+            const s = stats[device.uuid];
+            if (s) {
+              const total = s.rx + s.tx;
+              if (Number(device.trafficUsedBytes || 0) !== total) {
+                device.trafficUsedBytes = total;
+                changed = true;
+              }
+            }
+          }
+        }
+
+        if (changed) {
+          await supabase
+            .from('subscriptions')
+            .update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() })
+            .eq('id', sub.id);
+          updatedSubs++;
+        }
+      }
+
+      if (updatedSubs > 0 || revoked > 0) {
+        console.log(`[AWG] обслуживание: обновлено подписок ${updatedSubs}, отозвано конфигов ${revoked}`);
+      }
+    } catch (e: any) {
+      console.warn(`[AWG] sync failed: ${e.message}`);
     }
   }
 

@@ -306,6 +306,28 @@ bash update.sh`;
 
   const [isSyncingInbounds, setIsSyncingInbounds] = useState(false);
 
+  const handleCheckAwg = async () => {
+    try {
+      const { data } = await axios.get('/api/admin/awg/status', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      const lines = [
+        data.available
+          ? `[AWG] AmneziaWG работает: порт ${data.port}/udp, подсеть ${data.subnet}, клиентов ${data.peers?.length || 0}`
+          : `[AWG] ${data.message}`
+      ];
+      (data.peers || []).slice(0, 15).forEach((p: any) => {
+        lines.push(`[AWG] ${p.name} · ${p.address} · ${(Number(p.totalBytes || 0) / 1048576).toFixed(1)} МБ · ${p.online ? 'online' : 'offline'}`);
+      });
+      setSystemLogs(lines);
+      toast.success('Статус AmneziaWG получен');
+    } catch (e: any) {
+      const msg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${msg}`]);
+      toast.error('Не удалось получить статус AmneziaWG');
+    }
+  };
+
   const handleSyncAllInbounds = async () => {
     try {
       setIsSyncingInbounds(true);
@@ -831,6 +853,24 @@ bash update.sh`}
                 <Activity size={12} />
                 Открыть раздел «Тесты»
               </a>
+            </div>
+
+            {/* AmneziaWG Card */}
+            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">AmneziaWG (файл для роутера)</h3>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Обфусцированный WireGuard на хосте. Пользователь выбирает «Файл AmneziaWG» в кабинете и скачивает .conf. Здесь — состояние сервиса и клиенты с трафиком.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckAwg}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 rounded-xl transition-colors font-bold text-xs border border-cyan-500/20"
+              >
+                <RefreshCw size={12} />
+                Проверить AmneziaWG
+              </button>
             </div>
 
             {/* All Inbounds Card */}

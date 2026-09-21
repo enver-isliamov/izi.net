@@ -6,6 +6,7 @@ import axios from 'axios';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
+import { AwgService } from '../services/awg.service';
 
 const router = Router();
 
@@ -275,6 +276,15 @@ router.get('/geo', adminOnly, async (_req, res) => {
       active ? "сервис работает — протокол доступен клиентам" : `статус сервиса: ${out || "неизвестен"} (проверьте systemctl status hysteria2 на сервере)`);
   } catch (e: any) {
     push("Утечки", "hysteria2", "Hysteria2 (UDP/443)", "warn", "не удалось определить статус: " + e.message);
+  }
+
+  // 4c. AmneziaWG (обфусцированный WireGuard на хосте)
+  try {
+    const awg = AwgService.fullStatus();
+    push('Утечки', 'amneziawg', 'AmneziaWG (UDP)', awg.available ? 'ok' : 'warn',
+      awg.available ? `работает: порт ${awg.port}/udp, клиентов ${awg.peers.length}` : awg.message);
+  } catch (e: any) {
+    push('Утечки', 'amneziawg', 'AmneziaWG (UDP)', 'warn', e.message);
   }
 
   // 5. Что проверяется на стороне клиента

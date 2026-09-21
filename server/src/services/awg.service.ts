@@ -112,6 +112,55 @@ export class AwgService {
     return '194.50.94.28';
   }
 
+  /** Статистика по клиентам из `awg show <iface> dump`: трафик и время рукопожатия. */
+  static listPeerStats(): Record<string, { rx: number; tx: number; lastHandshake: number }> {
+    const stats: Record<string, { rx: number; tx: number; lastHandshake: number }> = {};
+    try {
+      const dump = hostExec(`awg show ${IFACE} dump`, 15000);
+      const lines = dump.split('\n').map((l) => l.trim()).filter(Boolean);
+      for (const line of lines.slice(1)) {
+        const p = line.split('\t');
+        if (p.length < 9) continue;
+        stats[p[0]] = {
+          lastHandshake: Number(p[6]) || 0,
+          rx: Number(p[7]) || 0,
+          tx: Number(p[8]) || 0
+        };
+      }
+    } catch (e: any) {
+      console.warn(`[AWG] dump failed: ${e.message}`);
+    }
+    return stats;
+  }
+
+  /** Полный статус для админки: доступность, порт, подсеть и клиенты с трафиком. */
+  static fullStatus(): {
+    available: boolean;
+    message: string;
+    port?: number;
+    subnet?: string;
+    peers: Array<{ name: string; address: string; created_at?: string; rx: number; tx: number; totalBytes: number; online: boolean }>;
+  } {
+    const base = this.status();
+    if (!base.available) return { available: false, message: base.message, peers: [] };
+    const server = this.readServer();
+    const stats = this.listPeerStats();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const peers = this.readPeers().map((peer) => {
+      const s = stats[peer.public_key] || { rx: 0, tx: 0, lastHandshake: 0 };
+      return {
+        name: peer.name,
+        address: peer.address,
+        created_at: peer.created_at,
+        rx: s.rx,
+        tx: s.tx,
+        totalBytes: s.rx + s.tx,
+        online: s.lastHandshake > 0 && nowSec - s.lastHandshake < 180
+      };
+    });
+    return { available: true, message: base.message, port: server?.port, subnet: server?.subnet, peers };
+  }
+
   static buildConf(peer: AwgPeer, server: AwgServer, endpoint: string): string {
     return [
       '[Interface]',
