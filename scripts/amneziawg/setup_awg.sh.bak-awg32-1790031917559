@@ -135,12 +135,9 @@ IFS='|' read -r P_JC P_JMIN P_JMAX P_S1 P_S2 P_H1 P_H2 P_H3 P_H4 P_SUBNET <<<"${
 
 is_free() {
   local net="$1"
-  # достоверная проверка: пробуем назначить адрес на lo и сразу снимаем
-  if ip addr add "${net}.1/24" dev lo 2>/dev/null; then
-    ip addr del "${net}.1/24" dev lo 2>/dev/null || true
-    return 0
-  fi
-  return 1
+  ip route show | grep -q "${net}\." && return 1
+  ip -4 -o addr show | grep -q "inet ${net}\." && return 1
+  return 0
 }
 
 SUBNET=""
@@ -200,10 +197,7 @@ PY
 
 {
   echo "[Interface]"
-  # /32 вместо /24: не конфликтует с уже существующими адресами, подсеть подключаем маршрутом
-  echo "Address = ${SUBNET}.1/32"
-  echo "PostUp = ip -4 route add ${SUBNET}.0/24 dev %i || true"
-  echo "PostDown = ip -4 route del ${SUBNET}.0/24 dev %i || true"
+  echo "Address = ${SUBNET}.1/24"
   echo "ListenPort = ${PORT}"
   echo "PrivateKey = ${SERVER_PRIV}"
   echo "MTU = 1280"
@@ -236,10 +230,6 @@ command -v ufw >/dev/null && { ufw allow "${PORT}/udp" 2>/dev/null || true; ufw 
 echo "  разрешён UDP ${PORT}"
 
 echo "=== 8/9 Запуск интерфейса ==="
-echo "  адреса на хосте (для контроля конфликтов):"
-ip -4 -o addr show | awk '{print "    "$2" -> "$4}' | head -20
-echo "  маршруты 10.*:"
-(ip route show | grep -E "^10\." || echo "    нет") | sed 's/^/    /'
 systemctl enable "awg-quick@${IFACE}" >/dev/null 2>&1 || true
 if systemctl restart "awg-quick@${IFACE}"; then
   sleep 2
