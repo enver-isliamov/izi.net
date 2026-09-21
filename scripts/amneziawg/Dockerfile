@@ -1,6 +1,8 @@
 # AmneziaWG в контейнере (userspace, БЕЗ модуля ядра).
 # Собирает amneziawg-go (userspace-реализация) и awg-tools, затем запускает интерфейс awg0.
-FROM golang:1.23-alpine AS gobuild
+# amneziawg-go требует Go >= 1.25 (обновляется автоматически при необходимости)
+FROM golang:1.25-alpine AS gobuild
+ENV GOTOOLCHAIN=auto
 RUN apk add --no-cache git make gcc musl-dev linux-headers
 WORKDIR /src
 RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /src/awg-go \

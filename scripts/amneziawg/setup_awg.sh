@@ -175,7 +175,19 @@ else
   H1="${P_H1}"; H2="${P_H2}"; H3="${P_H3}"; H4="${P_H4}"
 fi
 
-echo "=== 6/9 Конфигурация интерфейса ==="
+echo "=== 6/9 UDP-порт и конфигурация интерфейса ==="
+# На хосте может уже работать другой VPN (например wg0 на 10.66.66.0/24),
+# который занимает UDP 51820 — поэтому порт выбираем свободный.
+port_free() {
+  ss -lun 2>/dev/null | awk '{print $5}' | grep -qE "[:.]$1$" && return 1
+  return 0
+}
+for cand in "${PORT}" 51821 51822 51823 51900 51999 41820; do
+  if port_free "${cand}"; then PORT="${cand}"; break; fi
+  echo "  UDP ${cand} занят — пробую следующий"
+done
+echo "  выбран UDP-порт: ${PORT}"
+
 # Пиры сохраняем из реестра, чтобы не потерять выданных клиентов
 PEERS_BLOCK="$(
 python3 - "${AWG_DIR}/izinet-peers.json" <<'PY'
