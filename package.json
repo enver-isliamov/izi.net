@@ -9,7 +9,8 @@
     "start": "tsx --insecure-http-parser server/src/index.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:server": "tsx --test server/src/tests/contract.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

@@ -17,6 +17,7 @@ import { MaintenanceService } from './services/maintenance.service';
 import { RoutingService } from './services/routing.service';
 
 import adminRoutes from './routes/admin';
+import adminTestsRoutes from './routes/adminTests';
 import paymentRoutes from './routes/payments';
 import userRoutes from './routes/user';
 import configRoutes from './routes/config';
@@ -71,6 +72,7 @@ app.use('/api', configRoutes);
 app.use('/api/subscription', configRoutes);
 app.use('/sub', configRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminTestsRoutes);
 app.use('/api/pay', paymentRoutes);
 
 // --- УНИВЕРСАЛЬНЫЙ SUPABASE PROXY ---
