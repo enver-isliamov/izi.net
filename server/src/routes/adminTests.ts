@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { execSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import axios from 'axios';
 import { supabase } from '../services/supabase';
 import { adminOnly } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
@@ -182,6 +185,99 @@ router.get('/tests', adminOnly, async (_req, res) => {
   };
 
   res.json({ summary, results, generatedAt: new Date().toISOString() });
+});
+
+// Гео-контроль: что видят внешние сервисы (страна, ASN, признаки хостинга), какие DNS-резолверы
+// использует приложение и есть ли IPv6-выход (частая утечка мимо VLESS-туннеля).
+router.get('/geo', adminOnly, async (_req, res) => {
+  const started = Date.now();
+  const results: TestResult[] = [];
+  const push = (group: string, id: string, name: string, status: TestStatus, detail: string, ms = 0) =>
+    results.push({ group, id, name, status, detail, ms });
+
+  // 1. Выходной IP — тот же адрес, через который выходят пользователи VPN
+  let ip = '';
+  try {
+    const r = await axios.get('https://api.ipify.org?format=json', { timeout: 8000 });
+    ip = String(r.data?.ip || '');
+  } catch (e) {}
+  if (!ip) {
+    try { ip = String((await axios.get('https://ifconfig.me/ip', { timeout: 8000 })).data || '').trim(); } catch (e) {}
+  }
+  push('Гео', 'exit-ip', 'Выходной IP (как его видят сайты)', ip ? 'ok' : 'fail', ip || 'не удалось определить');
+
+  // 2. Гео и репутация адреса
+  if (ip) {
+    try {
+      const t = Date.now();
+      const r = await axios.get(
+        `http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org,as,asname,proxy,hosting,mobile`,
+        { timeout: 8000 }
+      );
+      const d = r.data || {};
+      if (d.status === 'success') {
+        const code = String(d.countryCode || '').toUpperCase();
+        push('Гео', 'exit-geo', 'Страна выходного IP', code === 'RU' ? 'fail' : 'ok',
+          `${d.country} (${code}), ${d.city || '—'}; ${d.asname || d.as || d.isp || '—'}`, Date.now() - t);
+        push('Гео', 'exit-flags', 'Признаки адреса', d.hosting ? 'warn' : 'ok',
+          `hosting=${Boolean(d.hosting)}, proxy=${Boolean(d.proxy)}, mobile=${Boolean(d.mobile)}` +
+          (d.hosting ? ' — адрес хостинга: часть сервисов (Google и др.) относится к таким адресам настороженно' : ''));
+      } else {
+        push('Гео', 'exit-geo', 'Страна выходного IP', 'warn', 'сервис геолокации не ответил');
+      }
+    } catch (e: any) {
+      push('Гео', 'exit-geo', 'Страна выходного IP', 'warn', 'не удалось получить гео: ' + e.message);
+    }
+  }
+
+  // 3. DNS-резолверы контейнера/сервера
+  try {
+    const resolv = fs.readFileSync('/etc/resolv.conf', 'utf8');
+    const servers = resolv
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('nameserver'))
+      .map((l) => l.split(/\s+/)[1])
+      .filter(Boolean);
+    push('Сеть', 'dns', 'DNS-резолверы контейнера', servers.length ? 'ok' : 'warn',
+      servers.length ? servers.join(', ') : 'не найдены');
+    const ruResolvers = servers.filter((s) => s.startsWith('77.88.') || s.startsWith('77.88'));
+    if (ruResolvers.length) {
+      push('Сеть', 'dns-ru', 'Российские DNS-резолверы', 'fail', 'обнаружены РФ-резолверы: ' + ruResolvers.join(', '));
+    }
+  } catch (e: any) {
+    push('Сеть', 'dns', 'DNS-резолверы контейнера', 'warn', e.message);
+  }
+
+  // 4. IPv6-выход
+  let v6 = false;
+  try {
+    const r = await axios.get('https://api6.ipify.org?format=json', { timeout: 6000 });
+    v6 = Boolean(r.data?.ip);
+  } catch (e) {}
+  const ifaces = os.networkInterfaces();
+  const v6Addrs = Object.entries(ifaces).flatMap(([name, addrs]) =>
+    (addrs || [])
+      .filter((a: any) => a.family === 'IPv6' && !a.internal)
+      .map((a: any) => `${name}:${a.address}`)
+  );
+  push('Утечки', 'ipv6', 'IPv6-выход', v6 ? 'warn' : 'ok',
+    v6
+      ? 'у контейнера есть IPv6-выход — убедитесь, что клиенты не уходят по IPv6 напрямую'
+      : 'IPv6-выход недоступен (утечки мимо туннеля нет)' + (v6Addrs.length ? `; адреса: ${v6Addrs.join(', ')}` : ''));
+
+  // 5. Что проверяется на стороне клиента
+  push('Клиент', 'client-hints', 'Что проверить в клиенте', 'ok',
+    'DNS внутри туннеля (не системный), IPv6 выключен, без «Round robin» с мёртвыми прокси, QUIC в браузере выключен, часовой пояс и язык не российские');
+
+  const summary = {
+    total: results.length,
+    ok: results.filter((r) => r.status === 'ok').length,
+    warn: results.filter((r) => r.status === 'warn').length,
+    fail: results.filter((r) => r.status === 'fail').length,
+    ms: Date.now() - started
+  };
+  res.json({ summary, results, exitIp: ip, generatedAt: new Date().toISOString() });
 });
 
 export default router;

@@ -123,10 +123,13 @@ export default function AdminPayments() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div></div>
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Платежи</h1>
+          <p className="text-sm text-muted-foreground mt-1">Подтверждение платежей и история пополнений</p>
+        </div>
         <button 
           onClick={fetchPayments}
-          className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5 text-sm hover:bg-white/10 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5 text-sm hover:bg-white/10 transition-colors shrink-0"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           Обновить

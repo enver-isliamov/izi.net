@@ -616,6 +616,150 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ADMIN-014: Продление подписки прямо из карточки пользователя.
+// Аддитивно: срок = max(сейчас, текущий срок) + N месяцев; ключи, устройства и трафик сохраняются.
+// Срок проставляется всем клиентам подписки во включённых инбаундах (включая копии вида email_порт).
+// Если клиента в панели уже нет (например, истёкшую подписку почистил maintenance) — он пересоздаётся
+// с тем же uuid, поэтому выданные пользователю ссылки продолжают работать.
+router.post('/users/:userId/subscription/extend', adminOnly, async (req, res) => {
+  const { userId } = req.params;
+  const monthsRaw = parseInt(String(req.body?.months ?? '1'), 10);
+  const months = Number.isFinite(monthsRaw) ? Math.min(36, Math.max(1, monthsRaw)) : 1;
+  const addTrafficGb = Number(req.body?.addTrafficGb) || 0;
+  const resetTraffic = req.body?.resetTraffic === true;
+
+  try {
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (subErr) throw subErr;
+    if (!sub) {
+      return res.status(404).json({ error: 'У пользователя нет подписки — сначала выдайте подписку.', needCreate: true });
+    }
+
+    const now = Date.now();
+    const currentMs = sub.expires_at ? new Date(sub.expires_at).getTime() : now;
+    const newExpiryMs = Math.max(now, currentMs) + months * 30 * 24 * 60 * 60 * 1000;
+    const newExpiryIso = new Date(newExpiryMs).toISOString();
+    const trafficLimitMb = (parseInt(String(sub.traffic_limit_mb)) || 102400) + Math.round(addTrafficGb * 1024);
+    const limitBytes = trafficLimitMb * 1024 * 1024;
+
+    const parseJsonSafe = (v: any): any => {
+      if (v == null) return {};
+      if (typeof v === 'object') return v;
+      try { return JSON.parse(v); } catch { return {}; }
+    };
+
+    let devices: any[] = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type) as any[];
+    const synced: string[] = [];
+    const recreated: string[] = [];
+    const failed: string[] = [];
+
+    const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+
+    for (const device of devices) {
+      const email = String(device.email || '');
+      if (!email) { failed.push(String(device.label || device.id || 'без email')); continue; }
+
+      const candidates = device.serverId
+        ? (activeServers || []).filter((s: any) => s.id === device.serverId)
+        : (activeServers || []);
+      if (candidates.length === 0) { failed.push(`${email} (сервер устройства не найден)`); continue; }
+
+      let done = 0;
+      let lastErr = '';
+
+      for (const server of candidates) {
+        try {
+          const { instance } = await getXuiForServer(server.id);
+          const inbounds = await instance.getInbounds();
+
+          // Все клиенты подписки в этом сервере: точное совпадение email и копии вида email_<порт>.
+          const targets: Array<{ inboundId: number; email: string }> = [];
+          for (const ib of inbounds) {
+            if (!ib.enable) continue;
+            const clients = parseJsonSafe(ib.settings).clients;
+            if (!Array.isArray(clients)) continue;
+            for (const cl of clients) {
+              const clEmail = String(cl?.email || '');
+              if (!clEmail) continue;
+              if (clEmail === email || clEmail.startsWith(`${email}_`)) targets.push({ inboundId: ib.id, email: clEmail });
+            }
+          }
+          if (targets.length === 0) continue;
+
+          for (const target of targets) {
+            let ok = false;
+            try {
+              ok = await instance.updateClient(target.email, device.uuid, target.inboundId, newExpiryMs, limitBytes);
+            } catch (e: any) { lastErr = e.message; }
+            if (!ok) {
+              try {
+                const raw = await instance.addClient(target.email, device.uuid, target.inboundId, newExpiryMs, limitBytes);
+                ok = !!raw;
+                if (ok) recreated.push(target.email);
+              } catch (e: any) { lastErr = e.message; }
+            }
+            if (ok) {
+              done++;
+              if (resetTraffic) {
+                try { await instance.resetClientTraffic(target.inboundId, target.email); } catch (e: any) { lastErr = e.message; }
+              }
+            } else if (!lastErr) {
+              lastErr = 'панель не подтвердила обновление';
+            }
+          }
+        } catch (e: any) {
+          lastErr = e.message;
+        }
+      }
+
+      if (done > 0) synced.push(email);
+      else failed.push(`${email}${lastErr ? ' (' + lastErr + ')' : ''}`);
+    }
+
+    devices = devices.map((d) => ({ ...d, expiresAt: newExpiryIso }));
+
+    const { error: updErr } = await supabase.from('subscriptions').update({
+      expires_at: newExpiryIso,
+      status: 'active',
+      traffic_limit_mb: trafficLimitMb,
+      v2ray_config: JSON.stringify(devices),
+      ...(resetTraffic ? { traffic_used_mb: 0 } : {}),
+      updated_at: new Date().toISOString()
+    }).eq('id', sub.id);
+    if (updErr) throw updErr;
+
+    try {
+      await supabase.from('transactions').insert({
+        user_id: userId,
+        amount: 0,
+        type: 'subscription_extend',
+        description: `Продление подписки на ${months} мес. (админ). Новый срок: ${newExpiryIso.slice(0, 10)}${resetTraffic ? ', трафик сброшен' : ''}`
+      });
+    } catch (e: any) {
+      console.warn(`[Admin] Не удалось записать историю продления: ${e.message}`);
+    }
+
+    res.json({
+      success: true,
+      subscriptionId: sub.id,
+      months,
+      previousExpiry: sub.expires_at,
+      newExpiry: newExpiryIso,
+      trafficLimitMb,
+      resetTraffic,
+      devices: { total: devices.length, synced: synced.length, recreated: recreated.length, failed }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.put('/users/:userId', adminOnly, async (req, res) => {
   const { userId } = req.params;
   const { role, is_pro, balance } = req.body;

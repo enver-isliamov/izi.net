@@ -175,24 +175,6 @@ router.get('/sub/:id', async (req, res) => {
       }
     }
 
-    // Добавляем Hysteria2 ссылки если настроен
-    try {
-      const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
-      if (hySettings?.value) {
-        const hyPassword = hySettings.value;
-        const hyLinks: string[] = [];
-        const devices = configText.split('\n').filter((l: string) => l.startsWith('vless://'));
-        for (const device of devices) {
-          const emailMatch = device.match(/#(.+)$/);
-          const name = emailMatch ? decodeURIComponent(emailMatch[1]) : 'izinet';
-          hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#${name}-hysteria`);
-        }
-        if (hyLinks.length > 0) {
-          configText = (configText ? configText + '\n' : '') + [...new Set(hyLinks)].join('\n');
-        }
-      }
-    } catch (e) {}
-
     // RENAME-001: в клиенте VPN показываем бренд и email подписчика вместо «izi.net VPN» / имён серверов (#OneD)
     const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
     const userEmail = subUser?.email || '';

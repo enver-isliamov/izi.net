@@ -4,7 +4,6 @@ import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cl
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
-import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
 import { toast } from 'sonner';
 
 interface Setting {
@@ -210,16 +209,14 @@ export default function AdminSettings() {
   const [isRepairing, setIsRepairing] = useState(false);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [systemLogs, setSystemLogs] = useState<string[]>([
-    '[Система] Добро пожаловать в веб-консоль управления сервером изинет.',
-    '[Система] Выберите желаемое действие выше для получения детального отчета.',
-    '[Подсказка] Кнопка ремонта полностью настроит сожительство Reality на порту 443 и Nginx на порту 3443.'
+    '[Система] Журнал операций панели изинет.',
+    '[Система] Выберите действие — результат появится здесь.',
+    '[Подсказка] Полная диагностика — в разделе «Тесты». Обновление сервера — командой bash update.sh по SSH.'
   ]);
 
   const handleCopyDeployScript = () => {
     const script = `cd /opt/izinet && \\
-git pull && \\
-docker compose up -d --build && \\
-docker image prune -f`;
+bash update.sh`;
     navigator.clipboard.writeText(script);
     toast.success('Команда обновления скопирована!');
   };
@@ -261,7 +258,7 @@ docker image prune -f`;
     try {
       setIsDiagnosing(true);
       setSystemLogs([
-        '[Старт] Сбор диагностических данных VPS (активные порты, докер-контейнеры, сертификаты, настройки SQ-Lite)...',
+        '[Старт] Запрос диагностики backend-API...',
         '[Система] Пожалуйста подождите...'
       ]);
       toast.loading('Запуск диагностики сервера...', { id: 'sys-diag' });
@@ -750,15 +747,13 @@ docker image prune -f`;
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-blue-400">Скрипт обновления (GitHub)</h3>
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Скопируйте скрипт ниже и выполните его в терминале (консоли) вашего сервера. Он стянет новые изменения с репозитория и перезапустит docker контейнеры.
+                  Скопируйте команду ниже и выполните её в терминале сервера. Скрипт update.sh обновит код, поправит .env, пересоберёт контейнеры и применит патчи Reality и маршрутизации.
                 </p>
               </div>
               <div className="relative group">
                 <div className="bg-black/40 border border-blue-500/20 rounded-xl p-3 font-mono text-[10px] text-blue-200 overflow-x-auto whitespace-pre">
 {`cd /opt/izinet && \\
-git pull && \\
-docker compose up -d --build && \\
-docker image prune -f`}
+bash update.sh`}
                 </div>
                 <button
                   type="button"
@@ -797,42 +792,21 @@ docker image prune -f`}
               </div>
             </div>
 
-            {/* Repair / Coexistence Card */}
+            {/* Diagnostics Card: реальная самодиагностика вместо удалённых заглушек */}
             <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
               <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">Авторемонт VLESS & Nginx</h3>
+                <h3 className="text-sm font-bold text-white">Диагностика и тесты</h3>
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Запустит скрипт <code className="text-orange-400">repair_xui.py</code> для настройки VLESS Reality (443) + Nginx (3443) co-existence.
+                  Реальные проверки: конфигурация, база, docker-порты, панель, инбаунды, Reality-ключи, клиенты, статистика трафика и маршрутизация.
                 </p>
               </div>
-              <button
-                type="button"
-                disabled={isRepairing}
-                onClick={handleRepairVless}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-yellow-500/20"
+              <a
+                href="/admin/tests"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded-xl transition-colors font-bold text-xs border border-blue-500/20"
               >
-                {isRepairing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                Ремонт портов и VLESS
-              </button>
-            </div>
-
-            {/* VPS Diagnostics Card */}
-            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">Диагностика VPS сервера</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Проверит свободные порты, запущенные docker-контейнеры, SSL сертификаты и настройки БД.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={isDiagnosing}
-                onClick={handleDiagnoseVps}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-blue-500/20"
-              >
-                {isDiagnosing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                Диагностика системы
-              </button>
+                <Activity size={12} />
+                Открыть раздел «Тесты»
+              </a>
             </div>
 
             {/* Regenerate All VPN Links Card */}
@@ -866,11 +840,11 @@ docker image prune -f`}
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
                     Резервное копирование VPS в 1 клик
                     <span className="text-[10px] bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded-full border border-blue-500/30">
-                      3x-ui + Hysteria2 + .env + Supabase
+                      3x-ui (x-ui.db) + конфиг Supabase
                     </span>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Создайте архив состояния VPS перед обновлением или миграцией. Архив можно скачать прямо в браузер.
+                    Архив конфигурации (база 3x-ui + настройки Supabase) — перед обновлением или миграцией. Хранится в контейнере приложения: скачайте его на компьютер.
                   </p>
                 </div>
               </div>
@@ -938,7 +912,7 @@ docker image prune -f`}
           {/* Terminal Console Output */}
           <div className="space-y-2 pt-2">
             <div className="flex justify-between items-center ml-1">
-              <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">Интерактивная Веб-Консоль Логов (VPS Terminal):</label>
+              <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">Журнал операций:</label>
               <button 
                 type="button" 
                 onClick={() => setSystemLogs(['[Консоль очищена пользователем]'])}
@@ -964,9 +938,6 @@ docker image prune -f`}
             </div>
           </div>
         </motion.div>
-
-        {/* Hysteria2 Section */}
-        <Hysteria2Section />
 
         <div className="sticky bottom-6 flex justify-end">
           <button

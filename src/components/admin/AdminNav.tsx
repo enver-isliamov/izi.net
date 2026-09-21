@@ -24,7 +24,7 @@ export function AdminNav() {
             key={item.path}
             to={item.path}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
+              "flex-1 basis-0 min-w-[124px] justify-center flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
               isActive 
                 ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" 
                 : "text-muted-foreground hover:text-white hover:bg-white/5"

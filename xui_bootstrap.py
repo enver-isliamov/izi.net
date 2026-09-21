@@ -9,12 +9,12 @@ import time
 
 DB_PATH = os.environ.get("XUI_DB_PATH", "/opt/izinet/xui-db/x-ui.db")
 SAFE_SERVER_NAMES = ["www.cloudflare.com"]
+# Резолверы без РФ (Яндекс DoH/DNS убраны — это российские адреса). Опроса A-записей достаточно:
+# IPv6-выход не нужен и только создаёт риск утечки мимо туннеля.
 SAFE_DNS_SERVERS = [
-    "localhost",
-    "https://dns.adguard-dns.com/dns-query",
-    "https://dns.yandex.ru/dns-query",
-    "94.140.14.14",
-    "77.88.8.8",
+    "https://1.1.1.1/dns-query",
+    "https://dns.quad9.net/dns-query",
+    "8.8.8.8",
     "9.9.9.9",
 ]
 FALLBACKS = [
@@ -324,9 +324,10 @@ def patch_xray_template(cursor):
     updated = 0
     if not row or not row[1] or row[1] == '{}':
         config = {
-            "dns": {"servers": SAFE_DNS_SERVERS},
+            "dns": {"servers": SAFE_DNS_SERVERS, "queryStrategy": "UseIPv4", "disableFallback": True},
+            "routing": {"domainStrategy": "UseIPv4"},
             "outbounds": [
-                {"protocol": "freedom", "tag": "direct"},
+                {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIPv4"}},
                 {"protocol": "blackhole", "tag": "blocked"}
             ]
         }
@@ -340,9 +341,19 @@ def patch_xray_template(cursor):
         if dns.get("servers") != SAFE_DNS_SERVERS:
             dns["servers"] = SAFE_DNS_SERVERS
             changed = True
+        if dns.get("queryStrategy") != "UseIPv4":
+            dns["queryStrategy"] = "UseIPv4"
+            changed = True
+        if dns.get("disableFallback") is not True:
+            dns["disableFallback"] = True
+            changed = True
+        routing = config.setdefault("routing", {})
+        if routing.get("domainStrategy") != "UseIPv4":
+            routing["domainStrategy"] = "UseIPv4"
+            changed = True
         if not config.get("outbounds") or len(config["outbounds"]) == 0:
             config["outbounds"] = [
-                {"protocol": "freedom", "tag": "direct"},
+                {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIPv4"}},
                 {"protocol": "blackhole", "tag": "blocked"}
             ]
             changed = True

@@ -18,6 +18,7 @@ services:
       - IS_DOCKER=true
     volumes:
       - ./xui-db:/etc/x-ui
+      - ./backups:/app/backups
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env

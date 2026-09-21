@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus, QrCode, RefreshCw, Copy, UserPlus } from 'lucide-react';
+import { Users, Search, Shield, UserX, UserCheck, ShieldAlert, Server, History, Trash2, Key, Plus, QrCode, RefreshCw, Copy, UserPlus, CalendarPlus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -37,6 +37,22 @@ export default function AdminUsers() {
     trafficLimitGb: '0'
   });
 
+  // ADMIN-014: продление подписки из карточки пользователя
+  const [extendUser, setExtendUser] = useState<any>(null);
+  const [extendMonths, setExtendMonths] = useState('1');
+  const [isExtending, setIsExtending] = useState(false);
+  const [extendResetTraffic, setExtendResetTraffic] = useState(false);
+
+  // Предпросмотр нового срока: max(сейчас, текущий срок) + N месяцев
+  const extendPreviewDate = (() => {
+    const current = extendUser?.active_subscription?.expires_at
+      ? new Date(extendUser.active_subscription.expires_at).getTime()
+      : 0;
+    const start = Math.max(Date.now(), current);
+    const m = parseInt(extendMonths, 10) || 1;
+    return new Date(start + m * 30 * 24 * 60 * 60 * 1000);
+  })();
+
   useEffect(() => {
     if (servers.length > 0 && !subCreateData.serverId) {
       setSubCreateData(prev => ({ ...prev, serverId: servers[0].id }));
@@ -58,6 +74,33 @@ export default function AdminUsers() {
       fetchData();
     } catch (err: any) {
       toast.error('Ошибка: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // ADMIN-014: продление подписки (аддитивно, ключи и трафик сохраняются)
+  const handleExtendSubscription = async () => {
+    if (!extendUser) return;
+    const months = parseInt(extendMonths, 10) || 1;
+    try {
+      setIsExtending(true);
+      const { data } = await axios.post(
+        `/api/admin/users/${extendUser.id}/subscription/extend`,
+        { months, resetTraffic: extendResetTraffic },
+        { headers: { Authorization: `Bearer ${session?.access_token}` } }
+      );
+      const newDate = data?.newExpiry ? new Date(data.newExpiry).toLocaleDateString('ru-RU') : '';
+      const failedCount = Array.isArray(data?.devices?.failed) ? data.devices.failed.length : 0;
+      if (failedCount > 0) {
+        toast.warning(`Подписка продлена до ${newDate}. Не синхронизировано устройств: ${failedCount}`);
+      } else {
+        toast.success(`Подписка продлена до ${newDate}`);
+      }
+      setExtendUser(null);
+      fetchData();
+    } catch (err: any) {
+      toast.error('Ошибка продления: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsExtending(false);
     }
   };
 
@@ -476,6 +519,18 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-6 py-4 border-l border-white/5 align-top">
                       <div className="flex flex-col items-end justify-start gap-2 h-full">
+                                                {sub ? (
+                          <div className="w-full text-center text-[9px] font-mono text-muted-foreground" title="Текущий срок подписки">
+                            {isExpired ? 'истекла ' : 'до '}{expiryDate ? expiryDate.toLocaleDateString('ru-RU') : '—'}
+                          </div>
+                        ) : null}
+                        <button
+                          onClick={() => { if (sub) { setExtendUser(user); setExtendMonths('1'); } else { setSubCreateUser(user); } }}
+                          className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 rounded-lg transition-all text-[10px] font-bold border border-blue-500/20"
+                          title={sub ? 'Продлить подписку' : 'Выдать подписку на срок'}
+                        >
+                          <CalendarPlus size={12} /> {sub ? 'Продлить' : 'Выдать'}
+                        </button>
                         <button 
                            onClick={() => {
                              setSelectedUser(user);
@@ -486,6 +541,7 @@ export default function AdminUsers() {
                          >
                            <History size={12} /> История
                          </button>
+
                       </div>
                     </td>
                   </tr>
@@ -587,15 +643,24 @@ export default function AdminUsers() {
 
                 <div className="flex flex-col gap-3">
                   <div className="flex justify-end">
-                    <button 
-                      onClick={() => {
-                        setSelectedUser(user);
-                        setIsHistoryOpen(true);
-                      }}
-                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white/5 text-white hover:bg-white/10 rounded-lg transition-all text-xs w-full"
-                    >
-                      <History size={12} /> История Тразакций
-                    </button>
+                                        <div className="flex gap-2">
+                      <button
+                        onClick={() => { if (sub) { setExtendUser(user); setExtendMonths('1'); } else { setSubCreateUser(user); } }}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 rounded-lg transition-all text-xs font-bold"
+                      >
+                        <CalendarPlus size={12} /> {sub ? 'Продлить' : 'Выдать'}
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setSelectedUser(user);
+                          setIsHistoryOpen(true);
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white/5 text-white hover:bg-white/10 rounded-lg transition-all text-xs"
+                      >
+                        <History size={12} /> История
+                      </button>
+                    </div>
+
                   </div>
                   
                   {sub ? (
@@ -711,6 +776,77 @@ export default function AdminUsers() {
             </div>
           )}
         </div>
+
+        {/* ADMIN-014: диалог продления подписки прямо в карточке пользователя */}
+        <Dialog open={!!extendUser} onOpenChange={(open) => !open && setExtendUser(null)}>
+          <DialogContent className="bg-[#0b0d11] border-white/10 text-white max-w-md">
+            <DialogHeader>
+              <DialogTitle>Продлить подписку</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                Пользователь: <span className="text-white font-medium">{extendUser?.email}</span>
+              </p>
+              <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Текущий срок</span>
+                  <span className="font-mono text-white">
+                    {extendUser?.active_subscription?.expires_at
+                      ? new Date(extendUser.active_subscription.expires_at).toLocaleDateString('ru-RU')
+                      : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Новый срок</span>
+                  <span className="font-mono text-emerald-400">{extendPreviewDate.toLocaleDateString('ru-RU')}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wider font-bold text-muted-foreground">Срок</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {['1', '3', '6', '12'].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setExtendMonths(m)}
+                      className={cn(
+                        'px-3 py-2 rounded-lg text-sm font-bold border transition-all',
+                        extendMonths === m
+                          ? 'bg-blue-500 text-white border-blue-500'
+                          : 'bg-white/5 text-muted-foreground border-white/5 hover:bg-white/10 hover:text-white'
+                      )}
+                    >
+                      {m} мес
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={extendResetTraffic}
+                  onChange={(e) => setExtendResetTraffic(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                Сбросить израсходованный трафик
+              </label>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Ключи и устройства сохраняются — обновляется срок подписки и срок клиента в панели X-UI. Если клиента в панели уже нет, он будет пересоздан с тем же ключом.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" className="text-muted-foreground" onClick={() => setExtendUser(null)}>
+                Отмена
+              </Button>
+              <Button
+                disabled={isExtending}
+                onClick={handleExtendSubscription}
+                className="bg-blue-500 hover:bg-blue-600 text-white"
+              >
+                {isExtending ? 'Продлеваем…' : 'Подтвердить'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <UserHistoryModal 
           user={selectedUser}

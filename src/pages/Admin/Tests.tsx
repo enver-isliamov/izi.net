@@ -38,21 +38,37 @@ export default function AdminTests() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [results, setResults] = useState<TestResult[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [exitIp, setExitIp] = useState('');
 
   const run = useCallback(async () => {
     if (!session?.access_token) return;
     setLoading(true);
     setError(null);
     try {
-      const { data } = await axios.get('/api/admin/tests', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        timeout: 45000,
+      const auth = { Authorization: `Bearer ${session.access_token}` };
+      const [testsRes, geoRes] = await Promise.all([
+        axios.get('/api/admin/tests', { headers: auth, timeout: 45000 }),
+        axios.get('/api/admin/geo', { headers: auth, timeout: 45000 }).catch(() => null),
+      ]);
+      const data = testsRes.data;
+      const geo = geoRes?.data;
+      const merged: TestResult[] = [
+        ...(Array.isArray(data.results) ? data.results : []),
+        ...(Array.isArray(geo?.results) ? geo.results : []),
+      ];
+      const failCount = merged.filter((r) => r.status === 'fail').length;
+      setSummary({
+        total: merged.length,
+        ok: merged.filter((r) => r.status === 'ok').length,
+        warn: merged.filter((r) => r.status === 'warn').length,
+        fail: failCount,
+        ms: (data.summary?.ms || 0) + (geo?.summary?.ms || 0),
       });
-      setSummary(data.summary);
-      setResults(Array.isArray(data.results) ? data.results : []);
+      setResults(merged);
+      setExitIp(geo?.exitIp || '');
       setGeneratedAt(data.generatedAt || null);
-      if (data.summary?.fail > 0) {
-        toast.error(`Проверки завершены: ошибок — ${data.summary.fail}`);
+      if (failCount > 0) {
+        toast.error(`Проверки завершены: ошибок — ${failCount}`);
       } else {
         toast.success('Проверки завершены: ошибок нет');
       }
@@ -122,6 +138,14 @@ export default function AdminTests() {
             <div className="text-xs text-muted-foreground">Время</div>
             <div className="text-xl font-semibold text-white">{(summary.ms / 1000).toFixed(1)} с</div>
           </div>
+        </div>
+      )}
+
+      {exitIp && (
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Выходной IP для внешних сервисов:</span>
+          <span className="font-mono text-white">{exitIp}</span>
+          <span className="text-xs text-muted-foreground">— страна, ASN и признаки адреса — в блоке «Гео» ниже</span>
         </div>
       )}
 
