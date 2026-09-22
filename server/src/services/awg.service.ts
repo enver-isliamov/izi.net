@@ -8,7 +8,9 @@ import { supabase } from './supabase';
  * Файлы сервера: /etc/amnezia/amneziawg/izinet-server.json и izinet-peers.json.
  */
 const AWG_DIR = '/etc/amnezia/amneziawg';
-const IFACE = 'awg0';
+// Имя интерфейса: можно переопределить через AWG_IFACE, иначе берётся из izinet-server.json,
+// иначе awg0. На сервере может уже работать интерфейс AmneziaWG с другим именем (например wg0).
+let IFACE = process.env.AWG_IFACE || 'awg0';
 const PEERS_JSON = `${AWG_DIR}/izinet-peers.json`;
 const SERVER_JSON = `${AWG_DIR}/izinet-server.json`;
 
@@ -112,7 +114,9 @@ export class AwgService {
     try {
       const raw = hostExec(`base64 -w0 ${SERVER_JSON}`);
       if (!raw) return null;
-      return JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+      const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+      if (parsed?.interface && !process.env.AWG_IFACE) IFACE = String(parsed.interface);
+      return parsed;
     } catch (e) {
       return null;
     }
