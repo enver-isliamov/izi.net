@@ -219,6 +219,18 @@ export default function AdminUsers() {
     }
   };
 
+  const toggleUserUniversalAccess = async (userId: string, currentUniversalStatus: boolean) => {
+    try {
+      await axios.put(`/api/admin/users/${userId}`, { universal_access: !currentUniversalStatus }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success(currentUniversalStatus ? 'Универсальная подписка отключена для пользователя' : 'Универсальная подписка включена для пользователя');
+      fetchData();
+    } catch (e) {
+      toast.error('Ошибка обновления универсального доступа');
+    }
+  };
+
   const deleteDevice = async (userId: string, deviceId: string) => {
     if (!window.confirm('Действительно удалить устройство? Пользователь потеряет доступ с него.')) return;
     try {
@@ -399,18 +411,34 @@ export default function AdminUsers() {
                           <button onClick={() => updateUserRole(user.id, 'user')} className="text-[10px] text-yellow-500 hover:text-yellow-400 transition-colors">Снять админа</button>
                         ) : null}
 
-                        <div className="mt-2 pt-2 border-t border-white/5 w-full space-y-1">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            user.is_pro ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-white/5 text-muted-foreground'
-                          }`}>
-                            {user.is_pro ? '👑 Pro Аккаунт' : 'Обычный'}
-                          </span>
-                          <button 
-                            onClick={() => toggleUserProStatus(user.id, !!user.is_pro)} 
-                            className="block text-[10px] text-purple-400 hover:text-purple-300 transition-colors font-semibold"
-                          >
-                            {user.is_pro ? 'Снять Pro' : 'Сделать Pro'}
-                          </button>
+                        <div className="mt-2 pt-2 border-t border-white/5 w-full space-y-1.5">
+                          <div>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              user.is_pro ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-white/5 text-muted-foreground'
+                            }`}>
+                              {user.is_pro ? '👑 Pro Аккаунт' : 'Обычный'}
+                            </span>
+                            <button 
+                              onClick={() => toggleUserProStatus(user.id, !!user.is_pro)} 
+                              className="block text-[10px] text-purple-400 hover:text-purple-300 transition-colors font-semibold mt-0.5"
+                            >
+                              {user.is_pro ? 'Снять Pro' : 'Сделать Pro'}
+                            </button>
+                          </div>
+
+                          <div className="pt-1.5 border-t border-white/5">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              user.universal_access ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 text-muted-foreground'
+                            }`}>
+                              {user.universal_access ? '🌐 Универсал: Вкл' : '🌐 Универсал: Авто'}
+                            </span>
+                            <button 
+                              onClick={() => toggleUserUniversalAccess(user.id, !!user.universal_access)} 
+                              className="block text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors font-semibold mt-0.5"
+                            >
+                              {user.universal_access ? 'Выкл доступ' : 'Выдать доступ'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -652,18 +680,34 @@ export default function AdminUsers() {
                       <button onClick={() => updateUserRole(user.id, 'user')} className="text-[10px] text-yellow-500 hover:text-yellow-400">Снять админа</button>
                     ) : null}
 
-                    <div className="mt-1.5 pt-1.5 border-t border-white/5 flex flex-col items-end gap-1">
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
-                        user.is_pro ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-white/5 text-muted-foreground'
-                      }`}>
-                        {user.is_pro ? '👑 Pro' : 'Обычный'}
-                      </span>
-                      <button 
-                        onClick={() => toggleUserProStatus(user.id, !!user.is_pro)} 
-                        className="text-[9px] text-purple-400 hover:text-purple-300 transition-colors font-semibold"
-                      >
-                        {user.is_pro ? 'Снять Pro' : 'Сделать Pro'}
-                      </button>
+                    <div className="mt-1.5 pt-1.5 border-t border-white/5 flex flex-col items-end gap-1.5">
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                          user.is_pro ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-white/5 text-muted-foreground'
+                        }`}>
+                          {user.is_pro ? '👑 Pro' : 'Обычный'}
+                        </span>
+                        <button 
+                          onClick={() => toggleUserProStatus(user.id, !!user.is_pro)} 
+                          className="text-[9px] text-purple-400 hover:text-purple-300 transition-colors font-semibold"
+                        >
+                          {user.is_pro ? 'Снять Pro' : 'Сделать Pro'}
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-0.5 pt-1 border-t border-white/5 w-full">
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                          user.universal_access ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 text-muted-foreground'
+                        }`}>
+                          {user.universal_access ? '🌐 Универсал: Вкл' : '🌐 Универсал: Авто'}
+                        </span>
+                        <button 
+                          onClick={() => toggleUserUniversalAccess(user.id, !!user.universal_access)} 
+                          className="text-[9px] text-emerald-400 hover:text-emerald-300 transition-colors font-semibold"
+                        >
+                          {user.universal_access ? 'Выкл доступ' : 'Выдать доступ'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

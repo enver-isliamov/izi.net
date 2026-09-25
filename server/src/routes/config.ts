@@ -52,8 +52,53 @@ router.post('/sync-traffic', async (req, res) => {
 });
 
 // Универсальная видимость ссылок (/api/subscription/universal-link-visible)
-router.get('/universal-link-visible', (req, res) => {
-  res.json({ visible: true });
+router.get('/universal-link-visible', async (req, res) => {
+  try {
+    let settingStatus = 'all';
+    try {
+      const { data: settingData } = await supabase.from('settings').select('value').eq('key', 'UNIVERSAL_LINK_STATUS').maybeSingle();
+      if (settingData?.value) settingStatus = settingData.value;
+    } catch (e) {}
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.json({ visible: settingStatus === 'all', status: settingStatus });
+    }
+
+    const token = authHeader.replace('Bearer ', '').trim();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    
+    if (authErr || !user) {
+      return res.json({ visible: settingStatus === 'all', status: settingStatus });
+    }
+
+    const { data: dbUser } = await supabase
+      .from('users')
+      .select('id,role,is_pro,universal_access')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const isAdmin = dbUser?.role === 'admin' || dbUser?.role === 'superadmin';
+    const isPro = !!dbUser?.is_pro;
+    const hasUniversalAccess = !!dbUser?.universal_access;
+
+    if (hasUniversalAccess || isAdmin) {
+      return res.json({ visible: true, status: settingStatus, is_pro: isPro, universal_access: true });
+    }
+
+    if (settingStatus === 'none') {
+      return res.json({ visible: false, status: settingStatus, is_pro: isPro });
+    }
+
+    if (settingStatus === 'pro') {
+      return res.json({ visible: isPro, status: settingStatus, is_pro: isPro });
+    }
+
+    // Default 'all'
+    return res.json({ visible: true, status: settingStatus, is_pro: isPro });
+  } catch (err: any) {
+    return res.json({ visible: true, error: err.message });
+  }
 });
 
 router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/universal/:id', '/subscription/:id'], async (req, res) => {
@@ -99,154 +144,128 @@ router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/unive
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    let configText = sub.v2ray_config || '';
-    try {
-      if (configText.startsWith('[')) {
-        let devices = JSON.parse(configText);
-        if (deviceId) devices = devices.filter((d: any) => d.id === deviceId);
+    // Fetch user details
+    const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
+    const userEmail = subUser?.email || '';
+    const safeUserTag = userEmail ? userEmail.split('@')[0] : sub.id.slice(0, 6);
 
-        // Get active server names for filtering
-        const { data: allActiveServers } = await supabase
-          .from('vpn_servers')
-          .select('name,health_status')
-          .eq('is_active', true);
-        
-        const healthyServers = (allActiveServers || []).filter((s: any) => s.health_status === 'ok');
-        const activeServers = healthyServers.length > 0 ? healthyServers : (allActiveServers || []);
-        const activeNames = activeServers.map((s: any) => s.name.replace(/\s+/g, '_'));
+    // Fetch active servers
+    const { data: allActiveServers } = await supabase
+      .from('vpn_servers')
+      .select('*')
+      .eq('is_active', true);
+    const activeServers = (allActiveServers && allActiveServers.length > 0) ? allActiveServers : [];
 
-        // Join device configs with real newline
-        const allLines = devices.map((d: any) => d.config).filter(Boolean).join('\n');
+    let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    if (deviceId) {
+      devices = devices.filter((d: any) => d.id === deviceId);
+    }
 
-        // Filter: keep lines from active servers (or all if no active servers found)
-        if (activeNames.length > 0 && allLines) {
-          const filtered = allLines.split('\n').filter((line: string) => {
-            const suffix = line.split('#')[1] || '';
-            return activeNames.some((name: string) => suffix.includes(name)) || suffix.includes('izinet');
-          });
-          configText = filtered.length > 0 ? filtered.join('\n') : allLines;
-        } else {
-          configText = allLines;
+    const collectedVlessLinks: string[] = [];
+
+    // Extract VLESS links from stored device configs
+    for (const device of devices) {
+      if (device.config) {
+        const lines = device.config.split('\n').map((l: string) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          if (line.startsWith('vless://')) {
+            collectedVlessLinks.push(line);
+          }
         }
       }
-    } catch (e) {}
+    }
 
-    // Fallback: if config is empty after filtering, try lazy regeneration
-    if (!configText || !configText.trim()) {
-      console.log(`🔄 [SUB] Lazy heal for ${id} — v2ray_config empty or no valid links`);
-      try {
-        const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
-        const { data: allActiveServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-        const healthyServers = (allActiveServers || []).filter((s: any) => s.health_status === 'ok');
-        const activeServers = healthyServers.length > 0 ? healthyServers : (allActiveServers || []);
-
-        if (devices.length > 0 && activeServers && activeServers.length > 0) {
-          let changed = false;
-          for (const device of devices) {
-            if (!device.uuid || !device.email) continue;
-            const lines: string[] = [];
-            for (const server of activeServers) {
+    // If no VLESS links found or stored configs are empty, heal dynamically from active servers
+    if (collectedVlessLinks.length === 0 && activeServers.length > 0 && devices.length > 0) {
+      console.log(`🔄 [SUB] Dynamic generation of Reality links for subscription ${sub.id}`);
+      for (const device of devices) {
+        if (!device.uuid || !device.email) continue;
+        for (const server of activeServers) {
+          try {
+            const { instance, server: serverData } = await getXuiForServer(server.id);
+            const inbounds = await instance.getInbounds();
+            const pubPorts = await getPublishedVlessPorts();
+            const realityInbounds = inbounds.filter((ib: any) => {
               try {
-                const { instance, server: serverData } = await getXuiForServer(server.id);
-                const inbounds = await instance.getInbounds();
-                const pubPorts = await getPublishedVlessPorts();
-                const realityInbounds = inbounds.filter((ib: any) => {
-                  try {
-                    const ss = JSON.parse(ib.streamSettings || '{}');
-                    return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
-                  } catch { return false; }
-                });
-                for (const ri of realityInbounds) {
-                  try {
-                    const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
-                    if (rawLink) lines.push(rawLink.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g, '_')}`));
-                  } catch (e) {}
+                const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
+              } catch { return false; }
+            });
+            for (const ri of realityInbounds) {
+              try {
+                const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                if (rawLink) {
+                  const sName = (server.name || 'Server').replace(/\s+/g, '_');
+                  const formatted = rawLink.replace(/(#.*)?$/, `#izinet_${sName}_Reality`);
+                  collectedVlessLinks.push(formatted);
                 }
               } catch (e) {}
             }
-            if (lines.length > 0) { device.config = lines.join('\n'); changed = true; }
-          }
-          if (changed) {
-            await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
-            configText = devices.map((d: any) => d.config).filter(Boolean).join('\n');
-            console.log(`✅ [SUB] Lazy heal succeeded for ${sub.id}`);
-          }
+          } catch (e) {}
         }
-      } catch (e: any) {
-        console.error(`❌ [SUB] Lazy heal failed for ${id}: ${e.message}`);
       }
     }
 
-    // 1. Добавляем Hysteria2 ссылки если настроен пароль
+    const finalLinks: string[] = [];
+
+    // 1. Add VLESS Reality links (preserving clean server-specific titles)
+    for (const rawVless of collectedVlessLinks) {
+      const match = rawVless.match(/#(.+)$/);
+      let sTitle = match ? decodeURIComponent(match[1]) : 'Reality';
+      if (!sTitle.toLowerCase().includes('izinet')) {
+        sTitle = `izinet_${sTitle}`;
+      }
+      finalLinks.push(rawVless.replace(/(#.*)?$/, `#${sTitle}`));
+    }
+
+    // 2. Add Hysteria 2 links for each active server
     try {
       const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
-      if (hySettings?.value) {
-        const hyPassword = hySettings.value;
-        const hyLinks: string[] = [];
-        const devices = configText.split('\n').filter((l: string) => l.startsWith('vless://'));
-        for (const device of devices) {
-          const emailMatch = device.match(/#(.+)$/);
-          const name = emailMatch ? decodeURIComponent(emailMatch[1]) : 'izinet';
-          hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#${name}-hysteria`);
+      const hyPassword = hySettings?.value;
+      if (hyPassword) {
+        if (activeServers.length > 0) {
+          for (const server of activeServers) {
+            const host = server.domain || server.ip || '194.50.94.28';
+            const sName = (server.name || 'Server').replace(/\s+/g, '_');
+            finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1#izinet_${sName}_Hysteria2`);
+          }
+        } else {
+          finalLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#izinet_Hysteria2`);
         }
-        if (hyLinks.length === 0) {
-          hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#izinet-hysteria`);
-        }
-        if (hyLinks.length > 0) {
-          configText = (configText ? configText + '\n' : '') + [...new Set(hyLinks)].join('\n');
-        }
-      }
-    } catch (e) {}
-
-    // RENAME-001: в клиенте VPN показываем бренд и email подписчика
-    const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
-    const userEmail = subUser?.email || '';
-    const subRemark = `izinet.online${userEmail ? '_' + userEmail : ''}`;
-
-    // 2. Добавляем AmneziaWG (WireGuard с защитой от DPI) для КАЖДОГО подписчика
-    try {
-      const userIdentifier = userEmail || sub.user_id || sub.id;
-      const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `${subRemark}_AmneziaWG`);
-      if (awgData?.wireguardUrl) {
-        configText = (configText ? configText + '\n' : '') + awgData.wireguardUrl;
-      }
-      if (awgData?.awgUrl) {
-        configText = (configText ? configText + '\n' : '') + awgData.awgUrl;
       }
     } catch (e: any) {
-      console.warn(`⚠️ [SUB] AmneziaWG injection warning: ${e.message}`);
+      console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
     }
 
-    if (configText && configText.trim()) {
-      configText = [...new Set(configText.split('\n').map(line => {
-        const trimmed = line.trim();
-        if (!trimmed) return '';
-        if (trimmed.startsWith('hysteria2://')) {
-          return trimmed.replace(/(#.*)$/, `#${subRemark}_Hysteria2`);
-        }
-        if (trimmed.startsWith('wireguard://')) {
-          return trimmed.replace(/(#.*)$/, `#${subRemark}_AmneziaWG`);
-        }
-        if (trimmed.startsWith('awg://')) {
-          return trimmed.replace(/(#.*)$/, `#${subRemark}_AmneziaWG_Native`);
-        }
-        if (trimmed.startsWith('vless://')) {
-          return trimmed.replace(/(#.*)$/, `#${subRemark}_Reality`);
-        }
-        return trimmed;
-      }))].filter(Boolean).join('\n');
+    // 3. Add AmneziaWG (WireGuard Anti-DPI) links for user
+    try {
+      const userIdentifier = userEmail || sub.user_id || sub.id;
+      const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${safeUserTag}_AmneziaWG`);
+      if (awgData?.wireguardUrl) {
+        finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG`));
+      }
+      if (awgData?.awgUrl) {
+        finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG_Native`));
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ [SUB] AmneziaWG link creation skipped: ${e.message}`);
     }
 
-    if (!configText || !configText.trim()) {
+    // Deduplicate exact duplicate lines
+    const uniqueLinks = [...new Set(finalLinks.filter(Boolean))];
+
+    let outputText = uniqueLinks.join('\n');
+    if (!outputText.trim()) {
       console.warn(`⚠️ [SUB] Empty config for subscription ${sub.id}, returning fallback notice`);
-      configText = `# profile: izinet.online\n# status: configuring\n# user: ${userEmail || sub.id}`;
+      outputText = `# profile: izinet.online\n# status: configuring\n# user: ${userEmail || sub.id}`;
     }
 
-    const base64Config = Buffer.from(configText).toString('base64');
+    const base64Config = Buffer.from(outputText).toString('base64');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('profile-title', `izinet.online${userEmail ? ' ' + userEmail : ''}`);
     res.setHeader('profile-web-page-url', 'https://izinet.online');
-    res.setHeader('profile-update-interval', '12');
+    res.setHeader('profile-update-interval', '6');
+    res.setHeader('Content-Disposition', 'inline; filename="izinet.txt"');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));
     res.send(base64Config);
   } catch (err: any) {

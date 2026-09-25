@@ -831,7 +831,7 @@ router.post('/users/:userId/subscription/extend', adminOnly, async (req, res) =>
 
 router.put('/users/:userId', adminOnly, async (req, res) => {
   const { userId } = req.params;
-  const { role, is_pro, balance } = req.body;
+  const { role, is_pro, universal_access, balance } = req.body;
   try {
     if (role !== undefined) {
       const { error } = await supabase.from('users').update({ role }).eq('id', userId);
@@ -841,8 +841,13 @@ router.put('/users/:userId', adminOnly, async (req, res) => {
     if (is_pro !== undefined) {
       const { error } = await supabase.from('users').update({ is_pro }).eq('id', userId);
       if (error && !/is_pro|schema cache|column/i.test(error.message || '')) throw error;
-      // ADMIN-USER-001: На старых схемах Supabase колонка users.is_pro может отсутствовать; роль/баланс не должны падать из-за Pro-флага.
       if (error) console.warn(`⚠️ [Admin] users.is_pro unavailable, skipped Pro flag for ${userId}: ${error.message}`);
+    }
+
+    if (universal_access !== undefined) {
+      const { error } = await supabase.from('users').update({ universal_access }).eq('id', userId);
+      if (error && !/universal_access|schema cache|column/i.test(error.message || '')) throw error;
+      if (error) console.warn(`⚠️ [Admin] users.universal_access unavailable, skipped universal access for ${userId}: ${error.message}`);
     }
 
     if (balance !== undefined) {

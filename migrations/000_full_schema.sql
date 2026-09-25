@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS users (
   telegram_id bigint,
   telegram_username text,
   is_banned boolean DEFAULT false,
+  is_pro boolean DEFAULT false,
+  universal_access boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );

@@ -213,7 +213,7 @@ export default function Dashboard() {
           headers: {
             'Authorization': `Bearer ${session?.access_token}`
           }
-        }).then(res => res.json()).catch(() => ({ visible: false }))
+        }).then(res => res.json()).catch(() => ({ visible: true }))
       ]);
 
       const balanceRes = balanceResult.data;
@@ -236,7 +236,7 @@ export default function Dashboard() {
       setReferrals(refRes || []);
       setActiveServer(serverData);
       setGlobalDeviceLimit(plansData?.deviceLimit || 2);
-      setShowUniversalLink(!!universalLinkRes?.visible);
+      setShowUniversalLink(universalLinkRes?.visible !== false);
       
       if (subRes?.id) {
         setSubUrl(`${window.location.origin}/api/sub/${subRes.id}`);
