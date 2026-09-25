@@ -746,48 +746,99 @@ export default function Dashboard() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                         <Button 
-                          size="sm" 
-                          className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-[10px] h-7.5 px-2.5 font-bold gap-1"
-                          onClick={() => {
-                            const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
-                            setQrData({
-                              value: deviceSubUrl,
-                              key: device.config,
-                              sub: deviceSubUrl,
-                              title: `Подключение: ${device.label || 'Устройство'}`,
-                              subtitle: device.serverType || 'VLESS Reality + AmneziaWG'
-                            });
-                            setQrMode('sub');
-                            setIsQrOpen(true);
-                          }}
-                        >
-                          <Zap className="w-3 h-3" /> Подключить
-                        </Button>
+                        {device.serverType === 'AWG' || device.serverType === 'ROUTER' ? (
+                          <>
+                            <Button 
+                              size="sm" 
+                              className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] h-7.5 px-2.5 font-bold gap-1"
+                              title="Скачать конфигурационный файл .conf для роутеров и AmneziaVPN"
+                              onClick={handleDownloadAwg}
+                            >
+                              <Download className="w-3.5 h-3.5" /> Скачать .conf
+                            </Button>
 
-                        <Button 
-                          size="sm" 
-                          variant="secondary" 
-                          className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] h-7.5 px-2 font-medium gap-1"
-                          title="Скачать конфигурационный файл .conf для роутеров и AmneziaVPN"
-                          onClick={handleDownloadAwg}
-                        >
-                          <Download className="w-3 h-3" /> .conf
-                        </Button>
+                            <Button 
+                              size="icon" 
+                              variant="secondary" 
+                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
+                              title="Показать QR-код AmneziaWG"
+                              onClick={handleOpenAwgModal}
+                            >
+                              <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                            </Button>
 
-                        <Button 
-                          size="sm" 
-                          variant="secondary" 
-                          className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
-                          title="Скопировать универсальную ссылку"
-                          onClick={async () => {
-                            const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
-                            const success = await copyToClipboard(deviceSubUrl);
-                            if (success) toast.success(`Ссылка скопирована (${device.label})`);
-                          }}
-                        >
-                          <Copy className="w-3 h-3 mr-1 opacity-60" /> Ссылка
-                        </Button>
+                            <Button 
+                              size="sm" 
+                              variant="secondary" 
+                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
+                              title="Скопировать текст конфигурации"
+                              onClick={async () => {
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  const res = await axios.get('/api/user/awg-subscription', {
+                                    headers: { Authorization: `Bearer ${session?.access_token}` }
+                                  });
+                                  const confText = res.data?.conf || '';
+                                  if (confText) {
+                                    const success = await copyToClipboard(confText);
+                                    if (success) toast.success(`Конфиг скопирован (${device.label})`);
+                                  }
+                                } catch (e) {
+                                  toast.error('Не удалось скопировать конфиг');
+                                }
+                              }}
+                            >
+                              <Copy className="w-3 h-3 mr-1 opacity-60" /> Текст
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button 
+                              size="icon" 
+                              variant="secondary" 
+                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
+                              title="Показать QR-код подключения"
+                              onClick={() => {
+                                const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
+                                setQrData({
+                                  value: deviceSubUrl,
+                                  key: device.config,
+                                  sub: deviceSubUrl,
+                                  title: device.label || 'Подключение устройства',
+                                  subtitle: 'VLESS Reality • Hysteria 2'
+                                });
+                                setQrMode('sub');
+                                setIsQrOpen(true);
+                              }}
+                            >
+                              <QrCode className="w-3.5 h-3.5 text-primary" />
+                            </Button>
+
+                            <Button 
+                              size="icon" 
+                              variant="secondary" 
+                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
+                              title="Перегенерировать ключ"
+                              onClick={() => handleRegenerateDevice(device.id)}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 text-green-400" />
+                            </Button>
+
+                            <Button 
+                              size="sm" 
+                              variant="secondary" 
+                              className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
+                              title="Скопировать ссылку подписки для Hiddify / V2Box"
+                              onClick={async () => {
+                                const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
+                                const success = await copyToClipboard(deviceSubUrl);
+                                if (success) toast.success(`Ссылка скопирована (${device.label})`);
+                              }}
+                            >
+                              <Copy className="w-3 h-3 mr-1 opacity-60" /> Ссылка
+                            </Button>
+                          </>
+                        )}
 
                         <Button 
                           size="sm" 
@@ -883,45 +934,20 @@ export default function Dashboard() {
           <LifeBuoy className="w-3.5 h-3.5 text-primary" /> Поддержка
         </Button>
       </div>
-      {/* QR & Connection Center Dialog */}
+      {/* QR & Connection Dialog */}
       <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
-        <DialogContent className="sm:max-w-[460px] bg-card border-border flex flex-col items-center p-6 sm:p-8">
+        <DialogContent className="w-[94vw] max-w-[380px] max-h-[85vh] overflow-y-auto bg-card/95 backdrop-blur-xl border-border flex flex-col items-center p-5 rounded-2xl sm:rounded-3xl shadow-2xl">
            <DialogHeader className="w-full text-center mb-3">
-              <DialogTitle className="text-xl font-bold">{qrData?.title || 'Центр подключения устройства'}</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-1">
-                Выберите подходящий способ: ссылка для приложений или файл конфигурации для роутера
+              <DialogTitle className="text-lg font-bold">{qrData?.title || 'QR-код подключения'}</DialogTitle>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {qrMode === 'awg' 
+                  ? 'Конфигурация AmneziaWG для роутеров и AmneziaVPN' 
+                  : (qrData?.subtitle || 'Универсальная подписка (Hiddify / V2Box / Happ)')}
               </p>
            </DialogHeader>
 
-           {/* Tab Selector: Apps (VLESS) vs Routers (.conf) */}
-           <div className="flex p-1 bg-muted/50 rounded-xl mb-5 w-full border border-border/50">
-             <button
-               onClick={() => {
-                 setQrMode('sub');
-               }}
-               className={cn(
-                 "flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5",
-                 qrMode === 'sub' || qrMode === 'key' ? "bg-primary text-black shadow-sm" : "text-muted-foreground hover:text-white"
-               )}
-             >
-               <Smartphone className="w-3.5 h-3.5" /> Смартфон / ПК
-             </button>
-             <button
-               onClick={() => {
-                 setQrMode('awg');
-                 if (!awgConfig) handleOpenAwgModal();
-               }}
-               className={cn(
-                 "flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5",
-                 qrMode === 'awg' ? "bg-emerald-500 text-black shadow-sm" : "text-muted-foreground hover:text-white"
-               )}
-             >
-               <Router className="w-3.5 h-3.5" /> Роутер (.conf)
-             </button>
-           </div>
-
            {qrMode === 'awg' && (
-             <div className="flex p-1 bg-muted/40 rounded-lg mb-4 w-full max-w-[280px]">
+             <div className="flex p-1 bg-muted/40 rounded-lg mb-3 w-full max-w-[260px]">
                <button
                  onClick={() => setAwgTab('wg')}
                  className={cn(
@@ -929,7 +955,7 @@ export default function Dashboard() {
                    awgTab === 'wg' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "text-muted-foreground hover:text-white"
                  )}
                >
-                 AmneziaWG (DPI-Bypass)
+                 WireGuard URL
                </button>
                <button
                  onClick={() => setAwgTab('awg')}
@@ -938,19 +964,44 @@ export default function Dashboard() {
                    awgTab === 'awg' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "text-muted-foreground hover:text-white"
                  )}
                >
-                 AmneziaVPN
+                 AmneziaVPN URL
                </button>
              </div>
            )}
 
-           <div className="bg-white p-5 rounded-2xl shadow-xl shadow-primary/10">
+           {qrMode !== 'awg' && qrData?.key && qrData?.sub && (
+             <div className="flex p-1 bg-muted/40 rounded-lg mb-3 w-full max-w-[240px]">
+               <button
+                 onClick={() => setQrMode('sub')}
+                 className={cn(
+                   "flex-1 py-1 text-[11px] font-bold rounded-md transition-all",
+                   qrMode === 'sub' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
+                 )}
+               >
+                 Подписка
+               </button>
+               <button
+                 onClick={() => setQrMode('key')}
+                 className={cn(
+                   "flex-1 py-1 text-[11px] font-bold rounded-md transition-all",
+                   qrMode === 'key' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
+                 )}
+               >
+                 Прямой ключ
+               </button>
+             </div>
+           )}
+
+           <div className="bg-white p-3.5 rounded-2xl shadow-lg shadow-primary/10">
               <QRCodeSVG 
                 value={
                   qrMode === 'awg' 
                     ? (awgTab === 'wg' ? (qrData?.wireguardUrl || awgUrl || qrData?.value || '') : (qrData?.awgUrl || awgUrl || qrData?.value || ''))
-                    : (qrData?.sub || qrData?.value || '') 
+                    : qrMode === 'sub' 
+                    ? (qrData?.sub || qrData?.value || '') 
+                    : (qrData?.key || qrData?.value || '')
                 } 
-                size={210}
+                size={175}
                 level="M"
                 includeMargin={false}
                 bgColor="#FFFFFF"
@@ -958,28 +1009,25 @@ export default function Dashboard() {
               />
            </div>
            
-           <div className="mt-5 w-full space-y-3">
+           <div className="mt-3.5 w-full space-y-2.5">
               {qrMode === 'awg' ? (
-                <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-center space-y-2">
+                <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-center space-y-2">
                    <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-400">
-                     <ShieldCheck className="w-4 h-4" /> Конфигурация для Keenetic / OpenWrt / ТВ
+                     <ShieldCheck className="w-3.5 h-3.5" /> Файл для Keenetic / OpenWrt / ТВ
                    </div>
-                   <p className="text-[10px] text-muted-foreground leading-relaxed">
-                     Файл содержит параметры обфускации (Jc, Jmin, Jmax, S1, S2, H1..H4) для полной невидимости от блокировок РКН.
-                   </p>
-                   <div className="grid grid-cols-2 gap-2 pt-1">
+                   <div className="grid grid-cols-2 gap-2 pt-0.5">
                      <Button 
                        variant="outline" 
                        size="sm" 
-                       className="h-9 text-xs bg-emerald-500 text-black hover:bg-emerald-400 font-bold border-0 rounded-lg gap-1.5"
+                       className="h-8.5 text-xs bg-emerald-500 text-black hover:bg-emerald-400 font-bold border-0 rounded-lg gap-1"
                        onClick={handleDownloadAwg}
                      >
-                       <Download className="w-3.5 h-3.5" /> Скачать .conf
+                       <Download className="w-3.5 h-3.5" /> .conf файл
                      </Button>
                      <Button 
                        variant="outline" 
                        size="sm" 
-                       className="h-9 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 rounded-lg gap-1.5"
+                       className="h-8.5 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 rounded-lg gap-1"
                        onClick={async () => {
                          const val = awgConfig || qrData?.wireguardUrl || qrData?.value || '';
                          if (val) {
@@ -988,32 +1036,32 @@ export default function Dashboard() {
                          }
                        }}
                      >
-                       <Copy className="w-3.5 h-3.5" /> Копировать текст
+                       <Copy className="w-3.5 h-3.5" /> Текст
                      </Button>
                    </div>
                 </div>
               ) : (
-                <div className="p-3.5 rounded-xl bg-muted/30 border border-border text-center space-y-2">
-                   <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">
-                     Универсальная ссылка подписки (VLESS + Hysteria2)
+                <div className="p-3 rounded-xl bg-muted/30 border border-border text-center space-y-1.5">
+                   <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">
+                     {qrMode === 'sub' ? 'Ссылка подписки (VLESS + Hysteria2)' : 'Прямой ключ VLESS Reality'}
                    </div>
-                   <div className="font-mono text-[10px] break-all line-clamp-2 text-muted-foreground">
-                     {qrData?.sub || qrData?.value}
+                   <div className="font-mono text-[9px] break-all line-clamp-2 text-muted-foreground px-1">
+                     {qrMode === 'sub' ? (qrData?.sub || qrData?.value) : (qrData?.key || qrData?.value)}
                    </div>
-                   <div className="flex items-center justify-center gap-2 pt-1">
+                   <div className="pt-0.5">
                      <Button 
                        variant="outline" 
                        size="sm" 
-                       className="h-9 text-xs bg-primary text-black hover:bg-primary/90 font-bold border-0 rounded-lg w-full gap-1.5"
+                       className="h-8.5 text-xs bg-primary text-black hover:bg-primary/90 font-bold border-0 rounded-lg w-full gap-1.5"
                        onClick={async () => {
-                         const val = qrData?.sub || qrData?.value;
+                         const val = qrMode === 'sub' ? (qrData?.sub || qrData?.value) : (qrData?.key || qrData?.value);
                          if (val) {
                            const success = await copyToClipboard(val);
-                           if (success) toast.success("Ссылка подписки скопирована");
+                           if (success) toast.success("Скопировано в буфер обмена");
                          }
                        }}
                      >
-                       <Copy className="w-3.5 h-3.5" /> Скопировать ссылку для Hiddify / V2Box
+                       <Copy className="w-3.5 h-3.5" /> Скопировать в буфер
                      </Button>
                    </div>
                 </div>
@@ -1021,7 +1069,7 @@ export default function Dashboard() {
 
               <Button 
                 variant="ghost"
-                className="w-full h-10 text-xs text-muted-foreground hover:text-white rounded-xl"
+                className="w-full h-8 text-xs text-muted-foreground hover:text-white rounded-xl"
                 onClick={() => setIsQrOpen(false)}
               >
                 Закрыть

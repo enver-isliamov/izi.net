@@ -27,14 +27,15 @@ const PLAN_OPTIONS: Record<string, { days: number; months: number }> = {
   '12m': { days: 365, months: 12 }
 };
 
-async function getServerPlan(planId: string) {
+async function getServerPlan(planId: string, serverType: string = 'WIFI') {
   const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
   const basePrice = parseInt(monthlyPriceStr, 10) || 100;
   const selected = PLAN_OPTIONS[planId];
   if (!selected) return null;
+  const multiplier = String(serverType).toUpperCase() === 'ROUTER' ? 2 : 1;
   return {
     ...selected,
-    pricePerDevice: Math.round(basePrice * selected.months)
+    pricePerDevice: Math.round(basePrice * selected.months * multiplier)
   };
 }
 
@@ -129,11 +130,11 @@ async function handleSubscriptionBuy(req: any, res: any) {
   if (req.user.id !== userId) return res.status(401).json({ error: 'Unauthorized ID mismatch' });
 
   try {
-    const plan = await getServerPlan(planId);
+    const normalizedServerType = String(serverType || 'WIFI').toUpperCase();
+    const plan = await getServerPlan(planId, normalizedServerType);
     if (!plan) return res.status(400).json({ error: 'Invalid subscription plan' });
 
     const globalDeviceLimit = clampInt(await getSystemSetting('DEVICE_LIMIT', '2'), 1, 20);
-    const normalizedServerType = String(serverType || 'WIFI').toUpperCase();
     const inboundId = 0;
     const trafficLimitMb = 102400;
     const now = new Date();
@@ -334,7 +335,8 @@ router.get('/subscription/plans', async (req, res) => {
     ];
 
     const serverTypes = [
-      { id: 'wifi', label: 'Wi-Fi / Mobile', price: 0, description: 'Стандартное Reality подключение' }
+      { id: 'wifi', label: '📱 Смартфон / ПК', price: 0, description: 'Стандартное VLESS Reality + Hysteria 2 подключение' },
+      { id: 'router', label: '📡 Роутер / Домашняя сеть', price: basePrice, description: 'Конфигурация AmneziaWG (.conf) для Keenetic, OpenWrt, TV (удвоенный ресурс)' }
     ];
 
     res.json({ periods, serverTypes, deviceLimit });

@@ -49,6 +49,13 @@ export default function Login() {
       navigate('/dashboard');
     }
 
+    // 0. Обработка ошибок OAuth от Supabase (например, если Google не включен в настройках)
+    const hash = window.location.hash;
+    if (hash && (hash.includes('error=validation_failed') || hash.includes('Unsupported+provider') || hash.includes('provider_not_enabled'))) {
+      toast.error('Авторизация через Google не включена в настройках Supabase (Authentication -> Providers -> Google). Войдите через Telegram или Email.', { duration: 7000 });
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     if (ref) {
@@ -160,44 +167,90 @@ export default function Login() {
     setIsLoading(true);
     const toastId = toast.loading('Подготовка входа через Telegram...');
     try {
-      // 1. Токен создаёт сервер (клиентская вставка блокировалась политиками базы)
+      // 1. Токен создаёт сервер (SERVICE ROLE)
       const { data: startRes } = await axios.post('/api/user/auth/telegram/start', {});
       const token = startRes?.token;
+      const targetBot = startRes?.botName || telegramBotName || 'izinet_bot';
       if (!token) throw new Error('Сервер не вернул токен входа');
 
       // 2. Открываем бота со ссылкой подтверждения
-      const link = `https://t.me/${telegramBotName}?start=${token}`;
-      toast.success('Переходим в Telegram для подтверждения...', { id: toastId });
+      const link = `https://t.me/${targetBot}?start=${token}`;
+      toast.success('Переходим в Telegram... Нажмите START в боте для входа', { id: toastId });
       window.open(link, '_blank');
 
       // 3. Опрашиваем сервер до 2 минут: подтвердил ли пользователь вход в боте
       const startedAt = Date.now();
+      let verifiedSuccessfully = false;
+
       const timer = window.setInterval(async () => {
+        if (verifiedSuccessfully) {
+          window.clearInterval(timer);
+          return;
+        }
+
+        if (Date.now() - startedAt > 120000) {
+          window.clearInterval(timer);
+          toast.error('Время ожидания входа истекло. Попробуйте снова или войдите по Email.', { id: toastId });
+          setIsLoading(false);
+          return;
+        }
+
         try {
-          if (Date.now() - startedAt > 120000) {
-            window.clearInterval(timer);
-            toast.error('Вход не подтверждён. Попробуйте снова или войдите по email.', { id: toastId });
-            return;
-          }
           const { data } = await axios.get(`/api/user/auth/telegram/verify?token=${token}`);
-          if (data?.status === 'linked' && data?.tokenHash) {
+          
+          if (data?.status === 'linked' && (data?.tokenHash || data?.actionLink)) {
+            verifiedSuccessfully = true;
             window.clearInterval(timer);
-            const { error } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: data.tokenHash });
-            if (error) throw error;
-            toast.success('Вход выполнен!', { id: toastId });
+
+            let sessionEstablished = false;
+
+            // Попытка 1: verifyOtp через magiclink
+            if (data.tokenHash) {
+              try {
+                const { data: authData, error: otpErr } = await supabase.auth.verifyOtp({ 
+                  type: 'magiclink', 
+                  token_hash: data.tokenHash 
+                });
+                if (!otpErr && authData?.session) {
+                  sessionEstablished = true;
+                }
+              } catch (e) {}
+
+              // Попытка 2: verifyOtp через email
+              if (!sessionEstablished) {
+                try {
+                  const { data: authData2, error: otpErr2 } = await supabase.auth.verifyOtp({ 
+                    type: 'email', 
+                    token_hash: data.tokenHash 
+                  });
+                  if (!otpErr2 && authData2?.session) {
+                    sessionEstablished = true;
+                  }
+                } catch (e) {}
+              }
+            }
+
+            // Попытка 3: Прямой переход по actionLink от Supabase Admin
+            if (!sessionEstablished && data.actionLink) {
+              window.location.href = data.actionLink;
+              return;
+            }
+
+            toast.success('🎉 Вход через Telegram выполнен!', { id: toastId });
+            setIsLoading(false);
             navigate('/dashboard');
           } else if (data?.status === 'no_user') {
             window.clearInterval(timer);
+            setIsLoading(false);
             toast.error(data.hint || 'Telegram не привязан к аккаунту.', { id: toastId });
           }
         } catch (e) {
-          // сетевые сбои не прерывают опрос
+          // сетевые сбои в момент опроса не прерывают цикл
         }
-      }, 3000);
+      }, 2000);
     } catch (error: any) {
       console.error('Telegram login error:', error);
       toast.error(error.message || 'Ошибка входа через Telegram', { id: toastId });
-    } finally {
       setIsLoading(false);
     }
   };
@@ -211,10 +264,21 @@ export default function Login() {
           redirectTo: `${window.location.origin}/dashboard`
         }
       });
-      if (error) throw error;
+      if (error) {
+        if (error.message?.includes('provider is not enabled') || error.message?.includes('validation_failed') || (error as any)?.code === 400) {
+          toast.error('Авторизация через Google не включена в панели Supabase (Authentication -> Providers -> Google). Воспользуйтесь входом через Telegram или Email.', { duration: 7000 });
+        } else {
+          toast.error(error.message || 'Ошибка авторизации через Google');
+        }
+        setIsLoading(false);
+      }
     } catch (error: any) {
       console.error('Google login error:', error);
-      toast.error(error.message || 'Ошибка авторизации через Google');
+      if (error.message?.includes('provider is not enabled') || error.message?.includes('validation_failed')) {
+        toast.error('Авторизация через Google не включена в панели Supabase (Authentication -> Providers -> Google). Воспользуйтесь входом через Telegram или Email.', { duration: 7000 });
+      } else {
+        toast.error(error.message || 'Ошибка авторизации через Google');
+      }
       setIsLoading(false);
     }
   };

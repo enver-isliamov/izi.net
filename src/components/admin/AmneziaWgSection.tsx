@@ -260,7 +260,34 @@ export function AmneziaWgSection() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={async () => {
+              try {
+                setSyncing(true);
+                const toastId = toast.loading('Настройка инбаунда WireGuard в 3x-ui...');
+                const res = await axios.post('/api/admin/xui/setup-wireguard-inbound', {}, {
+                  headers: { Authorization: `Bearer ${session?.access_token}` }
+                });
+                if (res.data?.success) {
+                  toast.success('Инбаунд WireGuard/Amnezia успешно настроен в 3x-ui!', { id: toastId });
+                  await fetchStatus();
+                }
+              } catch (e: any) {
+                toast.error('Ошибка настройки инбаунда: ' + (e.response?.data?.error || e.message));
+              } finally {
+                setSyncing(false);
+              }
+            }}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-xl font-bold text-xs transition-all active:scale-95"
+            title="Создать или проверить WireGuard/Amnezia инбаунд в панели 3x-ui"
+          >
+            <Server size={14} className="text-blue-400" />
+            Инбаунд в 3x-ui
+          </button>
+
           <button
             type="button"
             disabled={syncing}

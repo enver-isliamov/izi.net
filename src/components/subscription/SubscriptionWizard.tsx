@@ -255,11 +255,25 @@ export function SubscriptionWizard({ onClose, forceNew = false, targetDeviceId, 
               </div>
 
               {!isLoadingPlans && selectedServer && (
-                <div className="p-2.5 rounded-xl bg-primary/5 border border-primary/20 flex gap-2.5 items-center">
-                  <Zap className="w-4 h-4 text-primary shrink-0 animate-pulse" />
-                  <p className="text-[10px] text-muted-foreground leading-snug">
-                    Стабильное Wi-Fi/LTE подключение для любых ваших устройств без ограничений по трафику и скорости.
-                  </p>
+                <div className={cn(
+                  "p-2.5 rounded-xl border flex gap-2.5 items-center",
+                  selectedServer.id === 'router' ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-400" : "bg-primary/5 border-primary/20"
+                )}>
+                  {selectedServer.id === 'router' ? (
+                    <>
+                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <p className="text-[10px] text-muted-foreground leading-snug">
+                        <span className="font-bold text-emerald-400">Роутер / Домашняя сеть (AmneziaWG):</span> Готовый .conf файл для Keenetic, OpenWrt, Mikrotik и TV с обфускацией DPI для защиты всех устройств дома.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 text-primary shrink-0 animate-pulse" />
+                      <p className="text-[10px] text-muted-foreground leading-snug">
+                        <span className="font-bold text-foreground">Смартфон / ПК (VLESS + Hysteria 2):</span> Быстрое подключение по универсальной ссылке для Hiddify, V2Box, Happ.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
             </motion.div>

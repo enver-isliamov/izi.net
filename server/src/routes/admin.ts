@@ -386,6 +386,92 @@ router.post('/servers/:id/restore', adminOnly, async (req, res) => {
   }
 });
 
+// Автонастройка WireGuard / Amnezia инбаунда в 3x-ui
+router.post('/xui/setup-wireguard-inbound', adminOnly, async (_req: any, res) => {
+  try {
+    const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    if (!servers || servers.length === 0) {
+      return res.status(404).json({ error: 'Нет активных серверов в базе' });
+    }
+
+    const results = [];
+    for (const server of servers) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        await instance.login(true);
+        const inbounds = await instance.getInbounds();
+        
+        let wgInbound = inbounds.find((ib: any) => 
+          ib.protocol === 'wireguard' || 
+          (ib.remark && (ib.remark.toLowerCase().includes('wireguard') || ib.remark.toLowerCase().includes('amnezia')))
+        );
+
+        if (wgInbound) {
+          results.push({
+            server: server.name,
+            status: 'already_exists',
+            inboundId: wgInbound.id,
+            port: wgInbound.port,
+            protocol: wgInbound.protocol,
+            remark: wgInbound.remark,
+            clientCount: (wgInbound.clientStats as any)?.length || 0
+          });
+          continue;
+        }
+
+        const serverPrivateKey = crypto.randomBytes(32).toString('base64');
+        const port = 51821;
+
+        const newInbound = {
+          up: 0,
+          down: 0,
+          total: 0,
+          remark: 'izinet-wireguard-amnezia',
+          enable: true,
+          expiryTime: 0,
+          listen: '',
+          port,
+          protocol: 'wireguard',
+          settings: JSON.stringify({
+            secretKey: serverPrivateKey,
+            peers: [],
+            kernelMode: false,
+            mtu: 1420
+          }),
+          streamSettings: JSON.stringify({
+            network: 'domainsocket',
+            security: 'none'
+          }),
+          sniffing: JSON.stringify({
+            enabled: false,
+            destOverride: ['http', 'tls', 'quic']
+          })
+        };
+
+        const created = await instance.addInbound(newInbound);
+        results.push({
+          server: server.name,
+          status: 'created',
+          inboundId: created?.id,
+          port,
+          protocol: 'wireguard',
+          remark: newInbound.remark
+        });
+      } catch (err: any) {
+        results.push({
+          server: server.name,
+          status: 'error',
+          error: err.message
+        });
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/system/sync-servers', adminOnly, async (req, res) => {
   try {
     await MaintenanceService.syncAllServers();
