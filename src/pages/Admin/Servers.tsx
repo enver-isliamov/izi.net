@@ -228,15 +228,16 @@ export function AdminServersList() {
   };
 
   const deleteServer = async (id: string) => {
-    if (!confirm('Вы уверены?')) return;
+    if (!confirm('Вы действительно хотите удалить этот сервер?')) return;
     try {
-      await axios.delete(`/api/admin/servers/${id}`, {
+      const { data } = await axios.delete(`/api/admin/servers/${id}`, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       fetchServers();
-      toast.success('Сервер удален');
-    } catch (e) {
-      toast.error('Ошибка удаления сервера');
+      toast.success(data?.message || 'Сервер успешно удален');
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message || 'Ошибка удаления сервера';
+      toast.error(errMsg);
     }
   };
 

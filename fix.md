@@ -172,6 +172,10 @@ flow: xtls-rprx-vision
   - `scripts/git_update.sh`: Оптимизирована пошаговая запись логов для чистого отображения статуса шагов обновления (fetch, reset, update.sh).
   - `src/pages/Admin/Settings.tsx`: Добавлено модальное окно подтверждения (`showGitConfirmModal`) с информацией о безопасности данных (сохранение x-ui.db, Reality-ключей и клиентов), кнопка запуска в 1 клик и «живой» терминальный лог выполнения со статусом завершения.
   - `src/pages/Admin/Dashboard.tsx`: Добавлена быстрая ссылка-кнопка «Обновить из GitHub» в верхней панели управления дашборда для удобного перехода к обновлению без ручного ввода команд в SSH терминале.
+- [x] [2026-09-25 15:55] **SYS/SERVER-DELETE-FK-001**: Устранение блокировки удаления сервера из-за внешнего ключа `subscriptions_server_id_fkey`:
+  - `server/src/routes/admin.ts`: В роут `DELETE /servers/:id` внедрено безопасное автоматическое отвязывание подписок (`subscriptions.server_id = null`) и очистка правил роутинга перед удалением сервера.
+  - `src/pages/Admin/Servers.tsx`: Улучшена обработка ошибок и всплывающие уведомления при удалении сервера.
+  - `migrations/003_fix_server_foreign_keys.sql`: Создан скрипт миграции для перенастройки foreign key на `ON DELETE SET NULL` в Supabase SQL Editor.
 
 
 

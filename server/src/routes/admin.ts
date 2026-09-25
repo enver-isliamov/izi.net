@@ -250,10 +250,23 @@ router.put('/servers/:id', adminOnly, async (req, res) => {
 
 router.delete('/servers/:id', adminOnly, async (req, res) => {
   try {
-    const { error } = await supabase.from('vpn_servers').delete().eq('id', req.params.id);
+    const { id } = req.params;
+    // 1. Отвязываем подписки от удаляемого сервера (ставим server_id = null), чтобы не нарушать foreign key constraint
+    await supabase.from('subscriptions').update({ server_id: null }).eq('server_id', id);
+    
+    // 2. Удаляем специфичные правила маршрутизации для этого сервера (если были)
+    try {
+      await supabase.from('vpn_routing_rules').delete().eq('server_id', id);
+    } catch (_) {}
+
+    // 3. Удаляем сам сервер из таблицы vpn_servers
+    const { error } = await supabase.from('vpn_servers').delete().eq('id', id);
     if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+    res.json({ success: true, message: 'Сервер успешно удален' });
+  } catch (err: any) { 
+    console.error(`[DeleteServer] Error deleting server ${req.params.id}:`, err);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 router.post('/servers/:id/backup', adminOnly, async (req, res) => {
