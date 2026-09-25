@@ -24,7 +24,13 @@ else
     echo -e "${RED}⚠️ Файл .env не найден!${NC}"
 fi
 
-# 3. Перезапуск Docker с пересборкой
+# 3. Резервное копирование и подтягивание свежего образа 3x-ui
+echo "📦 Бэкапирую базу 3x-ui и скачиваю актуальный образ..."
+mkdir -p backups
+[ -f xui-db/x-ui.db ] && cp xui-db/x-ui.db "backups/x-ui.db.bak_$(date +%Y%m%d_%H%M%S)" || true
+docker compose pull x3-ui || echo "⚠️ Не удалось стянуть образ x3-ui, используем локальный"
+
+# 4. Перезапуск Docker с пересборкой
 echo "🐳 Пересобираю и запускаю контейнеры..."
 docker compose down
 docker compose up -d --build
