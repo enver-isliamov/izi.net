@@ -7,6 +7,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { AdminNav } from '@/components/admin/AdminNav';
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
+import { PanelManagementSection } from '@/components/admin/PanelManagementSection';
 
 export function AdminServersList() {
   const { session } = useAuth();
@@ -242,6 +243,9 @@ export function AdminServersList() {
   return (
     <div className="space-y-6">
       <AdminPageHeader title="Управление серверами" description="Синхронизация, диагностика и добавление нод" />
+
+      {/* 3x-ui Panel Version & 1-Click Update */}
+      <PanelManagementSection />
 
       <div className="flex flex-col sm:flex-row justify-between gap-4">
         <div>

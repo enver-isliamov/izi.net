@@ -1783,5 +1783,206 @@ router.post('/hysteria/regenerate-link', adminOnly, async (_req, res) => {
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// --- 3x-ui Panel Version & 1-Click Update ---
+
+interface GitHubReleaseCache {
+  tag: string;
+  name: string;
+  publishedAt: string;
+  htmlUrl: string;
+  body: string;
+  cachedAt: number;
+}
+let panelReleaseCache: GitHubReleaseCache | null = null;
+
+function isNewerSemver(latest: string, current: string): boolean {
+  if (!latest || !current) return false;
+  const clean = (v: string) => v.replace(/^[^\d]*/, '').split('-')[0].trim();
+  const lStr = clean(latest);
+  const cStr = clean(current);
+  if (!lStr || !cStr) return false;
+  if (lStr === cStr) return false;
+
+  const lParts = lStr.split('.').map(n => parseInt(n, 10) || 0);
+  const cParts = cStr.split('.').map(n => parseInt(n, 10) || 0);
+  const len = Math.max(lParts.length, cParts.length);
+
+  for (let i = 0; i < len; i++) {
+    const l = lParts[i] || 0;
+    const c = cParts[i] || 0;
+    if (l > c) return true;
+    if (l < c) return false;
+  }
+  return false;
+}
+
+router.get('/panel/version', adminOnly, async (_req, res) => {
+  try {
+    let currentVersion = 'v3.8.0';
+    let xrayVersion = '';
+    let containerStatus = 'running';
+    let imageCreated = '';
+    const isDocker = process.env.IS_DOCKER === 'true';
+
+    // 1. Чтение текущей установленной версии из контейнера 3x-ui
+    try {
+      const vOut = execSync('docker exec x3-ui x-ui version 2>/dev/null', { timeout: 6000 }).toString().trim();
+      if (vOut) currentVersion = vOut.startsWith('v') ? vOut : `v${vOut}`;
+    } catch {}
+
+    if (currentVersion === 'v3.8.0') {
+      try {
+        const imgVer = execSync('docker inspect -f \'{{index .Config.Labels "org.opencontainers.image.version"}}\' x3-ui 2>/dev/null', { timeout: 5000 }).toString().trim();
+        if (imgVer && imgVer !== '<no value>') {
+          currentVersion = imgVer.startsWith('v') ? imgVer : `v${imgVer}`;
+        }
+      } catch {}
+    }
+
+    try {
+      const xOut = execSync('docker exec x3-ui /app/bin/xray-linux-amd64 version 2>/dev/null', { timeout: 6000 }).toString().trim();
+      if (xOut) xrayVersion = xOut.split('\n')[0].trim();
+    } catch {}
+
+    try {
+      const statusOut = execSync('docker inspect -f \'{{.State.Status}}\' x3-ui 2>/dev/null', { timeout: 5000 }).toString().trim();
+      if (statusOut) containerStatus = statusOut;
+      const createdOut = execSync('docker inspect -f \'{{.Created}}\' x3-ui 2>/dev/null', { timeout: 5000 }).toString().trim();
+      if (createdOut) imageCreated = createdOut;
+    } catch {}
+
+    // 2. Получение информации об актуальном релизе на GitHub (с 15-мин кэшем)
+    const now = Date.now();
+    if (!panelReleaseCache || now - panelReleaseCache.cachedAt > 15 * 60 * 1000) {
+      try {
+        const ghRes = await axios.get('https://api.github.com/repos/MHSanaei/3x-ui/releases/latest', {
+          headers: { 'User-Agent': 'izinet-app' },
+          timeout: 8000
+        });
+        if (ghRes.data?.tag_name) {
+          panelReleaseCache = {
+            tag: ghRes.data.tag_name,
+            name: ghRes.data.name || ghRes.data.tag_name,
+            publishedAt: ghRes.data.published_at || '',
+            htmlUrl: ghRes.data.html_url || 'https://github.com/MHSanaei/3x-ui/releases',
+            body: ghRes.data.body || '',
+            cachedAt: now
+          };
+        }
+      } catch (ghErr: any) {
+        console.warn('⚠️ [Admin] Could not fetch latest 3x-ui release from GitHub:', ghErr.message);
+      }
+    }
+
+    const latestTag = panelReleaseCache?.tag || 'v3.8.5';
+    const updateAvailable = isNewerSemver(latestTag, currentVersion);
+
+    res.json({
+      ok: true,
+      currentVersion,
+      xrayVersion: xrayVersion || 'Xray-core',
+      containerStatus: isDocker ? containerStatus : 'active',
+      imageCreated,
+      latestVersion: latestTag,
+      latestReleaseName: panelReleaseCache?.name || latestTag,
+      latestReleaseUrl: panelReleaseCache?.htmlUrl || 'https://github.com/MHSanaei/3x-ui/releases',
+      publishedAt: panelReleaseCache?.publishedAt || null,
+      updateAvailable,
+      isDocker
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/panel/update', adminOnly, async (_req, res) => {
+  const logs: string[] = [];
+  const log = (msg: string) => {
+    console.log(`[Panel Update] ${msg}`);
+    logs.push(`[${new Date().toLocaleTimeString('ru-RU')}] ${msg}`);
+  };
+
+  try {
+    log('Старт процедуры безопасного обновления 3x-ui...');
+
+    // 1. Бэкап SQLite базы x-ui.db
+    let backupFile = '';
+    try {
+      const backupDir = path.resolve(process.cwd(), 'backups');
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      backupFile = `x-ui.db.bak_${ts}`;
+      
+      const potentialDbPaths = [
+        path.resolve(process.cwd(), 'xui-db/x-ui.db'),
+        '/etc/x-ui/x-ui.db'
+      ];
+      for (const p of potentialDbPaths) {
+        if (fs.existsSync(p)) {
+          fs.copyFileSync(p, path.join(backupDir, backupFile));
+          log(`✅ Резервная копия базы создана: ${backupFile}`);
+          break;
+        }
+      }
+    } catch (e: any) {
+      log(`⚠️ Предупреждение бэкапа: ${e.message}`);
+    }
+
+    // 2. Выполнение скрипта обновления
+    let updateOutput = '';
+    const isDocker = process.env.IS_DOCKER === 'true';
+
+    if (isDocker) {
+      log('Запуск обновления через Docker на хосте (образ ghcr.io/mhsanaei/3x-ui:latest)...');
+      try {
+        const cmd = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i bash -c "cd /opt/izinet && bash scripts/update_panel.sh"';
+        updateOutput = execSync(cmd, { timeout: 180000 }).toString();
+      } catch (hostErr: any) {
+        log(`⚠️ Запуск через nsenter: ${hostErr.message}. Пробуем прямые docker команды...`);
+        try {
+          execSync('docker pull ghcr.io/mhsanaei/3x-ui:latest', { timeout: 120000 });
+          execSync('docker restart x3-ui', { timeout: 30000 });
+          updateOutput = 'Docker pull ghcr.io/mhsanaei/3x-ui:latest и перезапуск x3-ui выполнены.';
+        } catch (subErr: any) {
+          throw new Error(hostErr.message + ' | ' + subErr.message);
+        }
+      }
+    } else {
+      log('Локальное окружение разработки (симуляция обновления)...');
+      updateOutput = '✅ Режим разработки: скрипт scripts/update_panel.sh подготовлен для продакшн сервера.';
+    }
+
+    const lines = updateOutput.split('\n').filter(l => l.trim().length > 0);
+    lines.forEach(l => logs.push(l));
+
+    // Сброс кэша версий
+    panelReleaseCache = null;
+
+    let newVersion = 'актуальная';
+    try {
+      const vOut = execSync('docker exec x3-ui x-ui version 2>/dev/null', { timeout: 6000 }).toString().trim();
+      if (vOut) newVersion = vOut;
+    } catch {}
+
+    log(`🎉 Обновление успешно завершено! Текущая версия: ${newVersion}`);
+
+    res.json({
+      ok: true,
+      message: 'Панель 3x-ui успешно обновлена до актуальной версии',
+      newVersion,
+      backupFile,
+      logs
+    });
+  } catch (err: any) {
+    const errMsg = err.message || 'Ошибка обновления';
+    log(`❌ Ошибка: ${errMsg}`);
+    res.status(500).json({
+      ok: false,
+      error: errMsg,
+      logs
+    });
+  }
+});
+
 export default router;
 

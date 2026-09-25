@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
+import { PanelManagementSection } from '@/components/admin/PanelManagementSection';
 import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
 import { toast } from 'sonner';
 
@@ -1021,6 +1022,9 @@ bash update.sh`}
             </div>
           </div>
         </motion.div>
+
+        {/* 3x-ui Panel Version & 1-Click Update Section */}
+        <PanelManagementSection />
 
         {/* Hysteria2 Section */}
         <Hysteria2Section />
