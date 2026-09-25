@@ -251,6 +251,8 @@ export default function AdminUsers() {
 
   return (
     <div className="space-y-6">
+      <AdminNav />
+
       <AdminPageHeader
         title="Пользователи"
         description="Подписки, балансы, устройства и продление"
@@ -284,8 +286,6 @@ export default function AdminUsers() {
           </button>
         </div>
       </AdminPageHeader>
-
-      <AdminNav />
 
       <div className="bg-secondary/30 rounded-2xl border border-white/5 overflow-hidden backdrop-blur-sm">
         {/* Desktop Table */}

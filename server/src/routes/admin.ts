@@ -1795,9 +1795,38 @@ interface GitHubReleaseCache {
 }
 let panelReleaseCache: GitHubReleaseCache | null = null;
 
+function extractCleanSemver(raw?: string | null): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  // Очистка от ANSI кодов терминала
+  const clean = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\[[0-9;]*m/g, '').trim();
+  // Исключаем текст справки, сообщений bash и ОС
+  if (/usages|subcommands|OS release|alpine|control menu|error|cannot|unknown/i.test(clean)) {
+    return null;
+  }
+  // Проверяем построчно
+  const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const m = line.match(/^v?(\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?)$/i);
+    if (m && m[1]) {
+      return m[1].startsWith('v') ? m[1] : `v${m[1]}`;
+    }
+  }
+  // Ищем тег вида v3.8.5
+  const m2 = clean.match(/\b(v[1-9]\d*\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?)\b/);
+  if (m2 && m2[1]) return m2[1];
+
+  const m3 = clean.match(/\b([1-9]\d*\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?)\b/);
+  if (m3 && m3[1]) return `v${m3[1]}`;
+
+  return null;
+}
+
 function isNewerSemver(latest: string, current: string): boolean {
   if (!latest || !current) return false;
-  const clean = (v: string) => v.replace(/^[^\d]*/, '').split('-')[0].trim();
+  const clean = (v: string) => {
+    const m = v.match(/\b(\d+\.\d+(?:\.\d+)?)\b/);
+    return m ? m[1] : '';
+  };
   const lStr = clean(latest);
   const cStr = clean(current);
   if (!lStr || !cStr) return false;
@@ -1818,30 +1847,66 @@ function isNewerSemver(latest: string, current: string): boolean {
 
 router.get('/panel/version', adminOnly, async (_req, res) => {
   try {
-    let currentVersion = 'v3.8.0';
+    let currentVersion = 'v3.8.5';
     let xrayVersion = '';
     let containerStatus = 'running';
     let imageCreated = '';
     const isDocker = process.env.IS_DOCKER === 'true';
 
-    // 1. Чтение текущей установленной версии из контейнера 3x-ui
+    // 1. Безопасное определение версии установленной панели 3x-ui
+    let detectedVersion: string | null = null;
+
+    // А. Из OCI метки образа (org.opencontainers.image.version)
     try {
-      const vOut = execSync('docker exec x3-ui x-ui version 2>/dev/null', { timeout: 6000 }).toString().trim();
-      if (vOut) currentVersion = vOut.startsWith('v') ? vOut : `v${vOut}`;
+      const imgVer = execSync('docker inspect -f \'{{index .Config.Labels "org.opencontainers.image.version"}}\' x3-ui 2>/dev/null', { timeout: 4000 }).toString().trim();
+      detectedVersion = extractCleanSemver(imgVer);
     } catch {}
 
-    if (currentVersion === 'v3.8.0') {
+    // Б. Из имени референса OCI (org.opencontainers.image.ref.name)
+    if (!detectedVersion) {
       try {
-        const imgVer = execSync('docker inspect -f \'{{index .Config.Labels "org.opencontainers.image.version"}}\' x3-ui 2>/dev/null', { timeout: 5000 }).toString().trim();
-        if (imgVer && imgVer !== '<no value>') {
-          currentVersion = imgVer.startsWith('v') ? imgVer : `v${imgVer}`;
-        }
+        const refName = execSync('docker inspect -f \'{{index .Config.Labels "org.opencontainers.image.ref.name"}}\' x3-ui 2>/dev/null', { timeout: 4000 }).toString().trim();
+        detectedVersion = extractCleanSemver(refName);
       } catch {}
     }
 
+    // В. Из всех лейблов контейнера
+    if (!detectedVersion) {
+      try {
+        const allLabels = execSync('docker inspect -f \'{{range $k, $v := .Config.Labels}}{{$k}}={{$v}} {{end}}\' x3-ui 2>/dev/null', { timeout: 4000 }).toString().trim();
+        detectedVersion = extractCleanSemver(allLabels);
+      } catch {}
+    }
+
+    // Г. Из названия / тега образа
+    if (!detectedVersion) {
+      try {
+        const imgName = execSync('docker inspect -f \'{{.Config.Image}}\' x3-ui 2>/dev/null', { timeout: 4000 }).toString().trim();
+        detectedVersion = extractCleanSemver(imgName);
+      } catch {}
+    }
+
+    // Д. Проверка файла версии в контейнере
+    if (!detectedVersion) {
+      try {
+        const fileVer = execSync('docker exec x3-ui sh -c "cat /app/version 2>/dev/null || cat /etc/x-ui/version 2>/dev/null" 2>/dev/null', { timeout: 4000 }).toString().trim();
+        detectedVersion = extractCleanSemver(fileVer);
+      } catch {}
+    }
+
+    // Проверка соответствия запущенного контейнера свежескачанному образу
+    let isSameAsLatestPull = false;
+    try {
+      const runningImg = execSync('docker inspect -f \'{{.Image}}\' x3-ui 2>/dev/null', { timeout: 4000 }).toString().trim();
+      const latestImg = execSync('docker inspect -f \'{{.Id}}\' ghcr.io/mhsanaei/3x-ui:latest 2>/dev/null', { timeout: 4000 }).toString().trim();
+      if (runningImg && latestImg && runningImg === latestImg) {
+        isSameAsLatestPull = true;
+      }
+    } catch {}
+
     try {
       const xOut = execSync('docker exec x3-ui /app/bin/xray-linux-amd64 version 2>/dev/null', { timeout: 6000 }).toString().trim();
-      if (xOut) xrayVersion = xOut.split('\n')[0].trim();
+      if (xOut) xrayVersion = xOut.split('\n')[0].replace(/\([^\)]+\)/g, '').trim();
     } catch {}
 
     try {
@@ -1875,7 +1940,16 @@ router.get('/panel/version', adminOnly, async (_req, res) => {
     }
 
     const latestTag = panelReleaseCache?.tag || 'v3.8.5';
-    const updateAvailable = isNewerSemver(latestTag, currentVersion);
+
+    if (detectedVersion) {
+      currentVersion = detectedVersion;
+    } else if (isSameAsLatestPull) {
+      currentVersion = latestTag;
+    } else {
+      currentVersion = 'v3.8.5';
+    }
+
+    const updateAvailable = !isSameAsLatestPull && isNewerSemver(latestTag, currentVersion);
 
     res.json({
       ok: true,
@@ -1960,8 +2034,9 @@ router.post('/panel/update', adminOnly, async (_req, res) => {
 
     let newVersion = 'актуальная';
     try {
-      const vOut = execSync('docker exec x3-ui x-ui version 2>/dev/null', { timeout: 6000 }).toString().trim();
-      if (vOut) newVersion = vOut;
+      const vOut = execSync('docker inspect -f \'{{index .Config.Labels "org.opencontainers.image.version"}}\' x3-ui 2>/dev/null', { timeout: 4000 }).toString().trim();
+      const cVer = extractCleanSemver(vOut);
+      if (cVer) newVersion = cVer;
     } catch {}
 
     log(`🎉 Обновление успешно завершено! Текущая версия: ${newVersion}`);

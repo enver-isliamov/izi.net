@@ -123,14 +123,14 @@ export default function AdminPayments() {
 
   return (
     <div className="space-y-6">
+      <AdminNav />
+
       <AdminPageHeader
         title="Платежи"
         description="Подтверждение платежей и история пополнений"
         onRefresh={fetchPayments}
         refreshing={loading}
       />
-
-      <AdminNav />
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">

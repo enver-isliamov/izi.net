@@ -16,7 +16,7 @@ interface AdminPageHeaderProps {
  */
 export function AdminPageHeader({ title, description, onRefresh, refreshing, children }: AdminPageHeaderProps) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-2">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <h1 className="text-xl sm:text-2xl font-semibold text-white leading-tight">{title}</h1>
         {description && (

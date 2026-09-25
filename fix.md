@@ -155,11 +155,11 @@ flow: xtls-rprx-vision
 - [x] [2026-09-25 10:00] **SYS/PANEL-UPDATE-001**: Автоматизация безопасного обновления панели 3x-ui до актуальной версии:
   - `update.sh`: Добавлен автоматический бэкап базы `xui-db/x-ui.db` и принудительный `docker compose pull x3-ui` перед перезапуском контейнеров (ранее `docker compose up -d --build` оставлял устаревший локальный образ 3x-ui).
   - `scripts/update_panel.sh`: Создан автономный скрипт для обновления панели 3x-ui в 1 команду на VPS без необходимости полной пересборки izinet-app. Включает сохранение бэкапа SQLite, пулл свежего образа `ghcr.io/mhsanaei/3x-ui:latest`, пересоздание контейнера, валидацию Reality inbound и проверку версий.
-- [x] [2026-09-25 10:15] **FEAT/PANEL-ONE-CLICK-001**: Добавление мониторинга версии 3x-ui и обновления в 1 клик прямо из веб-панели управления izinet:
-  - `server/src/routes/admin.ts`: Реализованы эндпоинты `GET /api/admin/panel/version` (сравнение установленной версии контейнера с актуальным релизом на GitHub через REST API) и `POST /api/admin/panel/update` (безопасное авто-обновление через Docker с предварительным бэкапом базы `x-ui.db` и выводом логов).
-  - `Dockerfile`: Добавлен пакет `docker-cli-compose` для поддержки `docker compose` команд из контейнера приложения.
-  - `src/components/admin/PanelManagementSection.tsx`: Создан компонент мониторинга версий 3x-ui с бейджами («Версия актуальна» / «Доступно обновление: v3.8.x»), карточками версий ядра Xray, модальным окном подтверждения с описанием шагов и терминальным логом операций в реальном времени.
-  - Компонент интегрирован в страницы «Серверы» (`src/pages/Admin/Servers.tsx`) и «Настройки» (`src/pages/Admin/Settings.tsx`).
+- [x] [2026-09-25 10:45] **BUG/PANEL-VERSION-001**: Исправлено отображение версии панели 3x-ui и наложение текста в админке:
+  - Проблема: Команда `docker exec x3-ui x-ui version` в Alpine-контейнере 3x-ui не поддерживала аргумент `version` и выводила 20-строчный справочный текст меню с ANSI-символами (`The OS release is: alpine | x-ui control menu usages...`). Это приводило к тому, что текст вылезал за пределы блока и перекрывал соседнюю карточку «Свежий релиз GitHub».
+  - `server/src/routes/admin.ts`: Реализована функция `extractCleanSemver()` с фильтрацией системных сообщений/меню и парсингом валидных semver-тегов (`v3.8.5`). Добавлено чтение версии напрямую из OCI-меток Docker (`org.opencontainers.image.version`, `org.opencontainers.image.ref.name`), проверка равенства ID запущенного контейнера со свежим pull-образом `ghcr.io/mhsanaei/3x-ui:latest`, а также очистка имени Xray-core.
+  - `src/components/admin/PanelManagementSection.tsx`: Добавлена клиентская санитизация `formatDisplayVersion()`, классы `min-w-0`, `overflow-hidden` и `truncate` на всех информационных карточках, что гарантирует абсолютную изоляцию блоков и предотвращает вылезание текста.
+  - `scripts/update_panel.sh`: Заменена команда `x-ui version` на чистый `docker inspect` статуса контейнера.
 
 
 

@@ -61,8 +61,8 @@ fi
 echo -e "\n${YELLOW}🩺 Шаг 5/5: Проверка запущенной версии и статуса...${NC}"
 docker ps --filter "name=x3-ui" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
 
-echo -e "\n${GREEN}🔍 Проверка версии внутри контейнера:${NC}"
-docker exec x3-ui x-ui version 2>/dev/null || echo "x-ui работает"
+echo -e "\n${GREEN}🔍 Проверка статуса внутри контейнера:${NC}"
+docker inspect -f 'Статус: {{.State.Status}} | Образ: {{.Config.Image}}' x3-ui 2>/dev/null || echo "x-ui работает"
 docker exec x3-ui /app/bin/xray-linux-amd64 version 2>/dev/null | head -n 1 || echo "Xray запущен"
 
 echo -e "\n${GREEN}====================================================${NC}"

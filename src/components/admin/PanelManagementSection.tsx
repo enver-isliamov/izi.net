@@ -33,6 +33,17 @@ interface PanelVersionData {
   isDocker?: boolean;
 }
 
+function formatDisplayVersion(ver?: string | null): string {
+  if (!ver) return 'v3.8.5';
+  const clean = ver.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\[[0-9;]*m/g, '').trim();
+  if (/usages|subcommands|OS release|alpine|control menu/i.test(clean) || clean.includes('\n')) {
+    const match = clean.match(/\b(v[1-9]\d*\.\d+(?:\.\d+)?)\b/);
+    if (match) return match[1];
+    return 'v3.8.5';
+  }
+  return clean.length > 16 ? clean.slice(0, 16) : clean;
+}
+
 export function PanelManagementSection() {
   const { session } = useAuth();
   const [data, setData] = useState<PanelVersionData | null>(null);
@@ -178,24 +189,30 @@ export function PanelManagementSection() {
       {/* Info Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {/* Current Version */}
-        <div className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-2">
+        <div className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-2 min-w-0 overflow-hidden">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Установленная версия:</span>
-            <Cpu size={14} className="text-blue-400" />
+            <Cpu size={14} className="text-blue-400 shrink-0" />
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold font-mono text-white">
-              {loading && !data ? '...' : data?.currentVersion || 'v3.8.0'}
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span 
+              className="text-xl font-bold font-mono text-white truncate max-w-full"
+              title={formatDisplayVersion(data?.currentVersion)}
+            >
+              {loading && !data ? '...' : formatDisplayVersion(data?.currentVersion)}
             </span>
-            <span className="text-[10px] font-mono text-zinc-500">Docker</span>
+            <span className="text-[10px] font-mono text-zinc-500 shrink-0">Docker</span>
           </div>
-          <div className="text-[11px] text-zinc-400 font-mono truncate">
+          <div 
+            className="text-[11px] text-zinc-400 font-mono truncate"
+            title={data?.xrayVersion || 'Xray-core (VLESS Reality)'}
+          >
             {data?.xrayVersion || 'Xray-core (VLESS Reality)'}
           </div>
         </div>
 
         {/* Latest Available Release */}
-        <div className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-2">
+        <div className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-2 min-w-0 overflow-hidden">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Свежий релиз GitHub:</span>
             {data?.latestReleaseUrl && (
@@ -203,43 +220,45 @@ export function PanelManagementSection() {
                 href={data.latestReleaseUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-[10px]"
+                className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-[10px] shrink-0"
                 title="Открыть релиз на GitHub"
               >
                 GitHub <ExternalLink size={10} />
               </a>
             )}
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold font-mono text-emerald-400">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="text-xl font-bold font-mono text-emerald-400 truncate">
               {loading && !data ? '...' : data?.latestVersion || 'v3.8.5'}
             </span>
             {data?.updateAvailable && (
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 shrink-0">
                 Новое
               </span>
             )}
           </div>
-          <div className="text-[11px] text-zinc-400 font-mono flex items-center gap-1">
-            <Clock size={11} className="text-zinc-500" />
-            {data?.publishedAt 
-              ? new Date(data.publishedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
-              : 'Актуальный'}
+          <div className="text-[11px] text-zinc-400 font-mono flex items-center gap-1 truncate">
+            <Clock size={11} className="text-zinc-500 shrink-0" />
+            <span className="truncate">
+              {data?.publishedAt 
+                ? new Date(data.publishedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+                : 'Актуальный'}
+            </span>
           </div>
         </div>
 
         {/* Safety & Backups */}
-        <div className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-2 sm:col-span-2 md:col-span-1">
+        <div className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-2 sm:col-span-2 md:col-span-1 min-w-0 overflow-hidden">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Безопасность:</span>
-            <ShieldCheck size={14} className="text-emerald-400" />
+            <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
           </div>
           <div className="text-xs text-zinc-300 leading-relaxed">
             Автобэкап базы <code className="text-blue-300 font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">x-ui.db</code> перед накатом обновления.
           </div>
-          <div className="text-[11px] text-emerald-400/90 flex items-center gap-1">
-            <CheckCircle2 size={12} />
-            Ключи Reality и клиенты сохраняются
+          <div className="text-[11px] text-emerald-400/90 flex items-center gap-1 truncate">
+            <CheckCircle2 size={12} className="shrink-0" />
+            <span className="truncate">Ключи Reality и клиенты сохраняются</span>
           </div>
         </div>
       </div>

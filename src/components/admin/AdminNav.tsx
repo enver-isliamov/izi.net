@@ -16,7 +16,7 @@ export function AdminNav() {
   ];
 
   return (
-    <div className="mb-6 grid grid-cols-2 gap-1 p-1 bg-white/5 rounded-xl border border-white/5 sm:flex sm:items-stretch sm:gap-2">
+    <div className="grid grid-cols-2 gap-1 p-1 bg-white/5 rounded-xl border border-white/5 sm:flex sm:items-stretch sm:gap-2">
       {navItems.map((item) => {
         const isActive = location.pathname === item.path;
         return (

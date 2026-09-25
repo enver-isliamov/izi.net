@@ -388,14 +388,14 @@ bash update.sh`;
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6">
+      <AdminNav />
+
       <AdminPageHeader
         title="Настройки"
         description="Тарифы, платёжные параметры и системные значения"
         onRefresh={fetchSettings}
       />
-
-      <AdminNav />
 
       {tableMissing && (
         <motion.div 
@@ -1023,12 +1023,6 @@ bash update.sh`}
           </div>
         </motion.div>
 
-        {/* 3x-ui Panel Version & 1-Click Update Section */}
-        <PanelManagementSection />
-
-        {/* Hysteria2 Section */}
-        <Hysteria2Section />
-
         <div className="sticky bottom-6 flex justify-end">
           <button
             type="submit"
@@ -1040,6 +1034,12 @@ bash update.sh`}
           </button>
         </div>
       </form>
+
+      {/* 3x-ui Panel Version & 1-Click Update Section */}
+      <PanelManagementSection />
+
+      {/* Hysteria2 Section */}
+      <Hysteria2Section />
     </div>
   );
 }

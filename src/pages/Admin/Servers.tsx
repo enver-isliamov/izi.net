@@ -241,8 +241,13 @@ export function AdminServersList() {
   };
 
   return (
-    <div className="space-y-6">
-      <AdminPageHeader title="Управление серверами" description="Синхронизация, диагностика и добавление нод" />
+    <div className="space-y-6 pt-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 pb-2 border-b border-white/5">
+        <div>
+          <h2 className="text-lg sm:text-xl font-semibold text-white leading-tight">Управление серверами</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Синхронизация, диагностика и добавление нод</p>
+        </div>
+      </div>
 
       {/* 3x-ui Panel Version & 1-Click Update */}
       <PanelManagementSection />
