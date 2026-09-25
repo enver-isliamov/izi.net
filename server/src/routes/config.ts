@@ -56,7 +56,7 @@ router.get('/universal-link-visible', (req, res) => {
   res.json({ visible: true });
 });
 
-router.get('/sub/:id', async (req, res) => {
+router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/universal/:id', '/subscription/:id'], async (req, res) => {
   const { id } = req.params;
   const { deviceId } = req.query;
 

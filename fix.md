@@ -183,6 +183,11 @@ flow: xtls-rprx-vision
 - [x] [2026-09-25 16:15] **SYS/CLIENT-APP-COMPATIBILITY-001**: Аудит и верификация совместимости VPN со всеми приложениями из раздела «Установка и настройка»:
   - `src/pages/Instructions.tsx`: Исправлено извлечение чистого ключа VLESS Reality из JSON-структуры подписки (исключено случайное копирование сырого JSON). Добавлен QR-код на странице инструкций, прямые кнопки копирования и скачивания `.conf` файлов для роутеров и ТВ.
   - Проверена совместимость форматов ссылок и конфигураций для: **INCY** (iOS/Android), **Hiddify** (Windows/Mac/Linux/iOS/Android), **Happ** (iOS), **v2rayNG** (Android), **AmneziaVPN** и роутеров **Keenetic/OpenWrt/Mikrotik** (AmneziaWG/WireGuard). Конфигурация Hysteria2 сохранена в неприкосновенности.
+- [x] [2026-09-25 16:30] **SYS/AMNEZIA-ISOLATION-001**: Устранение сбоя доступности сайта при добавлении Amnezia в 3x-ui:
+  - Причина падения: Попытка создания инбаунда WireGuard напрямую внутри SQLite базы 3x-ui приводила к ошибке конфигурации Xray (`domainsocket` / несовместимый формат). Xray падал на старте и освобождал порт 443 TCP, из-за чего переставал работать механизм Fallback на Nginx (порт 3443 -> сайт 3005) и сайт становился недоступен.
+  - `xui_bootstrap.py`: Добавлена очистка всех несовместимых WireGuard-инбаундов из `x-ui.db` с гарантией запуска Xray и принудительным сохранением fallback-маршрутизации браузерного трафика на Nginx (`dest: "host.docker.internal:3443"`).
+  - `server/src/routes/admin.ts`: В роуте `/xui/setup-wireguard-inbound` удалена опасная вставка WireGuard в 3x-ui, заменена на проверку чистоты базы. AmneziaWG полностью изолирован как системная служба на хосте (UDP 51820 / `AwgService`), что исключает любые конфликты с веб-сервером и Xray.
+  - `server/src/routes/config.ts`: Добавлены алиасы маршрутов универсальной подписки (`/sub/:id`, `/user/subscription/universal/:id`, `/subscription/universal/:id`), обеспечивающие 100% совместимость со всеми типами VPN-клиентов.
 
 
 

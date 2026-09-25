@@ -247,13 +247,19 @@ def ensure_default_inbound(cursor):
 
 
 def cleanup_conflicting_wg_inbound(cursor):
-    """Удаляет входящее соединение WireGuard из 3x-ui на порту 51820, так как AmneziaWG работает на хосте."""
+    """Удаляет входящие соединения WireGuard из 3x-ui, так как AmneziaWG работает изолированно на хосте."""
     if not table_exists(cursor, "inbounds"):
         return 0
-    cursor.execute("DELETE FROM inbounds WHERE port=51820 OR remark='izinet-amnezia-wireguard';")
+    cursor.execute("""
+        DELETE FROM inbounds 
+        WHERE protocol='wireguard' 
+           OR port IN (51820, 51821) 
+           OR remark LIKE '%wireguard%' 
+           OR remark LIKE '%amnezia%';
+    """)
     deleted = cursor.rowcount
     if deleted > 0:
-        print(f"xui-bootstrap: removed {deleted} conflicting wireguard inbound(s) on port 51820 (AWG is host-managed)")
+        print(f"xui-bootstrap: removed {deleted} conflicting wireguard/amnezia inbound(s) (AWG is host-managed)")
     return deleted
 
 

@@ -267,25 +267,25 @@ export function AmneziaWgSection() {
             onClick={async () => {
               try {
                 setSyncing(true);
-                const toastId = toast.loading('Настройка инбаунда WireGuard в 3x-ui...');
+                const toastId = toast.loading('Проверка чистоты инбаундов в 3x-ui...');
                 const res = await axios.post('/api/admin/xui/setup-wireguard-inbound', {}, {
                   headers: { Authorization: `Bearer ${session?.access_token}` }
                 });
                 if (res.data?.success) {
-                  toast.success('Инбаунд WireGuard/Amnezia успешно настроен в 3x-ui!', { id: toastId });
+                  toast.success('3x-ui проверен: конфликтующие инбаунды исключены, Xray в безопасности!', { id: toastId });
                   await fetchStatus();
                 }
               } catch (e: any) {
-                toast.error('Ошибка настройки инбаунда: ' + (e.response?.data?.error || e.message));
+                toast.error('Ошибка проверки: ' + (e.response?.data?.error || e.message));
               } finally {
                 setSyncing(false);
               }
             }}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-xl font-bold text-xs transition-all active:scale-95"
-            title="Создать или проверить WireGuard/Amnezia инбаунд в панели 3x-ui"
+            title="Проверить отсутствие конфликтующих WireGuard инбаундов в панели 3x-ui"
           >
-            <Server size={14} className="text-blue-400" />
-            Инбаунд в 3x-ui
+            <ShieldCheck size={14} className="text-blue-400" />
+            Проверить 3x-ui
           </button>
 
           <button

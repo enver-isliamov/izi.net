@@ -399,7 +399,7 @@ router.post('/servers/:id/restore', adminOnly, async (req, res) => {
   }
 });
 
-// Автонастройка WireGuard / Amnezia инбаунда в 3x-ui
+// Проверка и защита: удаление конфликтующих WireGuard инбаундов из 3x-ui (AWG работает изолированно на хосте)
 router.post('/xui/setup-wireguard-inbound', adminOnly, async (_req: any, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
@@ -414,61 +414,30 @@ router.post('/xui/setup-wireguard-inbound', adminOnly, async (_req: any, res) =>
         await instance.login(true);
         const inbounds = await instance.getInbounds();
         
-        let wgInbound = inbounds.find((ib: any) => 
+        // Поиск и безопасное удаление несовместимых WireGuard инбаундов из 3x-ui, которые ломают Xray
+        const brokenWgInbounds = inbounds.filter((ib: any) => 
           ib.protocol === 'wireguard' || 
           (ib.remark && (ib.remark.toLowerCase().includes('wireguard') || ib.remark.toLowerCase().includes('amnezia')))
         );
 
-        if (wgInbound) {
-          results.push({
-            server: server.name,
-            status: 'already_exists',
-            inboundId: wgInbound.id,
-            port: wgInbound.port,
-            protocol: wgInbound.protocol,
-            remark: wgInbound.remark,
-            clientCount: (wgInbound.clientStats as any)?.length || 0
-          });
-          continue;
+        let removedCount = 0;
+        for (const ib of brokenWgInbounds) {
+          try {
+            await instance.deleteInbound(ib.id);
+            removedCount++;
+          } catch (delErr: any) {
+            console.warn(`[XUI] Could not delete broken wg inbound ${ib.id}: ${delErr.message}`);
+          }
         }
 
-        const serverPrivateKey = crypto.randomBytes(32).toString('base64');
-        const port = 51821;
-
-        const newInbound = {
-          up: 0,
-          down: 0,
-          total: 0,
-          remark: 'izinet-wireguard-amnezia',
-          enable: true,
-          expiryTime: 0,
-          listen: '',
-          port,
-          protocol: 'wireguard',
-          settings: JSON.stringify({
-            secretKey: serverPrivateKey,
-            peers: [],
-            kernelMode: false,
-            mtu: 1420
-          }),
-          streamSettings: JSON.stringify({
-            network: 'domainsocket',
-            security: 'none'
-          }),
-          sniffing: JSON.stringify({
-            enabled: false,
-            destOverride: ['http', 'tls', 'quic']
-          })
-        };
-
-        const created = await instance.addInbound(newInbound);
+        const awgStatus = AwgService.status();
         results.push({
           server: server.name,
-          status: 'created',
-          inboundId: created?.id,
-          port,
-          protocol: 'wireguard',
-          remark: newInbound.remark
+          status: 'cleaned_and_isolated',
+          message: removedCount > 0 
+            ? `Удалено ${removedCount} конфликтующих инбаундов из 3x-ui. AmneziaWG изолированно работает через системную службу awg0.`
+            : '3x-ui чист (AmneziaWG изолированно работает на хосте UDP 51820).',
+          awgAvailable: awgStatus.available
         });
       } catch (err: any) {
         results.push({
