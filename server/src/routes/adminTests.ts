@@ -177,6 +177,83 @@ router.get('/tests', adminOnly, async (_req, res) => {
     }
   }
 
+  // 5. E2E Тестирование подписок и клиентских ссылок (Hiddify / v2rayNG / Happ)
+  try {
+    const { data: sampleSub } = await supabase
+      .from('subscriptions')
+      .select('id, user_id, status, v2ray_config, expires_at')
+      .in('status', ['active', 'trial', 'limited'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!sampleSub) {
+      push('Подписки (E2E)', 'sub-check-sample', 'Тестовая подписка в базе', 'warn', 'нет активных подписок для E2E теста');
+    } else {
+      push('Подписки (E2E)', 'sub-check-sample', 'Тестовая подписка в базе', 'ok', `ID: ${sampleSub.id.slice(0, 8)}... (${sampleSub.status})`);
+
+      const port = Number(process.env.PORT) || (process.env.NODE_ENV === 'production' || process.env.IS_DOCKER ? 3005 : 3000);
+      const localBase = `http://127.0.0.1:${port}`;
+
+      // 5.1 Проверка генератора по роуту /api/sub/:id
+      try {
+        const t = Date.now();
+        const subResp = await axios.get(`${localBase}/api/sub/${sampleSub.id}`, { timeout: 6000 });
+        if (subResp.status === 200 && subResp.data) {
+          const rawDecoded = Buffer.from(subResp.data, 'base64').toString('utf-8');
+          const lines = rawDecoded.split('\n').map(l => l.trim()).filter(Boolean);
+          const vlessCount = lines.filter(l => l.startsWith('vless://')).length;
+          const hyCount = lines.filter(l => l.startsWith('hysteria2://')).length;
+          const awgCount = lines.filter(l => l.startsWith('wireguard://') || l.startsWith('awg://')).length;
+
+          const hasColls = new Set(lines).size !== lines.length;
+
+          push('Подписки (E2E)', 'sub-api-endpoint', 'Генерация /api/sub/:id (Base64)', 'ok',
+            `Узлов: ${lines.length} (VLESS: ${vlessCount}, Hy2: ${hyCount}, AWG: ${awgCount})`, Date.now() - t);
+
+          if (hasColls) {
+            push('Подписки (E2E)', 'sub-collisions', 'Уникальность узлов в подписке', 'warn', 'обнаружены дублирующие строки конфигурации');
+          } else {
+            push('Подписки (E2E)', 'sub-collisions', 'Уникальность узлов в подписке', 'ok', 'все имена и ссылки уникальны');
+          }
+        } else {
+          push('Подписки (E2E)', 'sub-api-endpoint', 'Генерация /api/sub/:id (Base64)', 'fail', `HTTP ${subResp.status}`);
+        }
+      } catch (err: any) {
+        push('Подписки (E2E)', 'sub-api-endpoint', 'Генерация /api/sub/:id (Base64)', 'fail', err.message);
+      }
+
+      // 5.2 Проверка прямого роута /sub/:id (без /api)
+      try {
+        const t = Date.now();
+        const directResp = await axios.get(`${localBase}/sub/${sampleSub.id}`, { timeout: 6000 });
+        push('Подписки (E2E)', 'sub-direct-endpoint', 'Прямой импорт /sub/:id (Hiddify/Happ)', 
+          directResp.status === 200 ? 'ok' : 'fail',
+          directResp.status === 200 ? 'доступен без префикса /api' : `HTTP ${directResp.status}`,
+          Date.now() - t
+        );
+      } catch (err: any) {
+        push('Подписки (E2E)', 'sub-direct-endpoint', 'Прямой импорт /sub/:id (Hiddify/Happ)', 'fail', err.message);
+      }
+
+      // 5.3 Проверка AmneziaWG .conf конфига
+      try {
+        const t = Date.now();
+        const confResp = await axios.get(`${localBase}/api/subscription/awg-conf/${sampleSub.id}`, { timeout: 6000 });
+        const hasInterface = confResp.data && typeof confResp.data === 'string' && confResp.data.includes('[Interface]');
+        push('Подписки (E2E)', 'sub-awg-conf', 'Генерация AmneziaWG .conf файла', 
+          hasInterface ? 'ok' : 'warn',
+          hasInterface ? 'валидный WireGuard/AWG .conf' : 'файл не содержит секцию [Interface]',
+          Date.now() - t
+        );
+      } catch (err: any) {
+        push('Подписки (E2E)', 'sub-awg-conf', 'Генерация AmneziaWG .conf файла', 'warn', err.message);
+      }
+    }
+  } catch (e: any) {
+    push('Подписки (E2E)', 'sub-e2e-error', 'E2E проверка подписок', 'fail', e.message);
+  }
+
   const summary = {
     total: results.length,
     ok: results.filter((r) => r.status === 'ok').length,
