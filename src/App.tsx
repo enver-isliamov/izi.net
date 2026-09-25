@@ -26,6 +26,7 @@ import PrivacyPolicy from '@/pages/PrivacyPolicy';
 import AdminDashboard from '@/pages/Admin/Dashboard';
 import AdminUsers from '@/pages/Admin/Users';
 import AdminSettings from '@/pages/Admin/Settings';
+import AdminMaintenance from '@/pages/Admin/Maintenance';
 import AdminPayments from '@/pages/Admin/Payments';
 import AdminRouting from '@/pages/Admin/Routing';
 import AdminTests from '@/pages/Admin/Tests';
@@ -96,6 +97,8 @@ export default function App() {
                       <Route path="/" element={<AdminDashboard />} />
                       <Route path="/users" element={<AdminUsers />} />
                       <Route path="/payments" element={<AdminPayments />} />
+                      <Route path="/maintenance" element={<AdminMaintenance />} />
+                      <Route path="/service" element={<Navigate to="/admin/maintenance" replace />} />
                       <Route path="/settings" element={<AdminSettings />} />
                       <Route path="/routing" element={<AdminRouting />} />
                       <Route path="/tests" element={<AdminTests />} />

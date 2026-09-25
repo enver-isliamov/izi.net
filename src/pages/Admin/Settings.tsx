@@ -1,25 +1,30 @@
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2, Lock, Unlock, Copy, Archive, Download, Trash2, HardDrive, Terminal, ArrowUpCircle, Sparkles, X } from 'lucide-react';
+import { motion } from 'motion/react';
+import { 
+  Save, 
+  RefreshCw, 
+  ShieldCheck, 
+  Wallet, 
+  AlertCircle, 
+  Globe, 
+  Lock, 
+  Unlock, 
+  Key, 
+  Eye, 
+  EyeOff, 
+  Tag, 
+  SlidersHorizontal,
+  Layers
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
-import { PanelManagementSection } from '@/components/admin/PanelManagementSection';
-import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
-import { AmneziaWgSection } from '@/components/admin/AmneziaWgSection';
 import { toast } from 'sonner';
 
 interface Setting {
   key: string;
   value: string;
-}
-
-interface BackupItem {
-  filename: string;
-  size_bytes: number;
-  size_formatted: string;
-  created_at: string;
 }
 
 export default function AdminSettings() {
@@ -36,12 +41,8 @@ export default function AdminSettings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
-  const [backups, setBackups] = useState<BackupItem[]>([]);
-  const [isBackingUp, setIsBackingUp] = useState(false);
-  const [loadingBackups, setLoadingBackups] = useState(false);
+  const [showKeys, setShowKeys] = useState<{ [key: string]: boolean }>({});
   const [editLocks, setEditLocks] = useState<Record<string, boolean>>({
     MONTHLY_PRICE: true,
     PUBLIC_URL: true,
@@ -55,94 +56,13 @@ export default function AdminSettings() {
     setEditLocks(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const toggleKey = (key: string) => {
+    setShowKeys(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   useEffect(() => {
     fetchSettings();
-    fetchBackups();
   }, [session]);
-
-  const fetchBackups = async () => {
-    try {
-      setLoadingBackups(true);
-      const { data } = await axios.get('/api/admin/system/backups', {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      if (data.ok && Array.isArray(data.backups)) {
-        setBackups(data.backups);
-      }
-    } catch (e: any) {
-      console.error('Failed to fetch backups:', e);
-    } finally {
-      setLoadingBackups(false);
-    }
-  };
-
-  const handleCreateBackup = async () => {
-    try {
-      setIsBackingUp(true);
-      setSystemLogs(prev => [
-        ...prev,
-        '[Старт] Создание полной резервной копии VPS (3x-ui x-ui.db, Hysteria2, .env, Supabase snapshot)...',
-        '[Система] Упаковка в tar.gz архив...'
-      ]);
-      toast.loading('Создание бэкапа VPS...', { id: 'sys-backup' });
-      
-      const { data } = await axios.post('/api/admin/system/backup', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-
-      if (data.ok) {
-        toast.success(`Бэкап создан: ${data.filename} (${data.size_formatted})`, { id: 'sys-backup' });
-        setSystemLogs(prev => [
-          ...prev,
-          `[Успех] Резервная копия сохранена: ${data.filename} (${data.size_formatted})`,
-          `[Инфо] Сохранённые компоненты: ${(data.saved_files || []).join(', ')}`
-        ]);
-        fetchBackups();
-      } else {
-        toast.error(`Ошибка создания бэкапа: ${data.error}`, { id: 'sys-backup' });
-      }
-    } catch (e: any) {
-      const errMsg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка бэкапа] ${errMsg}`]);
-      toast.error('Ошибка бэкапа: ' + errMsg, { id: 'sys-backup' });
-    } finally {
-      setIsBackingUp(false);
-    }
-  };
-
-  const handleDownloadBackup = async (filename: string) => {
-    try {
-      toast.loading(`Скачивание ${filename}...`, { id: 'dl-backup' });
-      const response = await axios.get(`/api/admin/system/backups/${encodeURIComponent(filename)}/download`, {
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      toast.success('Архив успешно скачан на ваше устройство!', { id: 'dl-backup' });
-    } catch (e: any) {
-      toast.error('Ошибка скачивания: ' + (e.response?.data?.error || e.message), { id: 'dl-backup' });
-    }
-  };
-
-  const handleDeleteBackup = async (filename: string) => {
-    if (!confirm(`Вы действительно хотите удалить бэкап ${filename}?`)) return;
-    try {
-      await axios.delete(`/api/admin/system/backups/${encodeURIComponent(filename)}`, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      toast.success('Бэкап удален');
-      fetchBackups();
-    } catch (e: any) {
-      toast.error('Ошибка удаления: ' + (e.response?.data?.error || e.message));
-    }
-  };
 
   const fetchSettings = async () => {
     try {
@@ -172,17 +92,10 @@ export default function AdminSettings() {
     }
   };
 
-  const [showKeys, setShowKeys] = useState<{ [key: string]: boolean }>({});
-
-  const toggleKey = (key: string) => {
-    setShowKeys(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setSaving(true);
-      // Clean values
       const cleanSettings = {
         MONTHLY_PRICE: settings.MONTHLY_PRICE?.trim() || '100',
         PUBLIC_URL: settings.PUBLIC_URL?.trim() || '',
@@ -201,7 +114,7 @@ export default function AdminSettings() {
       });
       
       toast.success('Настройки успешно сохранены');
-      fetchSettings(); // Refresh to be sure
+      fetchSettings();
     } catch (e: any) {
       console.error(e);
       toast.error(e.response?.data?.error || 'Ошибка при сохранении');
@@ -210,249 +123,14 @@ export default function AdminSettings() {
     }
   };
 
-  const [isRepairing, setIsRepairing] = useState(false);
-  const [isDiagnosing, setIsDiagnosing] = useState(false);
-  const [isGitUpdating, setIsGitUpdating] = useState(false);
-  const [gitUpdateLogs, setGitUpdateLogs] = useState<string[]>([]);
-  const [showGitConfirmModal, setShowGitConfirmModal] = useState(false);
-  const [showGitLogs, setShowGitLogs] = useState(false);
-  const [systemLogs, setSystemLogs] = useState<string[]>([
-    '[Система] Журнал операций панели изинет.',
-    '[Система] Выберите действие — результат появится здесь.',
-    '[Подсказка] Полная диагностика — в разделе «Тесты». Обновление сервера — кнопкой «Обновить из GitHub» или командой bash update.sh.'
-  ]);
-
-  const handleCopyDeployScript = () => {
-    const script = `cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh`;
-    navigator.clipboard.writeText(script);
-    toast.success('Команда обновления скопирована!');
-  };
-
-  const handleStartGitUpdate = async () => {
-    setShowGitConfirmModal(false);
-    setIsGitUpdating(true);
-    setShowGitLogs(true);
-    setGitUpdateLogs([
-      `[${new Date().toLocaleTimeString('ru-RU')}] 🚀 Запуск: cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh`,
-      `[${new Date().toLocaleTimeString('ru-RU')}] ⏳ Отправка команды на VPS хост...`
-    ]);
-    const toastId = toast.loading('Запуск обновления из GitHub...', { id: 'git-update' });
-
-    try {
-      const { data } = await axios.post('/api/admin/system/git-update', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-
-      if (data.ok) {
-        toast.loading('Выполняется обновление из GitHub и пересборка контейнеров...', { id: 'git-update' });
-        
-        let pollCount = 0;
-        const pollInterval = setInterval(async () => {
-          pollCount++;
-          try {
-            const statusRes = await axios.get('/api/admin/system/git-update/status', {
-              headers: { Authorization: `Bearer ${session?.access_token}` }
-            });
-            
-            if (statusRes.data?.logs?.length) {
-              setGitUpdateLogs(statusRes.data.logs);
-            }
-
-            if (statusRes.data?.completed) {
-              clearInterval(pollInterval);
-              setIsGitUpdating(false);
-              toast.success('🎉 Обновление из GitHub успешно завершено!', { id: 'git-update', duration: 8000 });
-              setSystemLogs(prev => [
-                ...prev,
-                `[Успех] Обновление из GitHub ветки main и перезапуск Docker завершены!`,
-                ...(statusRes.data.logs.slice(-6))
-              ]);
-            } else if (statusRes.data?.error) {
-              clearInterval(pollInterval);
-              setIsGitUpdating(false);
-              toast.error('Процесс завершился с ошибками. Проверьте лог.', { id: 'git-update' });
-            }
-          } catch (pollErr) {
-            // В момент пересборки контейнер может кратковременно перезапускаться
-            if (pollCount > 30) {
-              // Через 75 секунд если сервер ожил — проверяем финализацию
-            }
-          }
-        }, 2500);
-
-        // Таймаут на всякий случай — 5 минут
-        setTimeout(() => {
-          clearInterval(pollInterval);
-          setIsGitUpdating(false);
-        }, 300000);
-      }
-    } catch (e: any) {
-      setIsGitUpdating(false);
-      const errMsg = e.response?.data?.error || e.message;
-      toast.error('Ошибка запуска обновления: ' + errMsg, { id: 'git-update' });
-      setGitUpdateLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
-    }
-  };
-
-  const handleRepairVless = async () => {
-    try {
-      setIsRepairing(true);
-      setSystemLogs([
-        '[Старт] Запуск автоматического ремонта VLESS/Reality и сожительства с Nginx...',
-        '[Система] Пожалуйста подождите, операция может занять до 20 секунд...'
-      ]);
-      toast.loading('Запуск авторемонта Reality + Nginx...', { id: 'sys-repair' });
-      
-      const { data } = await axios.post('/api/admin/system/repair-vless', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      
-      const outLines = (data.stdout || '').split('\n');
-      const errLines = (data.stderr || '').split('\n');
-      const lines = [...outLines, ...errLines].filter((l: string) => l.trim().length > 0);
-      
-      setSystemLogs(lines.length ? lines : ['[Успех] Скрипт не вернул логов, но завершился успешно.']);
-      
-      if (data.success) {
-        toast.success(data.message || 'Авторемонт успешно выполнен!', { id: 'sys-repair' });
-      } else {
-        toast.error('Ремонт выполнен с предупреждениями', { id: 'sys-repair' });
-      }
-    } catch (e: any) {
-      const errMsg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
-      toast.error('Ошибка ремонта: ' + errMsg, { id: 'sys-repair' });
-    } finally {
-      setIsRepairing(false);
-    }
-  };
-
-  const handleDiagnoseVps = async () => {
-    try {
-      setIsDiagnosing(true);
-      setSystemLogs([
-        '[Старт] Запрос диагностики backend-API...',
-        '[Система] Пожалуйста подождите...'
-      ]);
-      toast.loading('Запуск диагностики сервера...', { id: 'sys-diag' });
-      
-      const { data } = await axios.post('/api/admin/system/diagnose-vps', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      
-      const outLines = (data.stdout || '').split('\n');
-      const errLines = (data.stderr || '').split('\n');
-      const lines = [...outLines, ...errLines].filter((l: string) => l.trim().length > 0);
-      
-      setSystemLogs(lines.length ? lines : ['[Успех] Скрипт диагностики завершен.']);
-      
-      if (data.success) {
-        toast.success(data.message || 'Диагностика успешно выполнена!', { id: 'sys-diag' });
-      } else {
-        toast.error('Диагностика выполнена с предупреждениями', { id: 'sys-diag' });
-      }
-    } catch (e: any) {
-      const errMsg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
-      toast.error('Ошибка диагностики: ' + errMsg, { id: 'sys-diag' });
-    } finally {
-      setIsDiagnosing(false);
-    }
-  };
-
-  const handleFullSync = async () => {
-    try {
-      setIsSyncing(true);
-      toast.loading('Запуск глобальной синхронизации...', { id: 'sync-all' });
-      await axios.post('/api/admin/system/sync-all', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      toast.success('Синхронизация запущена в фоновом режиме', { id: 'sync-all' });
-    } catch (e: any) {
-      toast.error('Ошибка: ' + (e.response?.data?.error || e.message), { id: 'sync-all' });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const [isSyncingInbounds, setIsSyncingInbounds] = useState(false);
-
-  const handleCheckAwg = async () => {
-    try {
-      const { data } = await axios.get('/api/admin/awg/status', {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      const lines = [
-        data.available
-          ? `[AWG] AmneziaWG работает: порт ${data.port}/udp, подсеть ${data.subnet}, клиентов ${data.peers?.length || 0}`
-          : `[AWG] ${data.message}`
-      ];
-      (data.peers || []).slice(0, 15).forEach((p: any) => {
-        lines.push(`[AWG] ${p.name} · ${p.address} · ${(Number(p.totalBytes || 0) / 1048576).toFixed(1)} МБ · ${p.online ? 'online' : 'offline'}`);
-      });
-      setSystemLogs(lines);
-      toast.success('Статус AmneziaWG получен');
-    } catch (e: any) {
-      const msg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка] ${msg}`]);
-      toast.error('Не удалось получить статус AmneziaWG');
-    }
-  };
-
-  const handleSyncAllInbounds = async () => {
-    try {
-      setIsSyncingInbounds(true);
-      setSystemLogs(['[Старт] Развожу клиентов по всем включённым инбаундам...']);
-      const { data } = await axios.post('/api/admin/system/sync-clients-all-inbounds', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-      const lines = [
-        `[Готово] Устройств обработано: ${data.devices}, добавлено клиентов в инбаунды: ${data.addedTotal}, ошибок: ${data.failedTotal}`
-      ];
-      (data.report || []).slice(0, 12).forEach((r: any) => {
-        lines.push(`[${r.server}] ${r.device}: добавлено [${r.added.join(', ') || '—'}], уже было [${r.existing.join(', ') || '—'}]`);
-      });
-      setSystemLogs(lines);
-      toast.success('Клиенты разведены по всем инбаундам');
-    } catch (e: any) {
-      const msg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка] ${msg}`]);
-      toast.error('Не удалось развести клиентов: ' + msg);
-    } finally {
-      setIsSyncingInbounds(false);
-    }
-  };
-
-  const handleRegenerateLinks = async () => {
-    try {
-      setIsRegenerating(true);
-      setSystemLogs([
-        '[Старт] Обновление всех VPN-ссылок (Reality: chrome fp, актуальный publicKey)...',
-        '[Система] Подождите, операция может занять до 30 секунд...'
-      ]);
-      toast.loading('Обновление VPN-ссылок...', { id: 'regen-links' });
-
-      const { data } = await axios.post('/api/admin/system/regenerate-all-links', {}, {
-        headers: { Authorization: `Bearer ${session?.access_token}` }
-      });
-
-      const msg = `Обновлено: ${data.updated} из ${data.total} подписок` + (data.errors ? `, ошибок: ${data.errors}` : '');
-      setSystemLogs(prev => [...prev, `[Успех] ${msg}`]);
-      toast.success(msg, { id: 'regen-links' });
-    } catch (e: any) {
-      const errMsg = e.response?.data?.error || e.message;
-      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
-      toast.error('Ошибка: ' + errMsg, { id: 'regen-links' });
-    } finally {
-      setIsRegenerating(false);
-    }
-  };
-
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
-        <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-        <p className="text-muted-foreground font-mono text-xs uppercase tracking-widest">Loading Settings...</p>
+      <div className="space-y-6">
+        <AdminNav />
+        <div className="flex flex-col items-center justify-center min-h-[350px] gap-4">
+          <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+          <p className="text-muted-foreground font-mono text-xs uppercase tracking-widest">Загрузка настроек...</p>
+        </div>
       </div>
     );
   }
@@ -462,8 +140,8 @@ export default function AdminSettings() {
       <AdminNav />
 
       <AdminPageHeader
-        title="Настройки"
-        description="Тарифы, платёжные параметры и системные значения"
+        title="Настройки платформы"
+        description="Тарифы подписок, платёжный шлюз Enot.io, промокоды и ссылки"
         onRefresh={fetchSettings}
       />
 
@@ -477,32 +155,31 @@ export default function AdminSettings() {
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-red-400">Ошибка базы данных: Таблица не найдена</h3>
             <p className="text-xs text-red-200/70 leading-relaxed">
-              Таблица <code className="bg-red-500/20 px-1 rounded text-red-300">public.settings</code> отсутствует в вашем Supabase проекте. 
-              Без неё настройки платежей не будут сохраняться. Пожалуйста, выполните SQL скрипт из файла 
-              <code className="bg-white/5 px-1 rounded text-white italic ml-1">MULTI_SERVER_SETUP.md</code> в панели SQL Editor вашего Supabase.
+              Таблица <code className="bg-red-500/20 px-1 rounded text-red-300">public.settings</code> отсутствует в Supabase. 
+              Выполните миграцию <code className="bg-white/5 px-1 rounded text-white italic ml-1">000_full_schema.sql</code> в SQL Editor.
             </p>
           </div>
         </motion.div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-8">
+      <form onSubmit={handleSave} className="space-y-6">
         {/* Core Platform config Section */}
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+          className="p-5 sm:p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
         >
-          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
             <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
               <Globe size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-white">Домен платформы</h2>
-              <p className="text-xs text-muted-foreground">Настройки основного домена для генерации ссылок на оплату и подписки</p>
+              <h2 className="text-base sm:text-lg font-semibold text-white">Домен и базовая цена</h2>
+              <p className="text-xs text-muted-foreground">Основной URL приложения и тарифные расчеты</p>
             </div>
           </div>
 
-          <div className="grid gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">PUBLIC_URL (Домен приложения)</label>
               <div className="relative group">
@@ -521,17 +198,18 @@ export default function AdminSettings() {
                   type="button"
                   onClick={() => toggleLock('PUBLIC_URL')}
                   className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  title={editLocks.PUBLIC_URL ? 'Разблокировать для редактирования' : 'Заблокировать'}
                 >
                   {editLocks.PUBLIC_URL ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
                 </button>
               </div>
               <p className="text-[10px] text-muted-foreground ml-1">
-                Укажите точный домен (вместе с https://), на котором размещен сайт.
+                Точный домен с https:// для формирования ссылок на оплату и вебхуков.
               </p>
             </div>
             
             <div className="space-y-2">
-              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Базовая стоимость за месяц (₽)</label>
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Базовая стоимость за 1 месяц (₽)</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-emerald-400 transition-colors">
                   <Wallet size={18} />
@@ -548,12 +226,13 @@ export default function AdminSettings() {
                   type="button"
                   onClick={() => toggleLock('MONTHLY_PRICE')}
                   className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  title={editLocks.MONTHLY_PRICE ? 'Разблокировать для редактирования' : 'Заблокировать'}
                 >
                   {editLocks.MONTHLY_PRICE ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
                 </button>
               </div>
               <p className="text-[10px] text-muted-foreground ml-1">
-                Цена за 1 месяц подписки с одного устройства. При покупке на более длительный срок скидки применяться не будут.
+                Базовая цена 1 месяца подписки за 1 устройство. Для роутеров применяется коэффициент x2.
               </p>
             </div>
           </div>
@@ -561,23 +240,23 @@ export default function AdminSettings() {
 
         {/* Enot.io Section */}
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+          className="p-5 sm:p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
         >
-          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
             <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
               <Wallet size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-white">Enot.io Integration</h2>
-              <p className="text-xs text-muted-foreground">Настройки платежного шлюза для пополнения баланса</p>
+              <h2 className="text-base sm:text-lg font-semibold text-white">Платёжный шлюз Enot.io</h2>
+              <p className="text-xs text-muted-foreground">Параметры кассы и секретные ключи для пополнения баланса</p>
             </div>
           </div>
 
-          <div className="grid gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <div className="space-y-2">
-              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Shop ID</label>
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Shop ID (UUID кассы)</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
                   <ShieldCheck size={18} />
@@ -588,7 +267,7 @@ export default function AdminSettings() {
                   value={settings.ENOT_MERCHANT_ID}
                   onChange={(e) => setSettings({ ...settings, ENOT_MERCHANT_ID: e.target.value })}
                   className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
-                  placeholder="UUID кассы Enot.io"
+                  placeholder="UUID кассы"
                 />
                 <button
                   type="button"
@@ -600,574 +279,143 @@ export default function AdminSettings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Секретный ключ</label>
-                <div className="relative group">
-                  <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
-                    <Key size={18} />
-                  </div>
-                  <input
-                    type={showKeys.ENOT_SECRET_KEY ? "text" : "password"}
-                    autoComplete="new-password"
-                    disabled={editLocks.ENOT_SECRET_KEY}
-                    name={`enot_sk1_${Date.now()}`}
-                    value={settings.ENOT_SECRET_KEY}
-                    onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
-                    className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-[80px] focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
-                    placeholder="Из кабинета Enot.io"
-                  />
-                  <div className="absolute inset-y-0 right-4 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => toggleLock('ENOT_SECRET_KEY')}
-                      className="text-muted-foreground hover:text-white transition-colors"
-                    >
-                      {editLocks.ENOT_SECRET_KEY ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleKey('ENOT_SECRET_KEY')}
-                      className="text-muted-foreground hover:text-white transition-colors"
-                    >
-                      {showKeys.ENOT_SECRET_KEY ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Секретный ключ #1</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
+                  <Key size={18} />
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Дополнительный ключ</label>
-                <div className="relative group">
-                   <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
-                    <Key size={18} />
-                  </div>
-                  <input
-                    type={showKeys.ENOT_SECRET_KEY2 ? "text" : "password"}
-                    autoComplete="new-password"
-                    disabled={editLocks.ENOT_SECRET_KEY2}
-                    name={`enot_sk2_${Date.now()}`}
-                    value={settings.ENOT_SECRET_KEY2}
-                    onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
-                    className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-[80px] focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] focus:ring-0 transition-all font-mono text-sm [appearance:textfield]"
-                    placeholder="Из кабинета Enot.io (Дополнительный)"
-                  />
-                  <div className="absolute inset-y-0 right-4 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => toggleLock('ENOT_SECRET_KEY2')}
-                      className="text-muted-foreground hover:text-white transition-colors"
-                    >
-                      {editLocks.ENOT_SECRET_KEY2 ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleKey('ENOT_SECRET_KEY2')}
-                      className="text-muted-foreground hover:text-white transition-colors"
-                    >
-                      {showKeys.ENOT_SECRET_KEY2 ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
+                <input
+                  type={showKeys.ENOT_SECRET_KEY ? 'text' : 'password'}
+                  disabled={editLocks.ENOT_SECRET_KEY}
+                  value={settings.ENOT_SECRET_KEY}
+                  onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY: e.target.value })}
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-20 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                  placeholder="Secret Key 1"
+                />
+                <div className="absolute inset-y-0 right-4 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleKey('ENOT_SECRET_KEY')}
+                    className="text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {showKeys.ENOT_SECRET_KEY ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleLock('ENOT_SECRET_KEY')}
+                    className="text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {editLocks.ENOT_SECRET_KEY ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                  </button>
                 </div>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3 p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
-              <AlertCircle className="text-blue-400 shrink-0 mt-0.5" size={16} />
-              <div className="space-y-1">
-                <p className="text-[11px] text-blue-200">Как настроить ключи</p>
-                <p className="text-[10px] text-blue-200/60 leading-relaxed">
-                  1. В поле Shop ID укажите идентификатор кассы из Enot.io. <br />
-                  2. В первое поле ключа вставьте <b>секретный ключ кассы</b> для заголовка x-api-key. <br />
-                  3. Во второе поле вставьте <b>дополнительный ключ</b> для проверки HMAC-подписи webhook.
-                </p>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Promo Codes Section */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
-        >
-          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
-            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-              <Key size={20} />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Промокоды на пробный период (24ч)</h2>
-              <p className="text-xs text-muted-foreground">Настройка промокодов для активации бесплатного теста на 24 часа для новых пользователей</p>
-            </div>
-          </div>
-
-          <div className="grid gap-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-white">Активность функции промокодов</p>
-                <p className="text-xs text-muted-foreground">Включить или полностью отключить поле ввода промокодов у пользователей</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSettings({ ...settings, PROMO_CODES_ENABLED: 'true' })}
-                  className={`px-4 py-2 text-xs font-bold uppercase rounded-lg border transition-all ${
-                    settings.PROMO_CODES_ENABLED === 'true'
-                      ? 'bg-blue-500 border-blue-500 text-white'
-                      : 'bg-white/5 border-white/5 text-muted-foreground hover:bg-white/10'
-                  }`}
-                >
-                  Включено
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSettings({ ...settings, PROMO_CODES_ENABLED: 'false' })}
-                  className={`px-4 py-2 text-xs font-bold uppercase rounded-lg border transition-all ${
-                    settings.PROMO_CODES_ENABLED === 'false'
-                      ? 'bg-red-500 border-red-500 text-white'
-                      : 'bg-white/5 border-white/5 text-muted-foreground hover:bg-white/10'
-                  }`}
-                >
-                  Отключено
-                </button>
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Список промокодов (слов/кодов)</label>
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Секретный ключ #2 (Webhooks)</label>
               <div className="relative group">
-                <textarea
-                  disabled={editLocks.PROMO_CODES_LIST}
-                  value={settings.PROMO_CODES_LIST || ''}
-                  onChange={(e) => setSettings({ ...settings, PROMO_CODES_LIST: e.target.value })}
-                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-4 pr-12 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm min-h-[100px]"
-                  placeholder="PROMO24&#10;FREE24&#10;IZINET24"
+                <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-blue-400 transition-colors">
+                  <Key size={18} />
+                </div>
+                <input
+                  type={showKeys.ENOT_SECRET_KEY2 ? 'text' : 'password'}
+                  disabled={editLocks.ENOT_SECRET_KEY2}
+                  value={settings.ENOT_SECRET_KEY2}
+                  onChange={(e) => setSettings({ ...settings, ENOT_SECRET_KEY2: e.target.value })}
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-20 focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                  placeholder="Secret Key 2"
                 />
+                <div className="absolute inset-y-0 right-4 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleKey('ENOT_SECRET_KEY2')}
+                    className="text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {showKeys.ENOT_SECRET_KEY2 ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleLock('ENOT_SECRET_KEY2')}
+                    className="text-muted-foreground hover:text-white transition-colors"
+                  >
+                    {editLocks.ENOT_SECRET_KEY2 ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Promo Codes & Monetization Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-5 sm:p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
+        >
+          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
+            <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+              <Tag size={20} />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold text-white">Промокоды и политика ссылок</h2>
+              <p className="text-xs text-muted-foreground">Управление бонусами и доступом к универсальным ссылкам</p>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-black/30 rounded-xl border border-white/5">
+              <div className="space-y-0.5">
+                <span className="text-sm font-medium text-white">Активация промокодов</span>
+                <p className="text-xs text-muted-foreground">Разрешить пользователям вводить промокоды при пополнении баланса</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={settings.PROMO_CODES_ENABLED === 'true'}
+                  onChange={(e) => setSettings({ ...settings, PROMO_CODES_ENABLED: e.target.checked ? 'true' : 'false' })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between ml-1">
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Список промокодов (Формат: КОД:СКИДКА_ИЛИ_РУБЛИ)</label>
                 <button
                   type="button"
                   onClick={() => toggleLock('PROMO_CODES_LIST')}
-                  className="absolute top-3 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-white"
                 >
-                  {editLocks.PROMO_CODES_LIST ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                  {editLocks.PROMO_CODES_LIST ? <Lock size={12} className="text-red-400" /> : <Unlock size={12} className="text-green-400" />}
+                  <span className="text-[10px]">{editLocks.PROMO_CODES_LIST ? 'Заблокировано' : 'Редактируется'}</span>
                 </button>
               </div>
-              <p className="text-[10px] text-muted-foreground ml-1">
-                Введите промокоды, каждый с новой строки или через запятую. Регистр букв игнорируется (все будет приведено к верхнему регистру).
-              </p>
+              <textarea
+                disabled={editLocks.PROMO_CODES_LIST}
+                value={settings.PROMO_CODES_LIST}
+                onChange={(e) => setSettings({ ...settings, PROMO_CODES_LIST: e.target.value })}
+                rows={3}
+                className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl p-3 font-mono text-xs focus:outline-none focus:border-purple-500/50 transition-all placeholder:text-muted-foreground/30"
+                placeholder="START2026:50 (50 рублей бонус)&#10;IZI100:100 (100 рублей бонус)"
+              />
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-blue-500/5 rounded-xl border border-blue-500/10">
-              <AlertCircle className="text-blue-400 shrink-0 mt-0.5" size={16} />
-              <div className="space-y-1">
-                <p className="text-[11px] text-blue-200">Как это работает для пользователей</p>
-                <p className="text-[10px] text-blue-200/60 leading-relaxed">
-                  Пользователь заходит в раздел подписок и в поле промокода вводит одно из указанных ключевых слов. <br />
-                  Если промокод валиден и пользователь еще никогда не использовал пробный период через промокод, <br />
-                  для него автоматически за пару секунд генерируется VLESS подписка на 24 часа. <br />
-                  По окончании пробного периода пользователь сможет продлить подписку стандартным способом, пополнив баланс.
-                </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-black/30 rounded-xl border border-white/5">
+              <div className="space-y-0.5">
+                <span className="text-sm font-medium text-white">Режим универсальной ссылки подписки</span>
+                <p className="text-xs text-muted-foreground">Кому отображать единую ссылку на все устройства</p>
               </div>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Universal Link Visibility Section */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="p-6 bg-secondary/30 rounded-2xl border border-white/5 backdrop-blur-sm space-y-6"
-        >
-          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
-            <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
-              <Globe size={20} />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Универсальная ссылка подписки у юзеров</h2>
-              <p className="text-xs text-muted-foreground">Настройка видимости общей ссылки (одна ссылка на все устройства) во избежание обхода оплаты за доп. устройства</p>
-            </div>
-          </div>
-
-          <div className="grid gap-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-white">Статус отображения ссылки</p>
-                <p className="text-xs text-muted-foreground">Кто будет видеть общую ссылку v2ray/vless подписки на дашборде</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <select
-                  value={settings.UNIVERSAL_LINK_STATUS || 'all'}
-                  onChange={(e) => setSettings({ ...settings, UNIVERSAL_LINK_STATUS: e.target.value })}
-                  className="bg-secondary/50 border border-white/15 text-white text-xs font-bold rounded-lg px-3 py-2 outline-none focus:border-purple-500 transition-all font-mono"
-                >
-                  <option value="all">Показывать всем (All Users)</option>
-                  <option value="pro">Только Pro-пользователям (Pro Only)</option>
-                  <option value="none">Скрыть для всех (No/Hidden)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3 p-4 bg-purple-500/5 rounded-xl border border-purple-500/10">
-              <AlertCircle className="text-purple-400 shrink-0 mt-0.5" size={16} />
-              <div className="space-y-1">
-                <p className="text-[11px] text-purple-200">Монетизация на несколько устройств</p>
-                <p className="text-[10px] text-purple-200/60 leading-relaxed">
-                  По умолчанию пользователи получают универсальный URL подписки, который включает в себя ключи для ВСЕХ их добавленных устройств. <br />
-                  Если вы хотите монетизировать каждое устройство отдельно (чтобы пользователь платил за каждое дополнительное устройство отдельно и не мог поделиться одной ссылкой на все девайсы): <br />
-                  1. Выберите режим <b>"Только Pro-пользователям"</b> или <b>"Скрыть для всех"</b>. <br />
-                  2. Пользователи без Pro статуса вынуждены будут копировать и настраивать конфигурации индивидуально для каждого устройства, а администратор сможет брать плату за доп. слоты. <br />
-                  3. Вы можете даровать право "Pro" отдельным надежным пользователям через панель "Пользователи".
-                </p>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* System Maintenance Section */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="p-6 bg-red-500/5 rounded-2xl border border-red-500/10 backdrop-blur-sm space-y-6"
-        >
-          <div className="flex items-center gap-3 pb-4 border-b border-red-500/10">
-            <div className="p-2 bg-red-500/10 rounded-lg text-red-400">
-              <RefreshCw size={20} />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Обслуживание системы</h2>
-              <p className="text-xs text-muted-foreground">Глобальные инструменты управления инфраструктурой</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Sync Card */}
-            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">Синхронизация X-UI</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Принудительно переподключит всех активных пользователей к X-UI на всех серверах.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={isSyncing}
-                onClick={handleFullSync}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-red-500/20"
+              <select
+                value={settings.UNIVERSAL_LINK_STATUS || 'all'}
+                onChange={(e) => setSettings({ ...settings, UNIVERSAL_LINK_STATUS: e.target.value })}
+                className="bg-secondary/50 border border-white/15 text-white text-xs font-bold rounded-lg px-3 py-2 outline-none focus:border-purple-500 transition-all font-mono"
               >
-                {isSyncing ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                Запустить синхронизацию
-              </button>
-            </div>
-
-            {/* GitHub Deploy / 1-Click Update Card */}
-            <div className="p-5 bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/30 rounded-2xl flex flex-col justify-between border border-blue-500/30 space-y-4 shadow-lg shadow-blue-500/10 col-span-1 md:col-span-2 lg:col-span-2 relative overflow-hidden group">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="p-1.5 bg-blue-500/20 text-blue-400 rounded-lg border border-blue-500/30">
-                      <Sparkles size={16} className="animate-pulse" />
-                    </span>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      Обновление VPS из GitHub в 1 клик
-                      <span className="text-[10px] bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded-full border border-blue-500/30">
-                        main → update.sh
-                      </span>
-                    </h3>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
-                    Автоматически скачивает свежий код ветки <code className="text-blue-300 font-mono text-[11px]">main</code>, сбрасывает локальные изменения, пересобирает контейнеры Docker, восстанавливает .env, запускает bootstrap SQLite и накатывает свежие маршруты.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {gitUpdateLogs.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowGitLogs(!showGitLogs)}
-                      className="flex items-center gap-1.5 px-3 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl text-xs font-mono border border-white/10 transition-colors"
-                    >
-                      <Terminal size={14} />
-                      <span>{showGitLogs ? 'Скрыть лог' : 'Лог обновления'}</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    disabled={isGitUpdating}
-                    onClick={() => setShowGitConfirmModal(true)}
-                    className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/30 ring-2 ring-blue-500/30 transition-all active:scale-95 shrink-0"
-                  >
-                    {isGitUpdating ? (
-                      <>
-                        <RefreshCw className="animate-spin" size={14} />
-                        <span>Обновление сервера...</span>
-                      </>
-                    ) : (
-                      <>
-                        <ArrowUpCircle size={15} />
-                        <span>Обновить всё из GitHub (update.sh)</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Command Preview with Copy */}
-              <div className="relative group">
-                <div className="bg-black/50 border border-blue-500/20 rounded-xl p-3 font-mono text-[11px] text-blue-200 overflow-x-auto whitespace-pre flex items-center justify-between">
-                  <span>cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh</span>
-                  <button
-                    type="button"
-                    onClick={handleCopyDeployScript}
-                    className="p-1.5 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 rounded-lg transition-colors border border-blue-500/30 ml-2 shrink-0"
-                    title="Копировать команду для SSH терминала"
-                  >
-                    <Copy size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Live Git Update Logs Viewer */}
-              {showGitLogs && gitUpdateLogs.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-white/10 animate-in fade-in duration-200">
-                  <div className="flex justify-between items-center text-xs font-mono text-zinc-400">
-                    <span className="flex items-center gap-1.5 text-blue-400">
-                      <Terminal size={13} />
-                      Журнал выполнения git update & docker compose:
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setGitUpdateLogs([])}
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300 underline"
-                    >
-                      Очистить
-                    </button>
-                  </div>
-                  <div className="bg-neutral-950 font-mono text-[10px] md:text-xs p-4 rounded-xl border border-zinc-800 space-y-1 max-h-60 overflow-y-auto scrollbar-thin select-all">
-                    {gitUpdateLogs.map((log, idx) => {
-                      let color = 'text-zinc-300';
-                      if (log.includes('✅') || log.includes('🎉') || log.toLowerCase().includes('успешно') || log.toLowerCase().includes('success')) color = 'text-emerald-400 font-semibold';
-                      if (log.includes('❌') || log.toLowerCase().includes('error') || log.toLowerCase().includes('fatal') || log.toLowerCase().includes('ошибка')) color = 'text-red-400 font-semibold';
-                      if (log.includes('⚠️') || log.toLowerCase().includes('warning')) color = 'text-amber-400';
-                      if (log.includes('🚀') || log.includes('📡') || log.includes('🔄') || log.includes('⚙️') || log.includes('🐳')) color = 'text-cyan-400 font-medium';
-                      return (
-                        <div key={idx} className="flex gap-2">
-                          <span className="text-zinc-600 shrink-0">~</span>
-                          <span className={color}>{log}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* VPN/RAM Diagnostic Terminal Script Card */}
-            <div className="p-4 bg-orange-500/5 rounded-xl flex flex-col justify-between border border-orange-500/10 space-y-3 shadow-md shadow-orange-500/5 col-span-1 md:col-span-2 lg:col-span-2">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-orange-400">Скрипт диагностики памяти и отвала VPN</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Если падает VPN и забивается RAM, выполните этот код в терминале сервера и скиньте результат разработчику для анализа логов docker и OOM Killer.
-                </p>
-              </div>
-              <div className="relative group mt-auto">
-                <div className="bg-black/40 border border-orange-500/20 rounded-xl p-3 font-mono text-[10px] text-orange-200 overflow-x-auto whitespace-pre">
-{`echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER LOGS x3-ui ===" && docker logs --tail 50 x3-ui && echo "" && echo "=== OOM KILLS ===" && dmesg -T | grep -i oom`}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`echo "=== RAM & DISK ===" && free -h && echo "" && df -h && echo "" && echo "=== DOCKER LOGS x3-ui ===" && docker logs --tail 50 x3-ui && echo "" && echo "=== OOM KILLS ===" && dmesg -T | grep -i oom`);
-                    toast.success('Скрипт диагностики скопирован в буфер обмена!');
-                  }}
-                  className="absolute top-2 right-2 p-1.5 bg-orange-500/20 hover:bg-orange-500/40 text-orange-300 rounded-lg transition-colors border border-orange-500/30 backdrop-blur-md"
-                  title="Копировать скрипт"
-                >
-                  <Copy size={12} />
-                </button>
-              </div>
-            </div>
-
-            {/* Diagnostics Card: реальная самодиагностика вместо удалённых заглушек */}
-            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">Диагностика и тесты</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Реальные проверки: конфигурация, база, docker-порты, панель, инбаунды, Reality-ключи, клиенты, статистика трафика и маршрутизация.
-                </p>
-              </div>
-              <a
-                href="/admin/tests"
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded-xl transition-colors font-bold text-xs border border-blue-500/20"
-              >
-                <Activity size={12} />
-                Открыть раздел «Тесты»
-              </a>
-            </div>
-
-            {/* AmneziaWG Card */}
-            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">AmneziaWG (файл для роутера)</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Обфусцированный WireGuard на хосте. Пользователь выбирает «Файл AmneziaWG» в кабинете и скачивает .conf. Здесь — состояние сервиса и клиенты с трафиком.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleCheckAwg}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 rounded-xl transition-colors font-bold text-xs border border-cyan-500/20"
-              >
-                <RefreshCw size={12} />
-                Проверить AmneziaWG
-              </button>
-            </div>
-
-            {/* All Inbounds Card */}
-            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">Клиенты во все инбаунды</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Разводит каждого клиента по всем включённым инбаундам сервера (tcp / grpc / xhttp), чтобы работали все транспорты подписки. Уже существующих клиентов не перезаписывает. Автоматически выполняется каждый час.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={isSyncingInbounds}
-                onClick={handleSyncAllInbounds}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-emerald-500/20"
-              >
-                {isSyncingInbounds ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                Развести по всем инбаундам
-              </button>
-            </div>
-
-            {/* Regenerate All VPN Links Card */}
-            <div className="p-4 bg-black/20 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-white">Обновить все VPN-ссылки</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Пересоздаст VLESS-ссылки для всех активных подписок с текущими настройками Reality (chrome fp, актуальный publicKey).
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={isRegenerating}
-                onClick={handleRegenerateLinks}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-500/10 text-green-400 hover:bg-green-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-green-500/20"
-              >
-                {isRegenerating ? <RefreshCw className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                Обновить все ссылки
-              </button>
-            </div>
-          </div>
-
-          {/* VPS Backup Management Card */}
-          <div className="p-5 bg-gradient-to-r from-blue-950/30 to-purple-950/20 rounded-2xl border border-blue-500/20 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400 border border-blue-500/20">
-                  <Archive size={20} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    Резервное копирование VPS в 1 клик
-                    <span className="text-[10px] bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded-full border border-blue-500/30">
-                      3x-ui + Hysteria2 + .env + Supabase
-                    </span>
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Архив конфигурации: база 3x-ui, конфиг Hysteria2 (/etc/hysteria), .env и настройки Supabase. Хранится в контейнере приложения — скачайте его на компьютер.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={isBackingUp}
-                onClick={handleCreateBackup}
-                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/20 transition-all active:scale-95 shrink-0"
-              >
-                {isBackingUp ? <RefreshCw className="animate-spin" size={14} /> : <HardDrive size={14} />}
-                Создать бэкап VPS
-              </button>
-            </div>
-
-            {/* Backups List */}
-            <div className="space-y-2 pt-2 border-t border-white/5">
-              <div className="flex justify-between items-center text-xs font-mono text-zinc-400">
-                <span>Сохраненные архивы ({backups.length}):</span>
-                {loadingBackups && <RefreshCw size={12} className="animate-spin text-blue-400" />}
-              </div>
-
-              {backups.length === 0 ? (
-                <p className="text-xs text-zinc-500 font-mono py-2">
-                  Архивы еще не создавались. Нажмите кнопку выше для создания первой резервной копии.
-                </p>
-              ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {backups.map((b) => (
-                    <div key={b.filename} className="flex items-center justify-between p-3 bg-black/40 rounded-xl border border-white/5 hover:border-blue-500/20 transition-all font-mono text-xs">
-                      <div className="flex items-center gap-3 truncate">
-                        <Archive size={14} className="text-blue-400 shrink-0" />
-                        <div className="truncate">
-                          <p className="text-zinc-200 truncate font-semibold">{b.filename}</p>
-                          <p className="text-[10px] text-zinc-500">
-                            {new Date(b.created_at).toLocaleString('ru-RU')} • {b.size_formatted}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0 ml-3">
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadBackup(b.filename)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/20 rounded-lg text-xs font-semibold transition-colors"
-                          title="Скачать на устройство"
-                        >
-                          <Download size={12} />
-                          Скачать
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteBackup(b.filename)}
-                          className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition-colors"
-                          title="Удалить архив"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Terminal Console Output */}
-          <div className="space-y-2 pt-2">
-            <div className="flex justify-between items-center ml-1">
-              <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">Журнал операций:</label>
-              <button 
-                type="button" 
-                onClick={() => setSystemLogs(['[Консоль очищена пользователем]'])}
-                className="text-[10px] text-zinc-500 hover:text-zinc-300 font-mono underline"
-              >
-                Очистить экран
-              </button>
-            </div>
-            <div className="bg-neutral-950 font-mono text-[10px] md:text-xs p-4 rounded-xl border border-zinc-800 space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 select-all">
-              {systemLogs.map((log, idx) => {
-                let colorClass = 'text-zinc-300';
-                if (log.includes('[Ошибка]') || log.toLowerCase().includes('failed') || log.startsWith('❌')) colorClass = 'text-red-400 font-semibold';
-                if (log.toLowerCase().includes('success') || log.startsWith('✅')) colorClass = 'text-green-400 font-semibold';
-                if (log.startsWith('[Старт]') || log.startsWith('[Система]')) colorClass = 'text-cyan-400';
-                if (log.startsWith('===') || log.startsWith('---')) colorClass = 'text-zinc-500 font-bold';
-                return (
-                  <div key={idx} className="flex gap-2 leading-relaxed">
-                    <span className="text-zinc-600 shrink-0 select-none">~</span>
-                    <span className={colorClass}>{log}</span>
-                  </div>
-                );
-              })}
+                <option value="all">Показывать всем (All Users)</option>
+                <option value="pro">Только Pro-пользователям</option>
+                <option value="none">Скрыть для всех</option>
+              </select>
             </div>
           </div>
         </motion.div>
@@ -1176,101 +424,13 @@ export default function AdminSettings() {
           <button
             type="submit"
             disabled={saving}
-            className="flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all font-bold shadow-lg shadow-blue-600/20 active:scale-95"
+            className="flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all font-bold shadow-lg shadow-blue-600/20 active:scale-95 text-sm"
           >
             {saving ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
             {saving ? 'Сохранение...' : 'Сохранить изменения'}
           </button>
         </div>
       </form>
-
-      {/* 3x-ui Panel Version & 1-Click Update Section */}
-      <PanelManagementSection />
-
-      {/* Hysteria2 Section */}
-      <Hysteria2Section />
-
-      {/* AmneziaWG Section */}
-      <AmneziaWgSection />
-
-      {/* Modal Confirmation for GitHub Update */}
-      <AnimatePresence>
-        {showGitConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="w-full max-w-lg bg-zinc-950 border border-blue-500/30 rounded-2xl p-6 shadow-2xl space-y-5 relative overflow-hidden"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/30">
-                    <Sparkles size={22} className="animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-white">Обновить проект из GitHub</h3>
-                    <p className="text-xs text-zinc-400">Ветка <span className="text-blue-400 font-mono">origin/main</span></p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowGitConfirmModal(false)}
-                  className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="space-y-3 text-xs text-zinc-300">
-                <p className="leading-relaxed">
-                  На сервере будет выполнена полная цепочка обновления и пересборки:
-                </p>
-
-                <div className="p-3 bg-black/60 rounded-xl border border-white/10 font-mono text-[11px] text-blue-300 space-y-1">
-                  <div>cd /opt/izinet</div>
-                  <div>git fetch origin main</div>
-                  <div>git reset --hard origin/main</div>
-                  <div>bash update.sh</div>
-                </div>
-
-                <div className="space-y-1.5 text-[11px] text-zinc-400 bg-white/5 p-3.5 rounded-xl border border-white/5">
-                  <div className="flex items-center gap-2 text-emerald-400 font-medium">
-                    <CheckCircle2 size={14} />
-                    <span>Все базы данных (x-ui.db), Reality-ключи и клиенты сохраняются</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-emerald-400 font-medium">
-                    <CheckCircle2 size={14} />
-                    <span>Перед обновлением создаётся резервная копия базы</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-blue-300">
-                    <RefreshCw size={14} />
-                    <span>Контейнеры Docker будут пересобраны и перезапущены (~30-60 сек)</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowGitConfirmModal(false)}
-                  className="px-4 py-2.5 rounded-xl text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStartGitUpdate}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
-                >
-                  <ArrowUpCircle size={15} />
-                  <span>🚀 Запустить обновление сейчас</span>
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
