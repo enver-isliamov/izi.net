@@ -246,47 +246,15 @@ def ensure_default_inbound(cursor):
     return 1
 
 
-def ensure_wireguard_inbound(cursor):
-    """Добавляет входящее соединение WireGuard/AmneziaWG на порт 51820 в панель 3x-ui."""
+def cleanup_conflicting_wg_inbound(cursor):
+    """Удаляет входящее соединение WireGuard из 3x-ui на порту 51820, так как AmneziaWG работает на хосте."""
     if not table_exists(cursor, "inbounds"):
         return 0
-    cursor.execute("SELECT COUNT(*) FROM inbounds WHERE port=51820 OR protocol='wireguard';")
-    if cursor.fetchone()[0] > 0:
-        return 0
-
-    columns = table_columns(cursor, "inbounds")
-    private_key, public_key = reality_keypair()
-    wg_settings = {
-        "secretKey": private_key,
-        "address": ["10.88.0.1/24"],
-        "peers": [],
-        "mtu": 1280,
-        "noKernelTun": True,
-    }
-    values = {
-        "user_id": 0,
-        "up": 0,
-        "down": 0,
-        "total": 0,
-        "remark": "izinet-amnezia-wireguard",
-        "enable": 1,
-        "expiry_time": 0,
-        "listen": "",
-        "port": 51820,
-        "protocol": "wireguard",
-        "settings": dump_json(wg_settings),
-        "stream_settings": dump_json({"network": "udp", "security": "none"}),
-        "tag": "inbound-51820",
-        "sniffing": dump_json(default_sniffing()),
-    }
-    insert_cols = [col for col in columns if col != "id" and col in values]
-    placeholders = ",".join("?" for _ in insert_cols)
-    cursor.execute(
-        f"INSERT INTO inbounds ({','.join(insert_cols)}) VALUES ({placeholders});",
-        [values[col] for col in insert_cols],
-    )
-    print("xui-bootstrap: created AmneziaWG/WireGuard inbound on port 51820")
-    return 1
+    cursor.execute("DELETE FROM inbounds WHERE port=51820 OR remark='izinet-amnezia-wireguard';")
+    deleted = cursor.rowcount
+    if deleted > 0:
+        print(f"xui-bootstrap: removed {deleted} conflicting wireguard inbound(s) on port 51820 (AWG is host-managed)")
+    return deleted
 
 
 def patch_inbounds(cursor):
@@ -421,14 +389,14 @@ def main():
             set_setting(cursor, "externalTraffic", "false")
             set_setting(cursor, "externalTrafficInformURI", "")
         created = ensure_default_inbound(cursor)
-        created_wg = ensure_wireguard_inbound(cursor)
+        cleaned_wg = cleanup_conflicting_wg_inbound(cursor)
         inbound_updates = patch_inbounds(cursor)
         broken_disabled = disable_broken_inbounds(cursor)
         xray_updates = patch_xray_template(cursor)
         conn.commit()
         print(
             "xui-bootstrap: repaired persistent 3x-ui DB "
-            f"(created_inbounds={created}, created_wg={created_wg}, updated_inbounds={inbound_updates}, "
+            f"(created_inbounds={created}, cleaned_wg={cleaned_wg}, updated_inbounds={inbound_updates}, "
             f"broken_disabled={broken_disabled}, xray_template={xray_updates})"
         )
     finally:

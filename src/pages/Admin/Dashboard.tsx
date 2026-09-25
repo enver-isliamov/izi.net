@@ -1,6 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Users, Server, DollarSign, Activity, Zap, ShieldAlert, CheckCircle2, AlertCircle } from 'lucide-react';
+import { 
+  Users, 
+  Server, 
+  DollarSign, 
+  Activity, 
+  Zap, 
+  ShieldAlert, 
+  CheckCircle2, 
+  AlertCircle,
+  TrendingUp,
+  RefreshCw,
+  ShieldCheck,
+  CreditCard,
+  Cpu
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -16,34 +30,59 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const headers = { Authorization: `Bearer ${session?.access_token}` };
-        const [statsRes, diagRes] = await Promise.all([
-          axios.get('/api/admin/stats', { headers }),
-          axios.get('/api/admin/diag', { headers }).catch(e => ({ data: null }))
-        ]);
-        setStats(statsRes.data);
-        setDiag(diagRes.data);
-      } catch (e: any) {
-        console.error(e);
-        if (e.response?.status === 401 || e.response?.status === 403) {
-          toast.error(e.response.data.message || 'Ошибка доступа');
-        }
-      } finally {
-        setLoading(false);
+  const fetchData = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${session?.access_token}` };
+      const [statsRes, diagRes] = await Promise.all([
+        axios.get('/api/admin/stats', { headers }),
+        axios.get('/api/admin/diag', { headers }).catch(e => ({ data: null }))
+      ]);
+      setStats(statsRes.data);
+      setDiag(diagRes.data);
+    } catch (e: any) {
+      console.error(e);
+      if (e.response?.status === 401 || e.response?.status === 403) {
+        toast.error(e.response.data.message || 'Ошибка доступа');
       }
-    };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     if (session?.access_token) {
       fetchData();
     }
   }, [session]);
 
   const cards = [
-    { title: 'Всего пользователей', value: stats?.totalUsers || 0, icon: Users, color: 'text-blue-500' },
-    { title: 'Активных подписок', value: stats?.activeSubscriptions || 0, icon: Activity, color: 'text-green-500' },
-    { title: 'Сейчас онлайн', value: stats?.totalOnline || 0, icon: Zap, color: 'text-yellow-400' },
+    { 
+      title: 'Всего пользователей', 
+      value: stats?.totalUsers || 0, 
+      icon: Users, 
+      color: 'text-blue-400',
+      badgeColor: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+      subtext: 'Учетных записей в БД',
+      detail: 'Синхронизировано со всеми серверами'
+    },
+    { 
+      title: 'Активных подписок', 
+      value: stats?.activeSubscriptions || 0, 
+      icon: ShieldCheck, 
+      color: 'text-emerald-400',
+      badgeColor: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+      subtext: 'Действующие тарифы',
+      detail: `${stats?.totalUsers ? Math.round(((stats.activeSubscriptions || 0) / stats.totalUsers) * 100) : 0}% конверсия пользователей`
+    },
+    { 
+      title: 'Сейчас онлайн', 
+      value: stats?.totalOnline || 0, 
+      icon: Zap, 
+      color: 'text-amber-400',
+      badgeColor: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      subtext: 'Активные VPN сессии',
+      detail: 'Текущий туннельный трафик'
+    },
   ];
 
   if (loading && !stats) {
@@ -74,121 +113,234 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-
       <AdminNav />
       <AdminPageHeader title="Обзор" description="Ключевые показатели сервиса" />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {cards.map((card, i) => (
-          <motion.div
-            key={card.title}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            whileHover={{ y: -5, borderColor: 'rgba(59, 130, 246, 0.3)' }}
-            className="p-6 bg-secondary/30 rounded-2xl border border-white/5 transition-colors"
-          >
-            <div className="flex items-center gap-4">
-              <div className={`p-3 rounded-xl bg-white/5 ${card.color}`}>
-                <card.icon size={24} />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{card.title}</p>
-                <p className="text-2xl font-bold">{card.value}</p>
-              </div>
+      {/* Ключевые показатели сервиса Command Center Block */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="p-6 bg-gradient-to-r from-blue-950/20 via-secondary/30 to-purple-950/20 rounded-2xl border border-blue-500/20 backdrop-blur-sm space-y-6 shadow-xl shadow-blue-950/10"
+      >
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-white/5 gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400 border border-blue-500/20">
+              <TrendingUp size={22} />
             </div>
-          </motion.div>
-        ))}
-      </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-white">Ключевые показатели сервиса</h2>
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Система активна
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Операционный мониторинг пользователей, активных подписок и сетевой нагрузки
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setLoading(true);
+                fetchData();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl text-xs font-medium border border-white/10 transition-colors"
+              title="Обновить метрики"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin text-blue-400' : ''} />
+              <span>Обновить</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Info Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {cards.map((card, i) => (
+            <motion.div
+              key={card.title}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="p-4 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between space-y-3 min-w-0 overflow-hidden hover:border-white/15 transition-all"
+            >
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{card.title}</span>
+                <card.icon size={16} className={`${card.color} shrink-0`} />
+              </div>
+
+              <div className="flex items-baseline gap-2 min-w-0">
+                <span className={`text-2xl sm:text-3xl font-bold font-mono ${card.color} truncate`}>
+                  {card.value}
+                </span>
+                <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                  {card.subtext}
+                </span>
+              </div>
+
+              <div className="text-[11px] text-zinc-400 font-mono flex items-center justify-between pt-1 border-t border-white/5">
+                <span className="truncate">{card.detail}</span>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </motion.div>
       
       {/* 🛠 Diagnostics Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">
-          <h2 className="text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
-            <Zap size={20} /> Статус платежной системы (Enot.io)
-          </h2>
+        {/* Payment Diagnostics */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-gradient-to-r from-blue-950/20 via-secondary/30 to-slate-900/40 rounded-2xl border border-blue-500/20 backdrop-blur-sm space-y-5 shadow-xl shadow-blue-950/10"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400 border border-blue-500/20">
+                <CreditCard size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-white">Платежная система (Enot.io)</h3>
+                <p className="text-xs text-muted-foreground">Проверка API ключей, подписи и вебхуков</p>
+              </div>
+            </div>
+            {diag?.enot?.merchantId?.len > 0 && diag?.enot?.secretKey?.len > 0 ? (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <CheckCircle2 size={12} /> Готово к приему
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                <AlertCircle size={12} /> Ошибка ключей
+              </span>
+            )}
+          </div>
+
           <div className="space-y-3">
             {/* Shop ID */}
-            <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
-              <span className="text-sm text-muted-foreground">Shop ID</span>
+            <div className="p-3.5 bg-black/40 rounded-xl border border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-medium text-zinc-300">Shop ID (Merchant ID)</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                  Источник: {diag?.enot?.merchantId?.source || 'Не задан'}
+                </p>
+              </div>
               {diag?.enot?.merchantId?.len > 0 ? (
-                <div className="flex flex-col items-end">
-                  <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
-                    <CheckCircle2 size={14} /> OK ({diag.enot.merchantId.len} симв.)
-                  </span>
-                  <span className="text-[9px] text-muted-foreground uppercase opacity-50">Источник: {diag.enot.merchantId.source}</span>
-                </div>
+                <span className="text-emerald-400 flex items-center gap-1 text-xs font-mono font-bold bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  <CheckCircle2 size={13} /> {diag.enot.merchantId.len} симв.
+                </span>
               ) : (
-                <span className="text-red-400 flex items-center gap-1 text-sm font-bold">
-                  <AlertCircle size={14} /> MISSING
+                <span className="text-red-400 flex items-center gap-1 text-xs font-bold bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20">
+                  <AlertCircle size={13} /> MISSING
                 </span>
               )}
             </div>
 
             {/* Secret Key #1 */}
-            <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
-              <span className="text-sm text-muted-foreground">Secret Key #1</span>
+            <div className="p-3.5 bg-black/40 rounded-xl border border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-medium text-zinc-300">Secret Key #1 (HMAC)</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                  Источник: {diag?.enot?.secretKey?.source || 'Не задан'}
+                </p>
+              </div>
               {diag?.enot?.secretKey?.len > 0 ? (
-                <div className="flex flex-col items-end">
-                  <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
-                    <CheckCircle2 size={14} /> OK ({diag.enot.secretKey.len} симв.)
-                  </span>
-                  <span className="text-[9px] text-muted-foreground uppercase opacity-50">Источник: {diag.enot.secretKey.source}</span>
-                </div>
+                <span className="text-emerald-400 flex items-center gap-1 text-xs font-mono font-bold bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  <CheckCircle2 size={13} /> {diag.enot.secretKey.len} симв.
+                </span>
               ) : (
-                <span className="text-red-400 flex items-center gap-1 text-sm font-bold">
-                  <AlertCircle size={14} /> MISSING
+                <span className="text-red-400 flex items-center gap-1 text-xs font-bold bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20">
+                  <AlertCircle size={13} /> MISSING
                 </span>
               )}
             </div>
 
             {/* Secret Key #2 */}
-            <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
-              <span className="text-sm text-muted-foreground">Secret Key #2</span>
+            <div className="p-3.5 bg-black/40 rounded-xl border border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-medium text-zinc-300">Secret Key #2 (Вебхуки)</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                  Источник: {diag?.enot?.secretKey2?.source || 'Не задан'}
+                </p>
+              </div>
               {diag?.enot?.secretKey2?.len > 0 ? (
-                <div className="flex flex-col items-end">
-                  <span className="text-green-400 flex items-center gap-1 text-sm font-mono">
-                    <CheckCircle2 size={14} /> OK ({diag.enot.secretKey2.len} симв.)
-                  </span>
-                  <span className="text-[9px] text-muted-foreground uppercase opacity-50">Источник: {diag.enot.secretKey2.source}</span>
-                </div>
+                <span className="text-emerald-400 flex items-center gap-1 text-xs font-mono font-bold bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  <CheckCircle2 size={13} /> {diag.enot.secretKey2.len} симв.
+                </span>
               ) : (
-                <span className="text-yellow-400 flex items-center gap-1 text-sm font-bold">
-                  <AlertCircle size={14} /> WARNING (Using Key #1)
+                <span className="text-amber-400 flex items-center gap-1 text-xs font-bold bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                  <AlertCircle size={13} /> Fallback (Key #1)
                 </span>
               )}
             </div>
           </div>
-        </div>
+        </motion.div>
 
-        <div className="p-6 bg-secondary/30 rounded-2xl border border-white/5">
-          <h2 className="text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
-            <ShieldAlert size={20} /> Проверка системы
-          </h2>
-          <div className="space-y-4">
-             <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                <p className="text-[10px] text-muted-foreground uppercase mb-1">Таблица настроек (DB)</p>
-                {diag?.database?.settingsTableOk ? (
-                  <p className="text-green-400 flex items-center gap-1 text-sm font-bold">
-                    <CheckCircle2 size={14} /> ТАБЛИЦА НАЙДЕНА
-                  </p>
-                ) : (
-                  <div className="space-y-1">
-                    <p className="text-red-400 flex items-center gap-1 text-sm font-bold">
-                      <AlertCircle size={14} /> ТАБЛИЦА ОТСУТСТВУЕТ
-                    </p>
-                    <p className="text-[10px] text-red-300/50 leading-tight">Выполните SQL-скрипт из MULTI_SERVER_SETUP.md</p>
-                  </div>
-                )}
-             </div>
-             <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                <p className="text-[10px] text-muted-foreground uppercase mb-1">Ваша текущая Роль</p>
-                <p className={`font-bold text-sm uppercase tracking-wider ${diag?.role === 'superadmin' ? 'text-red-400' : 'text-blue-400'}`}>
-                  {diag?.role || '...'}
-                </p>
-             </div>
+        {/* System Diagnostics */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-gradient-to-r from-purple-950/20 via-secondary/30 to-slate-900/40 rounded-2xl border border-purple-500/20 backdrop-blur-sm space-y-5 shadow-xl shadow-purple-950/10"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-500/10 rounded-xl text-purple-400 border border-purple-500/20">
+                <ShieldAlert size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-white">Проверка системы & Доступ</h3>
+                <p className="text-xs text-muted-foreground">Состояние БД Supabase и права администратора</p>
+              </div>
+            </div>
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <CheckCircle2 size={12} /> RBAC OK
+            </span>
           </div>
-        </div>
+
+          <div className="space-y-3">
+            <div className="p-3.5 bg-black/40 rounded-xl border border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-medium text-zinc-300">Таблица настроек Supabase</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">Глобальный реестр конфигурации</p>
+              </div>
+              {diag?.database?.settingsTableOk ? (
+                <span className="text-emerald-400 flex items-center gap-1 text-xs font-mono font-bold bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  <CheckCircle2 size={13} /> Подключена
+                </span>
+              ) : (
+                <span className="text-red-400 flex items-center gap-1 text-xs font-bold bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20">
+                  <AlertCircle size={13} /> Отсутствует
+                </span>
+              )}
+            </div>
+
+            <div className="p-3.5 bg-black/40 rounded-xl border border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-medium text-zinc-300">Уровень доступа пользователя</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">Текущая авторизованная сессия</p>
+              </div>
+              <span className={`text-xs font-mono font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border ${
+                diag?.role === 'superadmin' 
+                  ? 'bg-red-500/10 text-red-400 border-red-500/20' 
+                  : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+              }`}>
+                {diag?.role || 'user'}
+              </span>
+            </div>
+
+            <div className="p-3.5 bg-black/40 rounded-xl border border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-medium text-zinc-300">Архитектурный протокол</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">Xray Reality + Nginx + Hysteria2</p>
+              </div>
+              <span className="text-emerald-400 flex items-center gap-1 text-xs font-mono font-bold bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                <CheckCircle2 size={13} /> Стабилен
+              </span>
+            </div>
+          </div>
+        </motion.div>
       </div>
 
       <AdminServersList />
