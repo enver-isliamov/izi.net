@@ -160,6 +160,15 @@ flow: xtls-rprx-vision
   - `server/src/routes/admin.ts`: Реализована функция `extractCleanSemver()` с фильтрацией системных сообщений/меню и парсингом валидных semver-тегов (`v3.8.5`). Добавлено чтение версии напрямую из OCI-меток Docker (`org.opencontainers.image.version`, `org.opencontainers.image.ref.name`), проверка равенства ID запущенного контейнера со свежим pull-образом `ghcr.io/mhsanaei/3x-ui:latest`, а также очистка имени Xray-core.
   - `src/components/admin/PanelManagementSection.tsx`: Добавлена клиентская санитизация `formatDisplayVersion()`, классы `min-w-0`, `overflow-hidden` и `truncate` на всех информационных карточках, что гарантирует абсолютную изоляцию блоков и предотвращает вылезание текста.
   - `scripts/update_panel.sh`: Заменена команда `x-ui version` на чистый `docker inspect` статуса контейнера.
+- [x] [2026-09-25 11:15] **SYS/AWG-INTEGRATION-001**: Интеграция AmneziaWG в универсальную подписку всех пользователей и панель 3x-ui:
+  - `xui_bootstrap.py`: Добавлена функция `ensure_wireguard_inbound(cursor)` для создания входящего соединения WireGuard/AmneziaWG на порту 51820 в SQLite-базе 3x-ui (`x-ui.db`). Теперь панель 3x-ui отображает инбаунд AmneziaWG с адресацией `10.88.0.1/24`, `noKernelTun: true` и метриками.
+  - `docker-compose.yml`: Открыт и проброшен UDP-порт `51820:51820/udp` в контейнер `x3-ui` для приёма обфусцированного WireGuard/AWG-трафика.
+  - `install.sh`: В правила брандмауэра UFW добавлены разрешения для UDP 443 (Hysteria 2) и UDP 51820 (AmneziaWG).
+  - `server/src/services/awg.service.ts`: Реализовано сохранение реестра клиентов AmneziaWG (`AWG_PEERS_REGISTRY`) в Supabase `settings` с асинхронным чтением `readPeersAsync()`, предотвращающее сброс IP-адресов или потерю ключей при перезапусках контейнеров или хоста.
+  - `server/src/routes/config.ts`: В генератор универсальной подписки `/sub/:id` внедрены обе схемы подключения: `wireguard://` (для Hiddify, NekoBox, v2rayNG) и `awg://` (для официального AmneziaVPN и Happ). Теперь каждый подписчик гарантированно получает AmneziaWG в едином списке серверов подписки.
+  - `server/src/services/maintenance.service.ts`: В цикл регламентного обслуживания `runFullMaintenance()` добавлен метод `syncAwgForSubscribers()`, непрерывно гарантирующий наличие AmneziaWG-пира для всех активных и триальных подписчиков.
+  - `server/src/routes/admin.ts`: Эндпоинт `/awg/sync-all` расширен для включения триальных подписок.
+  - `src/pages/Dashboard.tsx`: Расширен диалог QR-кода с переключением между форматами `WireGuard` и `AmneziaVPN`, а также кнопкой быстрого скачивания файла `.conf`.
 
 
 

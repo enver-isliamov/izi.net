@@ -16,7 +16,8 @@ import {
   Trash2,
   QrCode,
   RefreshCw,
-  Gift
+  Gift,
+  Download
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -62,10 +63,78 @@ export default function Dashboard() {
   const [targetDeviceName, setTargetDeviceName] = useState<string | undefined>(undefined);
 
   // QR States
-  const [qrData, setQrData] = useState<{ value: string; key?: string; sub?: string; title: string; subtitle: string } | null>(null);
-  const [qrMode, setQrMode] = useState<'key' | 'sub'>('sub');
+  const [qrData, setQrData] = useState<{
+    value: string;
+    key?: string;
+    sub?: string;
+    awg?: string;
+    wireguardUrl?: string;
+    awgUrl?: string;
+    conf?: string;
+    title: string;
+    subtitle: string;
+  } | null>(null);
+  const [qrMode, setQrMode] = useState<'key' | 'sub' | 'awg'>('sub');
+  const [awgTab, setAwgTab] = useState<'wg' | 'awg'>('wg');
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [showUniversalLink, setShowUniversalLink] = useState(false);
+  const [awgConfig, setAwgConfig] = useState<string>('');
+  const [awgUrl, setAwgUrl] = useState<string>('');
+
+  const handleDownloadAwg = async () => {
+    try {
+      const toastId = toast.loading('Подготовка AmneziaWG конфига...');
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await axios.get('/api/user/awg-download', {
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'izinet-amneziawg.conf');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Конфигурация AmneziaWG (.conf) скачана!', { id: toastId });
+    } catch (e: any) {
+      toast.error('Не удалось скачать файл AmneziaWG');
+    }
+  };
+
+  const handleOpenAwgModal = async () => {
+    try {
+      const toastId = toast.loading('Загрузка AmneziaWG...');
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await axios.get('/api/user/awg-subscription', {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (res.data?.ok) {
+        setAwgConfig(res.data.conf || '');
+        setAwgUrl(res.data.wireguardUrl || res.data.awgUrl || '');
+        setAwgTab('wg');
+        setQrData({
+          value: res.data.wireguardUrl || res.data.awgUrl || res.data.conf,
+          sub: subUrl,
+          key: res.data.wireguardUrl || res.data.conf,
+          awg: res.data.wireguardUrl || res.data.awgUrl || res.data.conf,
+          wireguardUrl: res.data.wireguardUrl,
+          awgUrl: res.data.awgUrl,
+          conf: res.data.conf,
+          title: 'AmneziaWG (WireGuard)',
+          subtitle: 'Анти-DPI WireGuard для AmneziaVPN, Hiddify, NekoBox'
+        });
+        setQrMode('awg');
+        setIsQrOpen(true);
+        toast.dismiss(toastId);
+      } else {
+        toast.error('Не удалось получить данные AmneziaWG', { id: toastId });
+      }
+    } catch (e: any) {
+      toast.error('Ошибка загрузки данных AmneziaWG');
+    }
+  };
 
   // Promo code states
   const [promoCode, setPromoCode] = useState('');
@@ -531,25 +600,51 @@ export default function Dashboard() {
         </div>
 
         {subscription && showUniversalLink && (
-           <div className="bg-primary/5 border border-primary/25 rounded-xl p-2 md:p-2.5 flex items-center justify-between gap-3 text-xs">
-             <div className="flex items-center gap-2">
-               <Globe className="w-4 h-4 text-primary shrink-0 animate-pulse" />
+           <div className="bg-primary/5 border border-primary/25 rounded-xl p-2.5 md:p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+             <div className="flex items-center gap-2.5">
+               <Globe className="w-5 h-5 text-primary shrink-0 animate-pulse" />
                <div className="flex flex-col">
-                 <span className="font-bold text-[10px] md:text-[11px] text-white">Универсальная подписка (v2ray)</span>
-                 <p className="text-[8px] md:text-[9px] text-muted-foreground leading-none mt-0.5">Одна ссылка на все ваши устройства в Hiddify</p>
+                 <div className="flex items-center gap-1.5 flex-wrap">
+                   <span className="font-bold text-[11px] md:text-xs text-white">Универсальная подписка</span>
+                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">VLESS Reality</span>
+                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">Hysteria 2</span>
+                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AmneziaWG</span>
+                 </div>
+                 <p className="text-[9px] md:text-[10px] text-muted-foreground leading-none mt-1">
+                   Включает все 3 протокола для Hiddify, NekoBox, AmneziaWG и WireGuard
+                 </p>
                </div>
              </div>
-             <div className="flex items-center gap-1 shrink-0">
+             <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                <Button 
+                  size="sm"
+                  variant="outline"
+                  className="rounded-lg text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 h-7 gap-1 text-[10px] px-2"
+                  onClick={handleOpenAwgModal}
+                  title="Подключение через AmneziaWG"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> AmneziaWG
+                </Button>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  className="rounded-lg text-emerald-400 hover:bg-emerald-500/10 h-7 w-7"
+                  title="Скачать .conf для AmneziaWG"
+                  onClick={handleDownloadAwg}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </Button>
                 <Button 
                   size="icon" 
                   variant="ghost" 
                   className="rounded-lg text-primary hover:bg-primary/10 h-7 w-7"
+                  title="QR-код подписки"
                   onClick={() => {
                     setQrData({
                       value: subUrl,
                       sub: subUrl,
                       title: 'Универсальная подписка',
-                      subtitle: 'Автоматическое обновление серверов'
+                      subtitle: 'Автоматическое обновление серверов (VLESS + Hysteria2 + AmneziaWG)'
                     });
                     setQrMode('sub');
                     setIsQrOpen(true);
@@ -561,9 +656,10 @@ export default function Dashboard() {
                   size="icon" 
                   variant="ghost" 
                   className="rounded-lg text-primary hover:bg-primary/10 h-7 w-7"
+                  title="Скопировать ссылку"
                   onClick={async () => {
                      const success = await copyToClipboard(subUrl);
-                     if (success) toast.success("Ссылка скопирована");
+                     if (success) toast.success("Ссылка подписки скопирована");
                   }}
                 >
                   <Copy className="w-3.5 h-3.5" />
@@ -790,11 +886,36 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground mt-1">
                 {qrMode === 'sub' 
                   ? 'Универсальная ссылка (Hiddify / V2Box)' 
+                  : qrMode === 'awg'
+                  ? 'Анти-DPI WireGuard (AmneziaVPN / Hiddify / NekoBox)'
                   : 'Прямой ключ VLESS (Shadowrocket / Nekobox)'}
               </p>
            </DialogHeader>
 
-           {qrData?.key && qrData?.sub && (
+           {qrMode === 'awg' && (
+             <div className="flex p-1 bg-muted/50 rounded-xl mb-6 w-full max-w-[320px]">
+               <button
+                 onClick={() => setAwgTab('wg')}
+                 className={cn(
+                   "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all",
+                   awgTab === 'wg' ? "bg-emerald-500 text-black shadow-sm" : "text-muted-foreground hover:text-white"
+                 )}
+               >
+                 WireGuard
+               </button>
+               <button
+                 onClick={() => setAwgTab('awg')}
+                 className={cn(
+                   "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all",
+                   awgTab === 'awg' ? "bg-emerald-500 text-black shadow-sm" : "text-muted-foreground hover:text-white"
+                 )}
+               >
+                 AmneziaVPN
+               </button>
+             </div>
+           )}
+
+           {qrMode !== 'awg' && qrData?.key && qrData?.sub && (
              <div className="flex p-1 bg-muted/50 rounded-xl mb-6 w-full max-w-[280px]">
                <button
                  onClick={() => setQrMode('sub')}
@@ -819,7 +940,13 @@ export default function Dashboard() {
            
            <div className="bg-white p-6 rounded-3xl shadow-2xl shadow-primary/20">
               <QRCodeSVG 
-                value={qrMode === 'sub' ? (qrData?.sub || qrData?.value || '') : (qrData?.key || qrData?.value || '')} 
+                value={
+                  qrMode === 'awg' 
+                    ? (awgTab === 'wg' ? (qrData?.wireguardUrl || qrData?.value || '') : (qrData?.awgUrl || qrData?.value || ''))
+                    : qrMode === 'sub' 
+                    ? (qrData?.sub || qrData?.value || '') 
+                    : (qrData?.key || qrData?.value || '')
+                } 
                 size={240}
                 level="M"
                 includeMargin={false}
@@ -831,25 +958,45 @@ export default function Dashboard() {
            <div className="mt-8 w-full space-y-3">
               <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center group relative overflow-hidden">
                  <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-1">
-                   {qrMode === 'sub' ? 'Universal Link' : 'VLESS Config'}
+                   {qrMode === 'sub' ? 'Universal Link' : qrMode === 'awg' ? (awgTab === 'wg' ? 'WireGuard URL (Hiddify/NekoBox)' : 'Amnezia URL (AmneziaVPN)') : 'VLESS Config'}
                  </div>
                  <div className="font-mono text-[10px] break-all line-clamp-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                   {qrMode === 'sub' ? (qrData?.sub || qrData?.value) : (qrData?.key || qrData?.value)}
+                   {qrMode === 'awg' 
+                     ? (awgTab === 'wg' ? (qrData?.wireguardUrl || qrData?.value) : (qrData?.awgUrl || qrData?.value))
+                     : qrMode === 'sub' 
+                     ? (qrData?.sub || qrData?.value) 
+                     : (qrData?.key || qrData?.value)}
                  </div>
-                 <Button 
-                   variant="ghost" 
-                   size="sm" 
-                   className="mt-2 h-7 text-[10px] text-primary"
-                   onClick={async () => {
-                     const val = qrMode === 'sub' ? (qrData?.sub || qrData?.value) : (qrData?.key || qrData?.value);
-                     if (val) {
-                       const success = await copyToClipboard(val);
-                       if (success) toast.success("Скопировано");
-                     }
-                   }}
-                 >
-                   <Copy className="w-3 h-3 mr-1" /> Копировать
-                 </Button>
+                 <div className="flex items-center justify-center gap-2 mt-2">
+                   <Button 
+                     variant="ghost" 
+                     size="sm" 
+                     className="h-7 text-[10px] text-primary"
+                     onClick={async () => {
+                       const val = qrMode === 'awg' 
+                         ? (awgTab === 'wg' ? (qrData?.wireguardUrl || qrData?.value) : (qrData?.awgUrl || qrData?.value))
+                         : qrMode === 'sub' 
+                         ? (qrData?.sub || qrData?.value) 
+                         : (qrData?.key || qrData?.value);
+                       if (val) {
+                         const success = await copyToClipboard(val);
+                         if (success) toast.success("Скопировано в буфер");
+                       }
+                     }}
+                   >
+                     <Copy className="w-3 h-3 mr-1" /> Копировать
+                   </Button>
+                   {qrMode === 'awg' && (
+                     <Button 
+                       variant="ghost" 
+                       size="sm" 
+                       className="h-7 text-[10px] text-emerald-400 hover:text-emerald-300"
+                       onClick={handleDownloadAwg}
+                     >
+                       <Download className="w-3 h-3 mr-1" /> Скачать .conf
+                     </Button>
+                   )}
+                 </div>
               </div>
               <Button 
                 className="w-full h-12 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl shadow-lg shadow-primary/20"

@@ -32,6 +32,7 @@ export class MaintenanceService {
       await this.cleanupExpiredSubscriptions().catch(e => console.error('❌ [Maintenance] cleanupExpired failed:', e.message));
       await this.syncTraffic().catch(e => console.error('❌ [Maintenance] syncTraffic failed:', e.message));
       await this.syncAwgDevices().catch(e => console.error('❌ [Maintenance] syncAwgDevices failed:', e.message));
+      await this.syncAwgForSubscribers().catch(e => console.error('❌ [Maintenance] syncAwgForSubscribers failed:', e.message));
       await this.syncAllServers().catch(e => console.error('❌ [Maintenance] syncAllServers failed:', e.message));
       await RoutingService.syncAll().catch(e => console.error('❌ [Maintenance] Routing syncAll failed:', e.message));
 
@@ -464,6 +465,35 @@ export class MaintenanceService {
       console.error('❌ [Maintenance] Sync error:', err.message);
     } finally {
       this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Синхронизация AmneziaWG пиров для всех активных подписчиков.
+   * Гарантирует, что каждый пользователь имеет готовый AWG-конфиг и персональный ключ.
+   */
+  static async syncAwgForSubscribers() {
+    try {
+      const { data: subs, error } = await supabase
+        .from('subscriptions')
+        .select('id, user_id, status, expires_at')
+        .in('status', ['active', 'limited', 'trial']);
+      if (error || !subs || subs.length === 0) return;
+
+      let synced = 0;
+      for (const sub of subs) {
+        try {
+          const { data: user } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
+          const userIdentifier = user?.email || sub.user_id || sub.id;
+          const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${sub.id.slice(0, 6)}`);
+          if (awgData) synced++;
+        } catch (_) {}
+      }
+      if (synced > 0) {
+        console.log(`[AWG] Синхронизировано ${synced} AmneziaWG пиров для подписчиков`);
+      }
+    } catch (e: any) {
+      console.warn(`[AWG] syncAwgForSubscribers warning: ${e.message}`);
     }
   }
 

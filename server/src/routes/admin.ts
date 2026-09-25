@@ -1783,6 +1783,90 @@ router.post('/hysteria/regenerate-link', adminOnly, async (_req, res) => {
   } catch (err: any) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// --- AmneziaWG (Обфусцированный WireGuard против DPI) ---
+
+router.get('/awg/status', adminOnly, async (_req, res) => {
+  try {
+    const status = AwgService.fullStatus();
+    const server = await AwgService.readServerAsync();
+    const endpoint = await AwgService.endpointHost();
+
+    res.json({
+      ok: true,
+      available: status.available,
+      message: status.message,
+      port: status.port || server.port || 51820,
+      subnet: status.subnet || server.subnet || '10.88.0',
+      interface: server.interface || 'awg0',
+      serverPublicKey: server.public_key,
+      endpoint,
+      obfuscation: {
+        jc: server.jc || 4,
+        jmin: server.jmin || 50,
+        jmax: server.jmax || 1000,
+        s1: server.s1 || 64,
+        s2: server.s2 || 128,
+        h1: server.h1 || 1,
+        h2: server.h2 || 2,
+        h3: server.h3 || 3,
+        h4: server.h4 || 4
+      },
+      peersCount: status.peers?.length || 0,
+      peers: status.peers || []
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/awg/restart', adminOnly, async (_req, res) => {
+  try {
+    const iface = process.env.AWG_IFACE || 'awg0';
+    try {
+      execSync(`docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i systemctl restart awg-quick@${iface} 2>/dev/null || docker restart izinet-awg`, { timeout: 30000 });
+    } catch (cmdErr: any) {
+      console.warn(`[AWG] Restart notice: ${cmdErr.message}`);
+    }
+    res.json({ ok: true, message: 'Служба AmneziaWG перезапущена' });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/awg/sync-all', adminOnly, async (_req, res) => {
+  try {
+    const { data: subs, error } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited', 'trial']);
+    if (error) throw error;
+
+    let syncedCount = 0;
+    const results: any[] = [];
+
+    for (const sub of (subs || [])) {
+      try {
+        const { data: user } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
+        const userIdentifier = user?.email || sub.user_id || sub.id;
+        const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${sub.id.slice(0, 6)}`);
+        if (awgData) {
+          syncedCount++;
+          results.push({ subId: sub.id, user: userIdentifier, address: awgData.peer.address, ok: true });
+        }
+      } catch (subErr: any) {
+        results.push({ subId: sub.id, ok: false, error: subErr.message });
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: `AmneziaWG успешно синхронизирован для ${syncedCount} подписок`,
+      syncedCount,
+      total: subs?.length || 0,
+      results
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // --- 3x-ui Panel Version & 1-Click Update ---
 
 interface GitHubReleaseCache {

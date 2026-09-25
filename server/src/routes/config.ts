@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { getXuiForServer } from '../services/xui.service';
 import { parseVpnDevices, getPublishedVlessPorts } from '../utils/vpn';
 import { MaintenanceService } from '../services/maintenance.service';
+import { AwgService } from '../services/awg.service';
 
 const router = Router();
 
@@ -175,7 +176,7 @@ router.get('/sub/:id', async (req, res) => {
       }
     }
 
-    // Добавляем Hysteria2 ссылки если настроен
+    // 1. Добавляем Hysteria2 ссылки если настроен пароль
     try {
       const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
       if (hySettings?.value) {
@@ -187,19 +188,52 @@ router.get('/sub/:id', async (req, res) => {
           const name = emailMatch ? decodeURIComponent(emailMatch[1]) : 'izinet';
           hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#${name}-hysteria`);
         }
+        if (hyLinks.length === 0) {
+          hyLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#izinet-hysteria`);
+        }
         if (hyLinks.length > 0) {
           configText = (configText ? configText + '\n' : '') + [...new Set(hyLinks)].join('\n');
         }
       }
     } catch (e) {}
 
-    // RENAME-001: в клиенте VPN показываем бренд и email подписчика вместо «izi.net VPN» / имён серверов (#OneD)
+    // RENAME-001: в клиенте VPN показываем бренд и email подписчика
     const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
     const userEmail = subUser?.email || '';
     const subRemark = `izinet.online${userEmail ? '_' + userEmail : ''}`;
 
+    // 2. Добавляем AmneziaWG (WireGuard с защитой от DPI) для КАЖДОГО подписчика
+    try {
+      const userIdentifier = userEmail || sub.user_id || sub.id;
+      const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `${subRemark}_AmneziaWG`);
+      if (awgData?.wireguardUrl) {
+        configText = (configText ? configText + '\n' : '') + awgData.wireguardUrl;
+      }
+      if (awgData?.awgUrl) {
+        configText = (configText ? configText + '\n' : '') + awgData.awgUrl;
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ [SUB] AmneziaWG injection warning: ${e.message}`);
+    }
+
     if (configText && configText.trim()) {
-      configText = [...new Set(configText.split('\n').map(line => line.trim() ? line.replace(/(#.*)$/, `#${subRemark}`) : line))].join('\n');
+      configText = [...new Set(configText.split('\n').map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return '';
+        if (trimmed.startsWith('hysteria2://')) {
+          return trimmed.replace(/(#.*)$/, `#${subRemark}_Hysteria2`);
+        }
+        if (trimmed.startsWith('wireguard://')) {
+          return trimmed.replace(/(#.*)$/, `#${subRemark}_AmneziaWG`);
+        }
+        if (trimmed.startsWith('awg://')) {
+          return trimmed.replace(/(#.*)$/, `#${subRemark}_AmneziaWG_Native`);
+        }
+        if (trimmed.startsWith('vless://')) {
+          return trimmed.replace(/(#.*)$/, `#${subRemark}_Reality`);
+        }
+        return trimmed;
+      }))].filter(Boolean).join('\n');
     }
 
     if (!configText || !configText.trim()) {
@@ -217,6 +251,69 @@ router.get('/sub/:id', async (req, res) => {
   } catch (err: any) {
     console.error('🔥 [SUB] Error generating subscription config:', err);
     res.status(500).send('Error generating subscription');
+  }
+});
+
+// Скачивание готового файла .conf для приложения AmneziaWG / WireGuard
+router.get(['/sub/:id/awg.conf', '/subscription/awg-conf/:id', '/api/subscription/awg-conf/:id'], async (req, res) => {
+  const { id } = req.params;
+  try {
+    let sub: any = null;
+    const { data: subById } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    if (subById) {
+      sub = subById;
+    } else {
+      const { data: subByUser } = await supabase.from('subscriptions').select('*').eq('user_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (subByUser) sub = subByUser;
+    }
+
+    if (!sub) return res.status(404).send('Subscription not found');
+
+    const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
+    const userIdentifier = subUser?.email || sub.user_id || sub.id;
+
+    const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, 'izinet_AmneziaWG');
+    if (!awgData?.conf) return res.status(500).send('Could not generate AmneziaWG configuration');
+
+    const safeName = (subUser?.email || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="izinet-${safeName}-amneziawg.conf"`);
+    res.send(awgData.conf);
+  } catch (err: any) {
+    res.status(500).send('Error generating AmneziaWG config: ' + err.message);
+  }
+});
+
+// Получение информации о параметрах подключения AmneziaWG в формате JSON
+router.get(['/sub/:id/awg-info', '/subscription/awg-info/:id', '/api/subscription/awg-info/:id'], async (req, res) => {
+  const { id } = req.params;
+  try {
+    let sub: any = null;
+    const { data: subById } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    if (subById) {
+      sub = subById;
+    } else {
+      const { data: subByUser } = await supabase.from('subscriptions').select('*').eq('user_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (subByUser) sub = subByUser;
+    }
+
+    if (!sub) return res.status(404).json({ ok: false, error: 'Subscription not found' });
+
+    const { data: subUser } = await supabase.from('users').select('email').eq('id', sub.user_id).maybeSingle();
+    const userIdentifier = subUser?.email || sub.user_id || sub.id;
+
+    const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, 'izinet_AmneziaWG');
+    if (!awgData) return res.status(500).json({ ok: false, error: 'Could not generate AmneziaWG parameters' });
+
+    res.json({
+      ok: true,
+      conf: awgData.conf,
+      wireguardUrl: awgData.wireguardUrl,
+      awgUrl: awgData.awgUrl,
+      peer: awgData.peer
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

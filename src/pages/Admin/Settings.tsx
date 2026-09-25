@@ -7,6 +7,7 @@ import { AdminNav } from '@/components/admin/AdminNav';
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader';
 import { PanelManagementSection } from '@/components/admin/PanelManagementSection';
 import { Hysteria2Section } from '@/components/admin/Hysteria2Section';
+import { AmneziaWgSection } from '@/components/admin/AmneziaWgSection';
 import { toast } from 'sonner';
 
 interface Setting {
@@ -1040,6 +1041,9 @@ bash update.sh`}
 
       {/* Hysteria2 Section */}
       <Hysteria2Section />
+
+      {/* AmneziaWG Section */}
+      <AmneziaWgSection />
     </div>
   );
 }

@@ -938,4 +938,46 @@ router.post('/user/awg/devices/:deviceId/rotate', authenticateUser, async (req: 
   }
 });
 
+// Универсальное получение AmneziaWG данных для пользователя
+router.get('/user/awg-subscription', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!sub) return res.status(404).json({ error: 'Подписка не найдена' });
+
+    const userEmail = req.user.email || '';
+    const userIdentifier = userEmail || userId;
+    const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${userIdentifier.slice(0, 8)}`);
+    if (!awgData) return res.status(500).json({ error: 'Не удалось сгенерировать AmneziaWG' });
+
+    res.json({
+      ok: true,
+      conf: awgData.conf,
+      wireguardUrl: awgData.wireguardUrl,
+      awgUrl: awgData.awgUrl,
+      peer: awgData.peer
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Скачивание .conf файла для пользователя
+router.get('/user/awg-download', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const userEmail = req.user.email || '';
+    const userIdentifier = userEmail || userId;
+    const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, 'izinet_AmneziaWG');
+    if (!awgData?.conf) return res.status(500).send('Конфигурация AmneziaWG недоступна');
+
+    const safeName = String(userEmail || 'user').replace(/[^a-zA-Z0-9._-]/g, '_');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="izinet-${safeName}-amneziawg.conf"`);
+    res.send(awgData.conf);
+  } catch (err: any) {
+    res.status(500).send('Ошибка генерации AmneziaWG: ' + err.message);
+  }
+});
+
 export default router;
