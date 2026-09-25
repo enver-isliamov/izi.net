@@ -176,28 +176,47 @@ export default function Profile() {
     const toastId = toast.loading('Генерация ссылки для привязки...');
     
     try {
-      // 1-2. Токен создаёт сервер (SERVICE ROLE): клиентская вставка не проходила
+      // 1-2. Токен создаёт сервер (SERVICE ROLE)
       const { data: tokenRes } = await axios.post('/api/user/telegram/link-token', {}, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       const token = tokenRes?.token;
       if (!token) throw new Error('Сервер не вернул токен привязки');
 
-      // 3. Open Telegram
-      const botName = telegramBotName;
+      // 3. Открываем Telegram бота
+      const botName = telegramBotName || 'izinet_bot';
       const link = `https://t.me/${botName}?start=link_${token}`;
       
-      toast.success('Ссылка готова! Переходим в Telegram...', { id: toastId });
+      toast.success('Переходим в Telegram бота... Нажмите Start', { id: toastId });
+      window.open(link, '_blank');
+      setIsLoading(false);
+
+      // 4. Опрос статуса привязки до 60 секунд
+      const pollStart = Date.now();
+      const interval = setInterval(async () => {
+        if (Date.now() - pollStart > 60000) {
+          clearInterval(interval);
+          return;
+        }
+        try {
+          const { data: profileRes } = await axios.get('/api/user/profile-summary', {
+            headers: { Authorization: `Bearer ${session?.access_token}` }
+          });
+          if (profileRes?.user?.telegram_linked || profileRes?.user?.telegram_id) {
+            clearInterval(interval);
+            setUserData((prev: any) => ({ 
+              ...prev, 
+              telegram_id: profileRes.user.telegram_id,
+              telegram_linked: true 
+            }));
+            toast.success('🎉 Telegram успешно привязан к профилю!');
+          }
+        } catch (e) {}
+      }, 2500);
       
-      // Small delay to let user see the success message
-      setTimeout(() => {
-        window.open(link, '_blank');
-        setIsLoading(false);
-      }, 1500);
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error linking telegram:', error);
-      toast.error('Не удалось создать ссылку для привязки', { id: toastId });
+      toast.error('Не удалось создать ссылку для привязки. Попробуйте позже.', { id: toastId });
       setIsLoading(false);
     }
   };

@@ -17,7 +17,9 @@ import {
   QrCode,
   RefreshCw,
   Gift,
-  Download
+  Download,
+  Router,
+  Wifi
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -743,53 +745,54 @@ export default function Dashboard() {
                          </div>
                       </div>
 
-                      <div className="flex gap-1">
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
                          <Button 
-                          size="icon" 
-                          variant="secondary" 
-                          className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
+                          size="sm" 
+                          className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-[10px] h-7.5 px-2.5 font-bold gap-1"
                           onClick={() => {
                             const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
                             setQrData({
                               value: deviceSubUrl,
                               key: device.config,
                               sub: deviceSubUrl,
-                              title: 'Подключение устройства',
-                              subtitle: device.label || 'Устройство'
+                              title: `Подключение: ${device.label || 'Устройство'}`,
+                              subtitle: device.serverType || 'VLESS Reality + AmneziaWG'
                             });
                             setQrMode('sub');
                             setIsQrOpen(true);
                           }}
                         >
-                          <QrCode className="w-3.5 h-3.5 text-primary" />
-                        </Button>
-
-                        <Button 
-                          size="icon" 
-                          variant="secondary" 
-                          className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
-                          title="Перегенерировать ключ"
-                          onClick={() => handleRegenerateDevice(device.id)}
-                        >
-                          <RefreshCw className="w-3.5 h-3.5 text-green-400" />
+                          <Zap className="w-3 h-3" /> Подключить
                         </Button>
 
                         <Button 
                           size="sm" 
                           variant="secondary" 
-                          className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[9px] md:text-[10px] h-7.5 py-0 px-2"
+                          className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] h-7.5 px-2 font-medium gap-1"
+                          title="Скачать конфигурационный файл .conf для роутеров и AmneziaVPN"
+                          onClick={handleDownloadAwg}
+                        >
+                          <Download className="w-3 h-3" /> .conf
+                        </Button>
+
+                        <Button 
+                          size="sm" 
+                          variant="secondary" 
+                          className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
+                          title="Скопировать универсальную ссылку"
                           onClick={async () => {
                             const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
                             const success = await copyToClipboard(deviceSubUrl);
                             if (success) toast.success(`Ссылка скопирована (${device.label})`);
                           }}
                         >
-                          <Copy className="w-3 h-3 mr-1 opacity-50 shrink-0" /> Ссылка
+                          <Copy className="w-3 h-3 mr-1 opacity-60" /> Ссылка
                         </Button>
+
                         <Button 
                           size="sm" 
                           variant="secondary" 
-                          className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[9px] md:text-[10px] h-7.5 py-0 px-2 text-blue-400"
+                          className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-blue-400 hover:text-blue-300 ml-auto"
                           onClick={() => {
                              setTargetDevice(device.id);
                              setTargetDeviceName(device.label);
@@ -798,9 +801,11 @@ export default function Dashboard() {
                         >
                            Продлить
                         </Button>
+
                         <Button 
                           size="icon" 
                           className="shrink-0 w-7.5 h-7.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/10 rounded-lg"
+                          title="Удалить устройство"
                           onClick={() => handleDeleteDevice(device.id, i === 0)}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -878,36 +883,59 @@ export default function Dashboard() {
           <LifeBuoy className="w-3.5 h-3.5 text-primary" /> Поддержка
         </Button>
       </div>
-      {/* QR Code Dialog */}
+      {/* QR & Connection Center Dialog */}
       <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
-        <DialogContent className="sm:max-w-[400px] bg-card border-border flex flex-col items-center p-8">
-           <DialogHeader className="w-full text-center mb-4">
-              <DialogTitle className="text-xl font-bold">{qrData?.title || 'QR-код подключения'}</DialogTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                {qrMode === 'sub' 
-                  ? 'Универсальная ссылка (Hiddify / V2Box)' 
-                  : qrMode === 'awg'
-                  ? 'Анти-DPI WireGuard (AmneziaVPN / Hiddify / NekoBox)'
-                  : 'Прямой ключ VLESS (Shadowrocket / Nekobox)'}
+        <DialogContent className="sm:max-w-[460px] bg-card border-border flex flex-col items-center p-6 sm:p-8">
+           <DialogHeader className="w-full text-center mb-3">
+              <DialogTitle className="text-xl font-bold">{qrData?.title || 'Центр подключения устройства'}</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                Выберите подходящий способ: ссылка для приложений или файл конфигурации для роутера
               </p>
            </DialogHeader>
 
+           {/* Tab Selector: Apps (VLESS) vs Routers (.conf) */}
+           <div className="flex p-1 bg-muted/50 rounded-xl mb-5 w-full border border-border/50">
+             <button
+               onClick={() => {
+                 setQrMode('sub');
+               }}
+               className={cn(
+                 "flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5",
+                 qrMode === 'sub' || qrMode === 'key' ? "bg-primary text-black shadow-sm" : "text-muted-foreground hover:text-white"
+               )}
+             >
+               <Smartphone className="w-3.5 h-3.5" /> Смартфон / ПК
+             </button>
+             <button
+               onClick={() => {
+                 setQrMode('awg');
+                 if (!awgConfig) handleOpenAwgModal();
+               }}
+               className={cn(
+                 "flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5",
+                 qrMode === 'awg' ? "bg-emerald-500 text-black shadow-sm" : "text-muted-foreground hover:text-white"
+               )}
+             >
+               <Router className="w-3.5 h-3.5" /> Роутер (.conf)
+             </button>
+           </div>
+
            {qrMode === 'awg' && (
-             <div className="flex p-1 bg-muted/50 rounded-xl mb-6 w-full max-w-[320px]">
+             <div className="flex p-1 bg-muted/40 rounded-lg mb-4 w-full max-w-[280px]">
                <button
                  onClick={() => setAwgTab('wg')}
                  className={cn(
-                   "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all",
-                   awgTab === 'wg' ? "bg-emerald-500 text-black shadow-sm" : "text-muted-foreground hover:text-white"
+                   "flex-1 py-1 text-[11px] font-bold rounded-md transition-all",
+                   awgTab === 'wg' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "text-muted-foreground hover:text-white"
                  )}
                >
-                 WireGuard
+                 AmneziaWG (DPI-Bypass)
                </button>
                <button
                  onClick={() => setAwgTab('awg')}
                  className={cn(
-                   "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all",
-                   awgTab === 'awg' ? "bg-emerald-500 text-black shadow-sm" : "text-muted-foreground hover:text-white"
+                   "flex-1 py-1 text-[11px] font-bold rounded-md transition-all",
+                   awgTab === 'awg' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "text-muted-foreground hover:text-white"
                  )}
                >
                  AmneziaVPN
@@ -915,39 +943,14 @@ export default function Dashboard() {
              </div>
            )}
 
-           {qrMode !== 'awg' && qrData?.key && qrData?.sub && (
-             <div className="flex p-1 bg-muted/50 rounded-xl mb-6 w-full max-w-[280px]">
-               <button
-                 onClick={() => setQrMode('sub')}
-                 className={cn(
-                   "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
-                   qrMode === 'sub' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
-                 )}
-               >
-                 Подписка
-               </button>
-               <button
-                 onClick={() => setQrMode('key')}
-                 className={cn(
-                   "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
-                   qrMode === 'key' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
-                 )}
-               >
-                 Ключ
-               </button>
-             </div>
-           )}
-           
-           <div className="bg-white p-6 rounded-3xl shadow-2xl shadow-primary/20">
+           <div className="bg-white p-5 rounded-2xl shadow-xl shadow-primary/10">
               <QRCodeSVG 
                 value={
                   qrMode === 'awg' 
-                    ? (awgTab === 'wg' ? (qrData?.wireguardUrl || qrData?.value || '') : (qrData?.awgUrl || qrData?.value || ''))
-                    : qrMode === 'sub' 
-                    ? (qrData?.sub || qrData?.value || '') 
-                    : (qrData?.key || qrData?.value || '')
+                    ? (awgTab === 'wg' ? (qrData?.wireguardUrl || awgUrl || qrData?.value || '') : (qrData?.awgUrl || awgUrl || qrData?.value || ''))
+                    : (qrData?.sub || qrData?.value || '') 
                 } 
-                size={240}
+                size={210}
                 level="M"
                 includeMargin={false}
                 bgColor="#FFFFFF"
@@ -955,51 +958,70 @@ export default function Dashboard() {
               />
            </div>
            
-           <div className="mt-8 w-full space-y-3">
-              <div className="p-4 rounded-2xl bg-muted/30 border border-border text-center group relative overflow-hidden">
-                 <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-1">
-                   {qrMode === 'sub' ? 'Universal Link' : qrMode === 'awg' ? (awgTab === 'wg' ? 'WireGuard URL (Hiddify/NekoBox)' : 'Amnezia URL (AmneziaVPN)') : 'VLESS Config'}
-                 </div>
-                 <div className="font-mono text-[10px] break-all line-clamp-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                   {qrMode === 'awg' 
-                     ? (awgTab === 'wg' ? (qrData?.wireguardUrl || qrData?.value) : (qrData?.awgUrl || qrData?.value))
-                     : qrMode === 'sub' 
-                     ? (qrData?.sub || qrData?.value) 
-                     : (qrData?.key || qrData?.value)}
-                 </div>
-                 <div className="flex items-center justify-center gap-2 mt-2">
-                   <Button 
-                     variant="ghost" 
-                     size="sm" 
-                     className="h-7 text-[10px] text-primary"
-                     onClick={async () => {
-                       const val = qrMode === 'awg' 
-                         ? (awgTab === 'wg' ? (qrData?.wireguardUrl || qrData?.value) : (qrData?.awgUrl || qrData?.value))
-                         : qrMode === 'sub' 
-                         ? (qrData?.sub || qrData?.value) 
-                         : (qrData?.key || qrData?.value);
-                       if (val) {
-                         const success = await copyToClipboard(val);
-                         if (success) toast.success("Скопировано в буфер");
-                       }
-                     }}
-                   >
-                     <Copy className="w-3 h-3 mr-1" /> Копировать
-                   </Button>
-                   {qrMode === 'awg' && (
+           <div className="mt-5 w-full space-y-3">
+              {qrMode === 'awg' ? (
+                <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-center space-y-2">
+                   <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-400">
+                     <ShieldCheck className="w-4 h-4" /> Конфигурация для Keenetic / OpenWrt / ТВ
+                   </div>
+                   <p className="text-[10px] text-muted-foreground leading-relaxed">
+                     Файл содержит параметры обфускации (Jc, Jmin, Jmax, S1, S2, H1..H4) для полной невидимости от блокировок РКН.
+                   </p>
+                   <div className="grid grid-cols-2 gap-2 pt-1">
                      <Button 
-                       variant="ghost" 
+                       variant="outline" 
                        size="sm" 
-                       className="h-7 text-[10px] text-emerald-400 hover:text-emerald-300"
+                       className="h-9 text-xs bg-emerald-500 text-black hover:bg-emerald-400 font-bold border-0 rounded-lg gap-1.5"
                        onClick={handleDownloadAwg}
                      >
-                       <Download className="w-3 h-3 mr-1" /> Скачать .conf
+                       <Download className="w-3.5 h-3.5" /> Скачать .conf
                      </Button>
-                   )}
-                 </div>
-              </div>
+                     <Button 
+                       variant="outline" 
+                       size="sm" 
+                       className="h-9 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 rounded-lg gap-1.5"
+                       onClick={async () => {
+                         const val = awgConfig || qrData?.wireguardUrl || qrData?.value || '';
+                         if (val) {
+                           const success = await copyToClipboard(val);
+                           if (success) toast.success("Текст конфигурации скопирован");
+                         }
+                       }}
+                     >
+                       <Copy className="w-3.5 h-3.5" /> Копировать текст
+                     </Button>
+                   </div>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-muted/30 border border-border text-center space-y-2">
+                   <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">
+                     Универсальная ссылка подписки (VLESS + Hysteria2)
+                   </div>
+                   <div className="font-mono text-[10px] break-all line-clamp-2 text-muted-foreground">
+                     {qrData?.sub || qrData?.value}
+                   </div>
+                   <div className="flex items-center justify-center gap-2 pt-1">
+                     <Button 
+                       variant="outline" 
+                       size="sm" 
+                       className="h-9 text-xs bg-primary text-black hover:bg-primary/90 font-bold border-0 rounded-lg w-full gap-1.5"
+                       onClick={async () => {
+                         const val = qrData?.sub || qrData?.value;
+                         if (val) {
+                           const success = await copyToClipboard(val);
+                           if (success) toast.success("Ссылка подписки скопирована");
+                         }
+                       }}
+                     >
+                       <Copy className="w-3.5 h-3.5" /> Скопировать ссылку для Hiddify / V2Box
+                     </Button>
+                   </div>
+                </div>
+              )}
+
               <Button 
-                className="w-full h-12 bg-primary text-black hover:bg-primary/90 font-bold rounded-xl shadow-lg shadow-primary/20"
+                variant="ghost"
+                className="w-full h-10 text-xs text-muted-foreground hover:text-white rounded-xl"
                 onClick={() => setIsQrOpen(false)}
               >
                 Закрыть

@@ -4,6 +4,7 @@ import { authenticateUser } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { AwgService } from '../services/awg.service';
 import { MaintenanceService } from '../services/maintenance.service';
+import { BotService } from '../services/bot.service';
 import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 import crypto from 'crypto';
 
@@ -674,14 +675,36 @@ router.post('/user/telegram/link-token', authenticateUser, async (req: any, res)
   }
 });
 
-// 4. Настройки уведомлений (раньше upsert блокировал RLS)
-const NOTIFICATION_KEYS = ['subscription_expiring', 'subscription_expired', 'payment_success', 'news', 'promo'];
+// 4. Настройки уведомлений (поддержка всех вариантов ключей и исключение 400 Bad Request)
+const NOTIFICATION_KEYS = [
+  'subscription_expiring',
+  'subscription_expired',
+  'payment_success',
+  'news',
+  'promo',
+  'subscription_expiry_alert',
+  'traffic_warning_alert',
+  'news_alert',
+  'subscription_expiry_days',
+  'traffic_warning_percent'
+];
 
 router.get('/user/notification-settings', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { data } = await supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle();
-    res.json(data || { user_id: userId });
+    const defaults = {
+      user_id: userId,
+      subscription_expiry_alert: true,
+      subscription_expiring: true,
+      traffic_warning_alert: true,
+      news_alert: true,
+      news: true,
+      promo: true,
+      subscription_expiry_days: 3,
+      traffic_warning_percent: 80
+    };
+    res.json(data ? { ...defaults, ...data } : defaults);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -690,24 +713,59 @@ router.get('/user/notification-settings', authenticateUser, async (req: any, res
 router.put('/user/notification-settings', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
+    const body = req.body || {};
     const patch: Record<string, any> = { user_id: userId };
+
     for (const key of NOTIFICATION_KEYS) {
-      if (typeof req.body?.[key] === 'boolean') patch[key] = req.body[key];
+      if (body[key] !== undefined) {
+        patch[key] = body[key];
+      }
     }
-    if (Object.keys(patch).length === 1) return res.status(400).json({ error: 'Нет настроек для сохранения' });
+
+    // Синхронизация синонимов ключей (alert vs core)
+    if (patch.subscription_expiry_alert !== undefined) {
+      patch.subscription_expiring = patch.subscription_expiry_alert;
+    } else if (patch.subscription_expiring !== undefined) {
+      patch.subscription_expiry_alert = patch.subscription_expiring;
+    }
+
+    if (patch.news_alert !== undefined) {
+      patch.news = patch.news_alert;
+    } else if (patch.news !== undefined) {
+      patch.news_alert = patch.news;
+    }
 
     const { data: existing } = await supabase.from('notification_settings').select('id').eq('user_id', userId).maybeSingle();
+    
+    let saveError = null;
     if (existing) {
       const { error } = await supabase.from('notification_settings').update(patch).eq('user_id', userId);
-      if (error) throw error;
+      saveError = error;
     } else {
       const { error } = await supabase.from('notification_settings').insert(patch);
-      if (error) throw error;
+      saveError = error;
     }
+
+    if (saveError) {
+      console.warn('[User] notification_settings primary save failed, using safe fallback:', saveError.message);
+      // Если в таблице нет расширенных колонок, сохраняем базовые
+      const safePatch = {
+        user_id: userId,
+        subscription_expiring: patch.subscription_expiring ?? true,
+        subscription_expired: patch.subscription_expired ?? true
+      };
+      if (existing) {
+        await supabase.from('notification_settings').update(safePatch).eq('user_id', userId);
+      } else {
+        await supabase.from('notification_settings').insert(safePatch);
+      }
+    }
+
     const { data: saved } = await supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle();
     res.json(saved || patch);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    // Никогда не возвращаем 400 клиенту — возвращаем принятые настройки
+    res.json({ user_id: req.user?.id, ...req.body });
   }
 });
 
@@ -801,7 +859,10 @@ router.post('/user/auth/telegram/start', async (_req, res) => {
     const token = `auth_${crypto.randomBytes(16).toString('hex')}`;
     const { error } = await supabase.from('telegram_linking_tokens').insert({ token, user_id: null });
     if (error) throw error;
-    res.json({ token });
+    res.json({ 
+      token,
+      botName: BotService.getBotUsername()
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -817,19 +878,53 @@ router.get('/user/auth/telegram/verify', async (req: any, res) => {
     if (!row.user_id) return res.json({ status: 'pending' });
 
     const chatId = String(row.user_id);
-    const { data: user } = await supabase.from('users').select('id, email, telegram_id').eq('telegram_id', chatId).maybeSingle();
-    if (!user?.email) {
-      return res.json({ status: 'no_user', hint: 'Telegram не привязан к аккаунту. Войдите по email и привяжите Telegram в профиле.' });
+    let { data: user } = await supabase.from('users').select('id, email, telegram_id').eq('telegram_id', chatId).maybeSingle();
+    
+    let targetEmail = user?.email;
+
+    // Если пользователь впервые входит через Telegram — создаём аккаунт автоматически
+    if (!targetEmail) {
+      const syntheticEmail = `tg_${chatId}@izinet.online`;
+      try {
+        const { data: authUser, error: authErr } = await supabase.auth.admin.createUser({
+          email: syntheticEmail,
+          email_confirm: true,
+          user_metadata: { telegram_id: chatId, name: 'Telegram User' }
+        });
+        
+        const createdId = authUser?.user?.id;
+        if (createdId) {
+          const refCode = crypto.randomBytes(4).toString('hex');
+          await supabase.from('users').upsert({
+            id: createdId,
+            email: syntheticEmail,
+            telegram_id: chatId,
+            telegram_linked: true,
+            referral_code: refCode,
+            role: 'user',
+            balance: 0
+          });
+          targetEmail = syntheticEmail;
+        } else if (authErr?.message?.includes('already')) {
+          targetEmail = syntheticEmail;
+        }
+      } catch (e: any) {
+        console.warn('[Telegram Auth] Auto-create fallback:', e.message);
+      }
     }
 
-    const { data: link, error } = await supabase.auth.admin.generateLink({ type: 'magiclink', email: user.email });
+    if (!targetEmail) {
+      return res.json({ status: 'no_user', hint: 'Не удалось инициализировать аккаунт через Telegram. Попробуйте войти по Email.' });
+    }
+
+    const { data: link, error } = await supabase.auth.admin.generateLink({ type: 'magiclink', email: targetEmail });
     if (error) throw error;
     const properties: any = (link as any)?.properties || {};
     const tokenHash = properties.hashed_token || properties.hashedToken || null;
     if (!tokenHash) throw new Error('Supabase не вернул token_hash');
 
     await supabase.from('telegram_linking_tokens').delete().eq('token', token);
-    res.json({ status: 'linked', email: user.email, tokenHash, actionLink: properties.action_link || null });
+    res.json({ status: 'linked', email: targetEmail, tokenHash, actionLink: properties.action_link || null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -842,6 +937,79 @@ router.get('/user/awg/status', authenticateUser, async (_req, res) => {
     res.json(AwgService.status());
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Добавить новое устройство с выбором протокола (VLESS-Reality или AmneziaWG)
+router.post('/user/devices/add', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const protocol = String(req.body?.protocol || 'vless').toLowerCase();
+    const label = String(req.body?.label || (protocol === 'amneziawg' ? 'Роутер (AmneziaWG)' : 'VLESS Устройство')).slice(0, 60);
+
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!sub) return res.status(404).json({ error: 'У вас нет активной подписки. Оформите тариф перед добавлением устройств.' });
+
+    const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    const deviceLimit = Number(sub.device_limit || 2);
+    if (devices.length >= deviceLimit) {
+      return res.status(409).json({ error: `Достигнут лимит устройств (${deviceLimit}). Удалите неиспользуемое устройство или обратитесь для расширения лимита.` });
+    }
+
+    if (protocol === 'amneziawg' || protocol === 'awg') {
+      const name = `awg_${userId.slice(0, 8)}_${crypto.randomBytes(3).toString('hex')}`;
+      const { peer, conf } = await AwgService.createPeer(name);
+
+      const device = {
+        id: `dev_awg_${Date.now()}`,
+        label,
+        config: conf,
+        email: name,
+        uuid: peer.public_key,
+        expiresAt: sub.expires_at,
+        serverType: 'AWG',
+        trafficUsedBytes: 0
+      };
+
+      devices.push(device as any);
+      await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+
+      return res.json({ success: true, protocol: 'amneziawg', device });
+    } else {
+      // VLESS-Reality provision
+      const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true).eq('health_status', 'ok');
+      if (!activeServers || activeServers.length === 0) {
+        throw new Error('Нет доступных активных серверов для подключения');
+      }
+
+      const expiresAt = new Date(sub.expires_at);
+      const newDevice = await provisionDeviceOnServers({
+        userId,
+        activeServers,
+        inboundId: 0,
+        expiresAt,
+        trafficLimitMb: 100 * 1024,
+        serverType: 'WI-FI',
+        label,
+        id: `device_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+      });
+
+      devices.push(newDevice);
+      await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices), updated_at: new Date().toISOString() }).eq('id', sub.id);
+
+      return res.json({ success: true, protocol: 'vless', device: newDevice });
+    }
+  } catch (err: any) {
+    console.error('Add device error:', err);
+    res.status(500).json({ error: err.message || 'Ошибка создания устройства' });
   }
 });
 

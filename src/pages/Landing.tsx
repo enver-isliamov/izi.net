@@ -8,11 +8,11 @@ export default function Landing() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const handleCTA = () => {
+  const handleCTA = (mode: 'login' | 'register' = 'register') => {
     if (user) {
       navigate('/dashboard');
     } else {
-      navigate('/login');
+      navigate(`/login?mode=${mode}`);
     }
   };
 
@@ -27,12 +27,12 @@ export default function Landing() {
             </div>
             <span className="font-black text-white text-lg tracking-tight uppercase">izinet</span>
           </div>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" className="text-muted-foreground hover:text-white hidden sm:flex" onClick={() => navigate('/login')}>
-              Личный кабинет
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" className="text-muted-foreground hover:text-white hidden sm:flex text-xs font-medium" onClick={() => handleCTA('login')}>
+              Вход
             </Button>
-            <Button onClick={handleCTA} className="bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-5 h-9">
-              {user ? 'В панель' : 'Начать'}
+            <Button onClick={() => handleCTA('register')} className="bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-4 h-9 text-xs">
+              {user ? 'В панель' : 'Регистрация'}
             </Button>
           </div>
         </div>
@@ -40,7 +40,7 @@ export default function Landing() {
 
       <main className="flex-1">
         {/* Hero Section */}
-        <section className="relative pt-20 pb-32 overflow-hidden">
+        <section className="relative pt-16 pb-28 overflow-hidden">
           {/* Background Glow */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/10 blur-[120px] rounded-full pointer-events-none opacity-50"></div>
           
@@ -50,7 +50,7 @@ export default function Landing() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              Стабильно работает в {new Date().getFullYear()}
+              VLESS Reality • Hysteria 2 • AmneziaWG
             </div>
             
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-black text-white tracking-tighter leading-[1.1] mb-6">
@@ -62,10 +62,25 @@ export default function Landing() {
               Защищенный и скоростной доступ ко всем мировым ресурсам. Умная маршрутизация: локальные сервисы работают напрямую, остальной мир — через защищенный туннель.
             </p>
             
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Button onClick={handleCTA} className="bg-primary text-black hover:bg-primary/90 text-base font-bold h-14 px-8 rounded-2xl w-full sm:w-auto shadow-[0_0_40px_-10px_rgba(0,255,136,0.5)] transition-all hover:scale-105 duration-300">
-                Начать использование <ArrowRight className="ml-2 w-5 h-5" />
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
+              <Button onClick={() => handleCTA('register')} className="bg-primary text-black hover:bg-primary/90 text-sm font-bold h-13 px-8 rounded-2xl w-full shadow-[0_0_40px_-10px_rgba(0,255,136,0.5)] transition-all hover:scale-105 duration-300">
+                Создать аккаунт в 1 клик <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
+            </div>
+            
+            <div className="mt-4 flex items-center justify-center gap-3 text-xs text-muted-foreground">
+              <span>Быстрый вход:</span>
+              <span className="inline-flex items-center gap-1 font-mono text-zinc-300 bg-white/5 px-2 py-0.5 rounded border border-white/10">
+                Google
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 font-mono text-zinc-300 bg-white/5 px-2 py-0.5 rounded border border-white/10">
+                Telegram
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 font-mono text-zinc-300 bg-white/5 px-2 py-0.5 rounded border border-white/10">
+                Email
+              </span>
             </div>
             
             <div className="mt-12 flex flex-wrap justify-center gap-x-8 gap-y-4 text-sm font-medium text-muted-foreground/60">

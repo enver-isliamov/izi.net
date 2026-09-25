@@ -4,6 +4,7 @@ import { getXuiForServer } from '../services/xui.service';
 import { parseVpnDevices, getPublishedVlessPorts } from '../utils/vpn';
 import { MaintenanceService } from '../services/maintenance.service';
 import { AwgService } from '../services/awg.service';
+import { BotService } from '../services/bot.service';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ const router = Router();
 
 router.get('/config', (req, res) => {
   res.json({
-    telegramBotName: process.env.VITE_TELEGRAM_BOT_NAME || 'izinet_bot',
+    telegramBotName: BotService.getBotUsername(),
     publicUrl: process.env.PUBLIC_URL || 'https://izinet.online'
   });
 });
