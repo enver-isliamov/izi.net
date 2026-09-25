@@ -101,13 +101,18 @@ router.get('/universal-link-visible', async (req, res) => {
   }
 });
 
-router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/universal/:id', '/subscription/:id'], async (req, res) => {
+router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscription/universal/:id', '/subscription/:id', '/universal/:id'], async (req, res) => {
   const { id } = req.params;
   const { deviceId } = req.query;
 
+  // Prevent routing collisions with static sub-routes
+  if (['config', 'servers', 'sync-servers', 'sync-traffic', 'universal-link-visible'].includes(id)) {
+    return res.status(404).send('Not found');
+  }
+
   try {
     let sub: any = null;
-    const { data: subById, error: errById } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
+    const { data: subById } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
     
     if (subById) {
       sub = subById;
@@ -157,65 +162,110 @@ router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/unive
     const activeServers = (allActiveServers && allActiveServers.length > 0) ? allActiveServers : [];
 
     let devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
+    let isSpecificDevice = false;
     if (deviceId) {
-      devices = devices.filter((d: any) => d.id === deviceId);
-    }
-
-    const collectedVlessLinks: string[] = [];
-
-    // Extract VLESS links from stored device configs
-    for (const device of devices) {
-      if (device.config) {
-        const lines = device.config.split('\n').map((l: string) => l.trim()).filter(Boolean);
-        for (const line of lines) {
-          if (line.startsWith('vless://')) {
-            collectedVlessLinks.push(line);
-          }
-        }
-      }
-    }
-
-    // If no VLESS links found or stored configs are empty, heal dynamically from active servers
-    if (collectedVlessLinks.length === 0 && activeServers.length > 0 && devices.length > 0) {
-      console.log(`🔄 [SUB] Dynamic generation of Reality links for subscription ${sub.id}`);
-      for (const device of devices) {
-        if (!device.uuid || !device.email) continue;
-        for (const server of activeServers) {
-          try {
-            const { instance, server: serverData } = await getXuiForServer(server.id);
-            const inbounds = await instance.getInbounds();
-            const pubPorts = await getPublishedVlessPorts();
-            const realityInbounds = inbounds.filter((ib: any) => {
-              try {
-                const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
-              } catch { return false; }
-            });
-            for (const ri of realityInbounds) {
-              try {
-                const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
-                if (rawLink) {
-                  const sName = (server.name || 'Server').replace(/\s+/g, '_');
-                  const formatted = rawLink.replace(/(#.*)?$/, `#izinet_${sName}_Reality`);
-                  collectedVlessLinks.push(formatted);
-                }
-              } catch (e) {}
-            }
-          } catch (e) {}
-        }
+      const filtered = devices.filter((d: any) => d.id === deviceId);
+      if (filtered.length > 0) {
+        devices = filtered;
+        isSpecificDevice = true;
       }
     }
 
     const finalLinks: string[] = [];
 
-    // 1. Add VLESS Reality links (preserving clean server-specific titles)
-    for (const rawVless of collectedVlessLinks) {
-      const match = rawVless.match(/#(.+)$/);
-      let sTitle = match ? decodeURIComponent(match[1]) : 'Reality';
-      if (!sTitle.toLowerCase().includes('izinet')) {
-        sTitle = `izinet_${sTitle}`;
+    // Helper: Find server from host/ip in link
+    const findMatchingServer = (link: string) => {
+      const hostMatch = link.match(/@([^:/?#]+):/);
+      if (!hostMatch) return null;
+      const host = hostMatch[1].toLowerCase();
+      return activeServers.find((s: any) => 
+        (s.ip && s.ip.toLowerCase() === host) ||
+        (s.domain && s.domain.toLowerCase() === host) ||
+        (s.public_host && s.public_host.toLowerCase() === host)
+      );
+    };
+
+    // Helper: Clean remark format
+    const formatRemark = (serverName: string, suffix?: string) => {
+      const cleanName = serverName.trim().replace(/\s+/g, '_');
+      const base = cleanName.startsWith('izinet_') ? cleanName : `izinet_${cleanName}`;
+      return suffix ? `${base}_${suffix}` : base;
+    };
+
+    // 1. Process devices
+    for (const device of devices) {
+      const isAwgDevice = String(device.serverType).toUpperCase() === 'AWG' || String(device.serverType).toUpperCase() === 'ROUTER';
+
+      if (isAwgDevice) {
+        // AmneziaWG device
+        try {
+          const userIdentifier = device.email || userEmail || sub.user_id || sub.id;
+          const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, formatRemark(device.label || 'AmneziaWG'));
+          if (awgData?.wireguardUrl) {
+            finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG')}`));
+          }
+          if (awgData?.awgUrl) {
+            finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG', 'Native')}`));
+          }
+        } catch (e: any) {
+          console.warn(`⚠️ [SUB] AWG device link error: ${e.message}`);
+        }
+      } else {
+        // VLESS Reality device
+        const collectedVless: string[] = [];
+
+        if (device.config) {
+          const lines = device.config.split('\n').map((l: string) => l.trim()).filter(Boolean);
+          for (const line of lines) {
+            if (line.startsWith('vless://')) {
+              collectedVless.push(line);
+            }
+          }
+        }
+
+        // If no VLESS links found in stored config, heal dynamically
+        if (collectedVless.length === 0 && activeServers.length > 0 && device.uuid && device.email) {
+          for (const server of activeServers) {
+            try {
+              const { instance, server: serverData } = await getXuiForServer(server.id);
+              const inbounds = await instance.getInbounds();
+              const pubPorts = await getPublishedVlessPorts();
+              const realityInbounds = inbounds.filter((ib: any) => {
+                try {
+                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                  return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
+                } catch { return false; }
+              });
+              for (const ri of realityInbounds) {
+                try {
+                  const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                  if (rawLink) {
+                    collectedVless.push(rawLink);
+                  }
+                } catch (e) {}
+              }
+            } catch (e) {}
+          }
+        }
+
+        // Format each VLESS link with proper server name
+        for (const rawVless of collectedVless) {
+          const matchedServer = findMatchingServer(rawVless);
+          let title = '';
+          if (matchedServer?.name) {
+            title = formatRemark(matchedServer.name, 'Reality');
+          } else {
+            const hashMatch = rawVless.match(/#(.+)$/);
+            const rawTag = hashMatch ? decodeURIComponent(hashMatch[1]) : '';
+            if (rawTag && !rawTag.includes('@') && !rawTag.startsWith('user_')) {
+              title = formatRemark(rawTag.replace(/^izinet_/, ''));
+            } else {
+              title = formatRemark('Reality');
+            }
+          }
+          finalLinks.push(rawVless.replace(/(#.*)?$/, `#${title}`));
+        }
       }
-      finalLinks.push(rawVless.replace(/(#.*)?$/, `#${sTitle}`));
     }
 
     // 2. Add Hysteria 2 links for each active server
@@ -226,8 +276,7 @@ router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/unive
         if (activeServers.length > 0) {
           for (const server of activeServers) {
             const host = server.domain || server.ip || '194.50.94.28';
-            const sName = (server.name || 'Server').replace(/\s+/g, '_');
-            finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1#izinet_${sName}_Hysteria2`);
+            finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
           }
         } else {
           finalLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#izinet_Hysteria2`);
@@ -237,18 +286,20 @@ router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/unive
       console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
     }
 
-    // 3. Add AmneziaWG (WireGuard Anti-DPI) links for user
-    try {
-      const userIdentifier = userEmail || sub.user_id || sub.id;
-      const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${safeUserTag}_AmneziaWG`);
-      if (awgData?.wireguardUrl) {
-        finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG`));
+    // 3. Add AmneziaWG (WireGuard Anti-DPI) links if universal subscription
+    if (!isSpecificDevice) {
+      try {
+        const userIdentifier = userEmail || sub.user_id || sub.id;
+        const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${safeUserTag}_AmneziaWG`);
+        if (awgData?.wireguardUrl) {
+          finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG`));
+        }
+        if (awgData?.awgUrl) {
+          finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG_Native`));
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ [SUB] AmneziaWG link creation skipped: ${e.message}`);
       }
-      if (awgData?.awgUrl) {
-        finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG_Native`));
-      }
-    } catch (e: any) {
-      console.warn(`⚠️ [SUB] AmneziaWG link creation skipped: ${e.message}`);
     }
 
     // Deduplicate exact duplicate lines
@@ -275,7 +326,7 @@ router.get(['/sub/:id', '/user/subscription/universal/:id', '/subscription/unive
 });
 
 // Скачивание готового файла .conf для приложения AmneziaWG / WireGuard
-router.get(['/sub/:id/awg.conf', '/subscription/awg-conf/:id', '/api/subscription/awg-conf/:id'], async (req, res) => {
+router.get(['/:id/awg.conf', '/sub/:id/awg.conf', '/subscription/awg-conf/:id', '/api/subscription/awg-conf/:id', '/awg-conf/:id'], async (req, res) => {
   const { id } = req.params;
   try {
     let sub: any = null;
@@ -305,7 +356,7 @@ router.get(['/sub/:id/awg.conf', '/subscription/awg-conf/:id', '/api/subscriptio
 });
 
 // Получение информации о параметрах подключения AmneziaWG в формате JSON
-router.get(['/sub/:id/awg-info', '/subscription/awg-info/:id', '/api/subscription/awg-info/:id'], async (req, res) => {
+router.get(['/:id/awg-info', '/sub/:id/awg-info', '/subscription/awg-info/:id', '/api/subscription/awg-info/:id', '/awg-info/:id'], async (req, res) => {
   const { id } = req.params;
   try {
     let sub: any = null;

@@ -71,6 +71,7 @@ app.use('/api', generalLimiter);
 app.use('/api', userRoutes);
 app.use('/api', configRoutes);
 app.use('/api/subscription', configRoutes);
+app.use('/subscription', configRoutes);
 app.use('/sub', configRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminTestsRoutes);
