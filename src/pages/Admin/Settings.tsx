@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'motion/react';
-import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2, Lock, Unlock, Copy, Archive, Download, Trash2, HardDrive } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Save, RefreshCw, Key, ShieldCheck, Wallet, AlertCircle, Eye, EyeOff, Cloud, Globe, Activity, CheckCircle2, Lock, Unlock, Copy, Archive, Download, Trash2, HardDrive, Terminal, ArrowUpCircle, Sparkles, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -212,17 +212,86 @@ export default function AdminSettings() {
 
   const [isRepairing, setIsRepairing] = useState(false);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [isGitUpdating, setIsGitUpdating] = useState(false);
+  const [gitUpdateLogs, setGitUpdateLogs] = useState<string[]>([]);
+  const [showGitConfirmModal, setShowGitConfirmModal] = useState(false);
+  const [showGitLogs, setShowGitLogs] = useState(false);
   const [systemLogs, setSystemLogs] = useState<string[]>([
     '[Система] Журнал операций панели изинет.',
     '[Система] Выберите действие — результат появится здесь.',
-    '[Подсказка] Полная диагностика — в разделе «Тесты». Обновление сервера — командой bash update.sh по SSH.'
+    '[Подсказка] Полная диагностика — в разделе «Тесты». Обновление сервера — кнопкой «Обновить из GitHub» или командой bash update.sh.'
   ]);
 
   const handleCopyDeployScript = () => {
-    const script = `cd /opt/izinet && \\
-bash update.sh`;
+    const script = `cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh`;
     navigator.clipboard.writeText(script);
     toast.success('Команда обновления скопирована!');
+  };
+
+  const handleStartGitUpdate = async () => {
+    setShowGitConfirmModal(false);
+    setIsGitUpdating(true);
+    setShowGitLogs(true);
+    setGitUpdateLogs([
+      `[${new Date().toLocaleTimeString('ru-RU')}] 🚀 Запуск: cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh`,
+      `[${new Date().toLocaleTimeString('ru-RU')}] ⏳ Отправка команды на VPS хост...`
+    ]);
+    const toastId = toast.loading('Запуск обновления из GitHub...', { id: 'git-update' });
+
+    try {
+      const { data } = await axios.post('/api/admin/system/git-update', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+
+      if (data.ok) {
+        toast.loading('Выполняется обновление из GitHub и пересборка контейнеров...', { id: 'git-update' });
+        
+        let pollCount = 0;
+        const pollInterval = setInterval(async () => {
+          pollCount++;
+          try {
+            const statusRes = await axios.get('/api/admin/system/git-update/status', {
+              headers: { Authorization: `Bearer ${session?.access_token}` }
+            });
+            
+            if (statusRes.data?.logs?.length) {
+              setGitUpdateLogs(statusRes.data.logs);
+            }
+
+            if (statusRes.data?.completed) {
+              clearInterval(pollInterval);
+              setIsGitUpdating(false);
+              toast.success('🎉 Обновление из GitHub успешно завершено!', { id: 'git-update', duration: 8000 });
+              setSystemLogs(prev => [
+                ...prev,
+                `[Успех] Обновление из GitHub ветки main и перезапуск Docker завершены!`,
+                ...(statusRes.data.logs.slice(-6))
+              ]);
+            } else if (statusRes.data?.error) {
+              clearInterval(pollInterval);
+              setIsGitUpdating(false);
+              toast.error('Процесс завершился с ошибками. Проверьте лог.', { id: 'git-update' });
+            }
+          } catch (pollErr) {
+            // В момент пересборки контейнер может кратковременно перезапускаться
+            if (pollCount > 30) {
+              // Через 75 секунд если сервер ожил — проверяем финализацию
+            }
+          }
+        }, 2500);
+
+        // Таймаут на всякий случай — 5 минут
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          setIsGitUpdating(false);
+        }, 300000);
+      }
+    } catch (e: any) {
+      setIsGitUpdating(false);
+      const errMsg = e.response?.data?.error || e.message;
+      toast.error('Ошибка запуска обновления: ' + errMsg, { id: 'git-update' });
+      setGitUpdateLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+    }
   };
 
   const handleRepairVless = async () => {
@@ -790,28 +859,107 @@ bash update.sh`;
               </button>
             </div>
 
-            {/* GitHub Deploy Details Card */}
-            <div className="p-4 bg-blue-500/5 rounded-xl flex flex-col justify-between border border-blue-500/10 space-y-3 shadow-md shadow-blue-500/5">
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-blue-400">Скрипт обновления (GitHub)</h3>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Скопируйте команду ниже и выполните её в терминале сервера. Скрипт update.sh обновит код, поправит .env, пересоберёт контейнеры и применит патчи Reality и маршрутизации.
-                </p>
-              </div>
-              <div className="relative group">
-                <div className="bg-black/40 border border-blue-500/20 rounded-xl p-3 font-mono text-[10px] text-blue-200 overflow-x-auto whitespace-pre">
-{`cd /opt/izinet && \\
-bash update.sh`}
+            {/* GitHub Deploy / 1-Click Update Card */}
+            <div className="p-5 bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/30 rounded-2xl flex flex-col justify-between border border-blue-500/30 space-y-4 shadow-lg shadow-blue-500/10 col-span-1 md:col-span-2 lg:col-span-2 relative overflow-hidden group">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-blue-500/20 text-blue-400 rounded-lg border border-blue-500/30">
+                      <Sparkles size={16} className="animate-pulse" />
+                    </span>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      Обновление VPS из GitHub в 1 клик
+                      <span className="text-[10px] bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded-full border border-blue-500/30">
+                        main → update.sh
+                      </span>
+                    </h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
+                    Автоматически скачивает свежий код ветки <code className="text-blue-300 font-mono text-[11px]">main</code>, сбрасывает локальные изменения, пересобирает контейнеры Docker, восстанавливает .env, запускает bootstrap SQLite и накатывает свежие маршруты.
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCopyDeployScript}
-                  className="absolute top-2 right-2 p-1.5 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 rounded-lg transition-colors border border-blue-500/30 backdrop-blur-md"
-                  title="Копировать скрипт"
-                >
-                  <Copy size={12} />
-                </button>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {gitUpdateLogs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowGitLogs(!showGitLogs)}
+                      className="flex items-center gap-1.5 px-3 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl text-xs font-mono border border-white/10 transition-colors"
+                    >
+                      <Terminal size={14} />
+                      <span>{showGitLogs ? 'Скрыть лог' : 'Лог обновления'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={isGitUpdating}
+                    onClick={() => setShowGitConfirmModal(true)}
+                    className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/30 ring-2 ring-blue-500/30 transition-all active:scale-95 shrink-0"
+                  >
+                    {isGitUpdating ? (
+                      <>
+                        <RefreshCw className="animate-spin" size={14} />
+                        <span>Обновление сервера...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpCircle size={15} />
+                        <span>Обновить всё из GitHub (update.sh)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
+
+              {/* Command Preview with Copy */}
+              <div className="relative group">
+                <div className="bg-black/50 border border-blue-500/20 rounded-xl p-3 font-mono text-[11px] text-blue-200 overflow-x-auto whitespace-pre flex items-center justify-between">
+                  <span>cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyDeployScript}
+                    className="p-1.5 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 rounded-lg transition-colors border border-blue-500/30 ml-2 shrink-0"
+                    title="Копировать команду для SSH терминала"
+                  >
+                    <Copy size={12} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Live Git Update Logs Viewer */}
+              {showGitLogs && gitUpdateLogs.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-white/10 animate-in fade-in duration-200">
+                  <div className="flex justify-between items-center text-xs font-mono text-zinc-400">
+                    <span className="flex items-center gap-1.5 text-blue-400">
+                      <Terminal size={13} />
+                      Журнал выполнения git update & docker compose:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setGitUpdateLogs([])}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300 underline"
+                    >
+                      Очистить
+                    </button>
+                  </div>
+                  <div className="bg-neutral-950 font-mono text-[10px] md:text-xs p-4 rounded-xl border border-zinc-800 space-y-1 max-h-60 overflow-y-auto scrollbar-thin select-all">
+                    {gitUpdateLogs.map((log, idx) => {
+                      let color = 'text-zinc-300';
+                      if (log.includes('✅') || log.includes('🎉') || log.toLowerCase().includes('успешно') || log.toLowerCase().includes('success')) color = 'text-emerald-400 font-semibold';
+                      if (log.includes('❌') || log.toLowerCase().includes('error') || log.toLowerCase().includes('fatal') || log.toLowerCase().includes('ошибка')) color = 'text-red-400 font-semibold';
+                      if (log.includes('⚠️') || log.toLowerCase().includes('warning')) color = 'text-amber-400';
+                      if (log.includes('🚀') || log.includes('📡') || log.includes('🔄') || log.includes('⚙️') || log.includes('🐳')) color = 'text-cyan-400 font-medium';
+                      return (
+                        <div key={idx} className="flex gap-2">
+                          <span className="text-zinc-600 shrink-0">~</span>
+                          <span className={color}>{log}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* VPN/RAM Diagnostic Terminal Script Card */}
@@ -1044,6 +1192,85 @@ bash update.sh`}
 
       {/* AmneziaWG Section */}
       <AmneziaWgSection />
+
+      {/* Modal Confirmation for GitHub Update */}
+      <AnimatePresence>
+        {showGitConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-lg bg-zinc-950 border border-blue-500/30 rounded-2xl p-6 shadow-2xl space-y-5 relative overflow-hidden"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/30">
+                    <Sparkles size={22} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Обновить проект из GitHub</h3>
+                    <p className="text-xs text-zinc-400">Ветка <span className="text-blue-400 font-mono">origin/main</span></p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGitConfirmModal(false)}
+                  className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs text-zinc-300">
+                <p className="leading-relaxed">
+                  На сервере будет выполнена полная цепочка обновления и пересборки:
+                </p>
+
+                <div className="p-3 bg-black/60 rounded-xl border border-white/10 font-mono text-[11px] text-blue-300 space-y-1">
+                  <div>cd /opt/izinet</div>
+                  <div>git fetch origin main</div>
+                  <div>git reset --hard origin/main</div>
+                  <div>bash update.sh</div>
+                </div>
+
+                <div className="space-y-1.5 text-[11px] text-zinc-400 bg-white/5 p-3.5 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                    <CheckCircle2 size={14} />
+                    <span>Все базы данных (x-ui.db), Reality-ключи и клиенты сохраняются</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                    <CheckCircle2 size={14} />
+                    <span>Перед обновлением создаётся резервная копия базы</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-blue-300">
+                    <RefreshCw size={14} />
+                    <span>Контейнеры Docker будут пересобраны и перезапущены (~30-60 сек)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGitConfirmModal(false)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartGitUpdate}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+                >
+                  <ArrowUpCircle size={15} />
+                  <span>🚀 Запустить обновление сейчас</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

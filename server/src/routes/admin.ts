@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { supabase } from '../services/supabase';
@@ -2226,6 +2226,72 @@ router.post('/panel/update', adminOnly, async (_req, res) => {
       error: errMsg,
       logs
     });
+  }
+});
+
+// Полное обновление проекта из GitHub ветки main (git fetch + reset + update.sh)
+router.post('/system/git-update', adminOnly, async (_req, res) => {
+  try {
+    const backupDir = path.resolve(process.cwd(), 'backups');
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+    
+    const logPath = path.join(backupDir, 'git_update.log');
+    const initialLog = `[${new Date().toLocaleTimeString('ru-RU')}] 🚀 Запуск процедуры: git fetch origin main && git reset --hard origin/main && bash update.sh\n[${new Date().toLocaleTimeString('ru-RU')}] ⏳ Инициализация процесса обновления в фоне...\n`;
+    fs.writeFileSync(logPath, initialLog, 'utf8');
+
+    const isDocker = process.env.IS_DOCKER === 'true' || process.env.NODE_ENV === 'production';
+
+    if (isDocker) {
+      const hostCmd = `nohup bash -c 'cd /opt/izinet && git fetch origin main 2>&1 && git reset --hard origin/main 2>&1 && bash update.sh 2>&1' > /opt/izinet/backups/git_update.log 2>&1 &`;
+      const containerCmd = `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i bash -c "${hostCmd}"`;
+      try {
+        exec(containerCmd);
+      } catch (e: any) {
+        console.warn('[Git Update] nsenter launch warning:', e.message);
+        exec(`nohup bash /opt/izinet/scripts/git_update.sh > ${logPath} 2>&1 &`);
+      }
+    } else {
+      exec(`nohup bash scripts/git_update.sh > ${logPath} 2>&1 &`);
+    }
+
+    res.json({
+      ok: true,
+      message: 'Обновление из GitHub запущено в фоновом режиме на сервере',
+      logPath
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/system/git-update/status', adminOnly, async (_req, res) => {
+  try {
+    const potentialLogPaths = [
+      path.resolve(process.cwd(), 'backups/git_update.log'),
+      '/opt/izinet/backups/git_update.log'
+    ];
+
+    let logContent = '';
+    for (const p of potentialLogPaths) {
+      if (fs.existsSync(p)) {
+        logContent = fs.readFileSync(p, 'utf8');
+        break;
+      }
+    }
+
+    const lines = logContent ? logContent.split('\n').filter(l => l.length > 0) : [];
+    const isCompleted = logContent.includes('ОБНОВЛЕНИЕ ЗАВЕРШЕНО') || logContent.includes('ОБНОВЛЕНИЕ ИЗ GITHUB УСПЕШНО ЗАВЕРШЕНО');
+    const hasError = logContent.toLowerCase().includes('fatal:') || logContent.toLowerCase().includes('error:');
+
+    res.json({
+      ok: true,
+      running: !isCompleted && lines.length > 0 && !hasError,
+      completed: isCompleted,
+      error: hasError,
+      logs: lines.slice(-100)
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message, logs: [] });
   }
 });
 

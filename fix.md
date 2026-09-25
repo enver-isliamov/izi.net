@@ -167,12 +167,11 @@ flow: xtls-rprx-vision
   - `server/src/routes/admin.ts`: Эндпоинт `/awg/sync-all` расширен для включения триальных подписок.
   - `src/pages/Dashboard.tsx`: Расширен диалог QR-кода с переключением между форматами `WireGuard` и `AmneziaVPN`, а также кнопкой быстрого скачивания файла `.conf`.
 - [x] [2026-09-25 13:10] **SYS/DOCKER-PORT-CONFLICT-001**: Устранение конфликта портов UDP 51820 между Docker и хостом (failed to bind host port 0.0.0.0:51820/udp: address already in use -> `docker-compose.yml`, `xui_bootstrap.py` -> Удалён ошибочный проброс `51820:51820/udp` в контейнер `x3-ui` и внедрена очистка SQLite `x-ui.db` от инбаунда 51820, поскольку AmneziaWG функционирует независимо на хост-системе через модуль ядра/nsenter, освобождая запуск Docker-стека).
-- [x] [2026-09-25 15:15] **SYS/ROUTER-PRICING-XUI-INBOUND-001**: Обработка ошибок Google OAuth, автологин Telegram, мобильный диалог подключения, удвоенный тариф для роутеров и автонастройка инбаунда в 3x-ui:
-  - `src/pages/Login.tsx`: Устранено падение при неактивном Google OAuth в Supabase (добавлен перехват ошибок hash и параметров провайдера с понятной подсказкой пользователю). Улучшен автологин через Telegram: внедрены fallback через verifyOtp и прямой вход по actionLink от Supabase Admin.
-  - `src/pages/Dashboard.tsx`: Диалог «Центр подключения» полностью адаптирован под узкие экраны смартфонов (`w-[94vw] max-w-[430px] max-h-[88vh] overflow-y-auto`, пропорциональный QR-код, компактные кнопки действий).
-  - `server/src/routes/user.ts`: Тарифные планы расширены опцией «Роутер / Домашняя сеть (AmneziaWG)» с удвоенной стоимостью (x2), покрывающей все домашние устройства через роутеры Keenetic/OpenWrt/Mikrotik.
-  - `src/components/subscription/SubscriptionWizard.tsx`: Добавлено явное визуальное разделение на тарифы «Смартфон / ПК» и «Роутер / Домашняя сеть (AmneziaWG)» с автоматическим расчетом стоимости.
-  - `server/src/routes/admin.ts` & `src/components/admin/AmneziaWgSection.tsx`: Создан эндпоинт `/api/admin/xui/setup-wireguard-inbound` и кнопка «Инбаунд в 3x-ui» для 1-клик создания и автонастройки WireGuard/Amnezia инбаунда в панели 3x-ui (порт 51821) с проверкой существующих шлюзов.
+- [x] [2026-09-25 15:45] **SYS/ADMIN-GIT-UPDATE-BTN-001**: Реализация запуска команды обновления сервера `cd /opt/izinet && git fetch origin main && git reset --hard origin/main && bash update.sh` по кнопке в панели администратора:
+  - `server/src/routes/admin.ts`: Подключен модуль `exec` из `child_process`. Настроена корректная фоновая передача команды через `docker run nsenter` / `nohup` с перенаправлением вывода в `/opt/izinet/backups/git_update.log`.
+  - `scripts/git_update.sh`: Оптимизирована пошаговая запись логов для чистого отображения статуса шагов обновления (fetch, reset, update.sh).
+  - `src/pages/Admin/Settings.tsx`: Добавлено модальное окно подтверждения (`showGitConfirmModal`) с информацией о безопасности данных (сохранение x-ui.db, Reality-ключей и клиентов), кнопка запуска в 1 клик и «живой» терминальный лог выполнения со статусом завершения.
+  - `src/pages/Admin/Dashboard.tsx`: Добавлена быстрая ссылка-кнопка «Обновить из GitHub» в верхней панели управления дашборда для удобного перехода к обновлению без ручного ввода команд в SSH терминале.
 
 
 

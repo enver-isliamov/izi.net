@@ -13,7 +13,9 @@ import {
   RefreshCw,
   ShieldCheck,
   CreditCard,
-  Cpu
+  Cpu,
+  ArrowUpCircle,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
@@ -143,6 +145,14 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-2">
+            <a
+              href="/admin/settings"
+              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-blue-600/30 via-indigo-600/20 to-purple-600/30 hover:from-blue-600/50 hover:to-indigo-600/40 text-blue-300 rounded-xl text-xs font-medium border border-blue-500/30 transition-all active:scale-95 shadow-sm"
+              title="Обновить проект и перезапустить Docker (update.sh)"
+            >
+              <ArrowUpCircle size={14} className="text-blue-400" />
+              <span>Обновить из GitHub</span>
+            </a>
             <button
               onClick={() => {
                 setLoading(true);
