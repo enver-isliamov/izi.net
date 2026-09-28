@@ -178,14 +178,129 @@ fi
 echo "=== 6/9 UDP-порт и конфигурация интерфейса ==="
 # На хосте может уже работать другой VPN (например wg0 на 10.66.66.0/24),
 # который занимает UDP 51820 — поэтому порт выбираем свободный.
-port_free() {
-  ss -lun 2>/dev/null | awk '{print $5}' | grep -qE "[:.]$1$" && return 1
-  return 0
+# Собираем все занятые UDP-порты: обычные слушатели + интерфейсы WireGuard/AmneziaWG.
+# Так мы точно не возьмём порт, который держит другой VPN (например wg0 на 51820).
+collect_used_ports() {
+  {
+    ss -lun 2>/dev/null | sed -n '2,$p' | awk '{print $5}' | sed 's/.*://'
+    wg show all listen-port 2>/dev/null
+    awg show all listen-port 2>/dev/null
+  } | grep -E '^[0-9]{2,5}
+
+# Пиры сохраняем из реестра, чтобы не потерять выданных клиентов
+PEERS_BLOCK="$(
+python3 - "${AWG_DIR}/izinet-peers.json" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+if not os.path.exists(p):
+    print("")
+    sys.exit(0)
+try:
+    peers = json.load(open(p)).get("peers", [])
+except Exception:
+    peers = []
+out = []
+for peer in peers:
+    out.append("[Peer]")
+    out.append("PublicKey = %s" % peer.get("public_key", ""))
+    out.append("AllowedIPs = %s/32" % peer.get("address", ""))
+    out.append("")
+print("\n".join(out))
+PY
+)"
+
+{
+  echo "[Interface]"
+  # /32 вместо /24: не конфликтует с уже существующими адресами, подсеть подключаем маршрутом
+  echo "Address = ${SUBNET}.1/32"
+  echo "PostUp = ip -4 route add ${SUBNET}.0/24 dev %i || true"
+  echo "PostDown = ip -4 route del ${SUBNET}.0/24 dev %i || true"
+  echo "ListenPort = ${PORT}"
+  echo "PrivateKey = ${SERVER_PRIV}"
+  echo "MTU = 1280"
+  echo "Jc = ${JC}"
+  echo "Jmin = ${JMIN}"
+  echo "Jmax = ${JMAX}"
+  echo "S1 = ${S1}"
+  echo "S2 = ${S2}"
+  echo "H1 = ${H1}"
+  echo "H2 = ${H2}"
+  echo "H3 = ${H3}"
+  echo "H4 = ${H4}"
+  echo ""
+  [ -n "${PEERS_BLOCK}" ] && echo "${PEERS_BLOCK}"
+} > "${AWG_DIR}/${IFACE}.conf"
+chmod 600 "${AWG_DIR}/${IFACE}.conf"
+
+echo "=== 7/9 Форвардинг и NAT ==="
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+WAN="$(ip route show default | awk '/default/ {print $5; exit}')"
+iptables -t nat -C POSTROUTING -s ${SUBNET}.0/24 -o "${WAN}" -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -s ${SUBNET}.0/24 -o "${WAN}" -j MASQUERADE
+iptables -C FORWARD -i ${IFACE} -o "${WAN}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${IFACE} -o "${WAN}" -j ACCEPT
+iptables -C FORWARD -i "${WAN}" -o ${IFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+  iptables -A FORWARD -i "${WAN}" -o ${IFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT
+command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
+echo "  NAT настроен (внешний интерфейс ${WAN})"
+command -v ufw >/dev/null && { ufw allow "${PORT}/udp" 2>/dev/null || true; ufw reload 2>/dev/null || true; }
+echo "  разрешён UDP ${PORT}"
+
+echo "=== 8/9 Запуск интерфейса ==="
+echo "  адреса на хосте (для контроля конфликтов):"
+ip -4 -o addr show | awk '{print "    "$2" -> "$4}' | head -20
+echo "  маршруты 10.*:"
+(ip route show | grep -E "^10\." || echo "    нет") | sed 's/^/    /'
+systemctl enable "awg-quick@${IFACE}" >/dev/null 2>&1 || true
+if systemctl restart "awg-quick@${IFACE}"; then
+  sleep 2
+  echo "  ✅ интерфейс поднят:"
+  awg show "${IFACE}" || true
+  RESULT="ok"
+else
+  echo "  ❌ интерфейс не поднялся. Что случилось (последние строки службы):"
+  journalctl -u "awg-quick@${IFACE}" -n 12 --no-pager 2>/dev/null | sed 's/^/    /' || true
+  echo "    Если снова 'Address already in use' — освободите адрес: ip -4 -o addr show | grep ${SUBNET}"
+  echo "    Если 'No such device' — нет модуля ядра и не подхватился userspace."
+  RESULT="fail"
+fi
+
+echo "=== 9/9 Параметры для приложения ==="
+python3 - "$SERVER_JSON" "$SERVER_PUB" "$PORT" "$SUBNET" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4" "$([ "${USERSPACE}" = "1" ] && echo container || echo kernel)" <<'PY'
+import json, sys
+out, pub, port, subnet, jc, jmin, jmax, s1, s2, h1, h2, h3, h4, mode = sys.argv[1:15]
+json.dump({
+  "interface": "awg0", "public_key": pub, "port": int(port), "subnet": subnet,
+  "jc": int(jc), "jmin": int(jmin), "jmax": int(jmax), "s1": int(s1), "s2": int(s2),
+  "h1": int(h1), "h2": int(h2), "h3": int(h3), "h4": int(h4), "mode": mode,
+}, open(out, "w"), ensure_ascii=False, indent=2)
+PY
+chmod 600 "${SERVER_JSON}"
+[ -f "${AWG_DIR}/izinet-peers.json" ] || { echo '{"peers":[]}' > "${AWG_DIR}/izinet-peers.json"; chmod 600 "${AWG_DIR}/izinet-peers.json"; }
+
+echo ""
+echo "==============================================="
+echo " Итог: режим $([ "${USERSPACE}" = "1" ] && echo 'userspace (amneziawg-go)' || echo 'ядро (amneziawg)'), подсеть ${SUBNET}.0/24, UDP ${PORT}"
+echo " Интерфейс: $([ "${RESULT}" = "ok" ] && echo 'поднят ✅' || echo 'НЕ поднят ❌ (см. строки выше)')"
+echo " Проверка:  awg show ${IFACE}"
+echo " В кабинете: «Мои устройства» → «Файл AmneziaWG (роутер)» → «Скачать файл»"
+echo " В админке:  Настройки → «AmneziaWG» → «Проверить AmneziaWG»"
+echo "==============================================="
+ | sort -un
 }
-for cand in "${PORT}" 51821 51822 51823 51900 51999 41820; do
-  if port_free "${cand}"; then PORT="${cand}"; break; fi
+USED_PORTS="$(collect_used_ports | tr '\n' ' ')"
+echo "  занятые UDP-порты: ${USED_PORTS:-нет}"
+port_free() { echo " ${USED_PORTS} " | grep -q " $1 " && return 1; return 0; }
+PICKED=""
+for cand in "${PORT}" 51821 51822 51823 51900 51999 41820 41821; do
+  if port_free "${cand}"; then PICKED="${cand}"; break; fi
   echo "  UDP ${cand} занят — пробую следующий"
 done
+if [ -z "${PICKED}" ]; then
+  echo "❌ Не нашёл свободный UDP-порт — пришлите список занятых портов выше"
+  exit 1
+fi
+PORT="${PICKED}"
 echo "  выбран UDP-порт: ${PORT}"
 
 # Пиры сохраняем из реестра, чтобы не потерять выданных клиентов
