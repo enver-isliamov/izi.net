@@ -182,7 +182,10 @@ echo "=== 6/9 UDP-порт и конфигурация интерфейса ==="
 # Так мы точно не возьмём порт, который держит другой VPN (например wg0 на 51820).
 collect_used_ports() {
   {
-    ss -lun 2>/dev/null | sed -n '2,$p' | awk '{print $5}' | sed 's/.*://'
+    # колонка Local Address:Port — 4-я (State, Recv-Q, Send-Q, Local, Peer).
+    # -H убирает заголовок; если не поддерживается, берём строки без 'State'.
+    ss -lunH 2>/dev/null | awk '{print $4}' | sed 's/.*://'
+    ss -lun 2>/dev/null | grep -v '^State' | awk '{print $4}' | sed 's/.*://'
     wg show all listen-port 2>/dev/null
     awg show all listen-port 2>/dev/null
   } | grep -E '^[0-9]{2,5}
