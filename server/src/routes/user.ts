@@ -1074,10 +1074,25 @@ router.get('/user/awg/devices/:deviceId/config', authenticateUser, async (req: a
     if (!device) return res.status(404).json({ error: 'Устройство не найдено' });
     if (String((device as any).serverType).toUpperCase() !== 'AWG') return res.status(400).json({ error: 'Это не AmneziaWG-устройство' });
 
+    // Пересобираем .conf по актуальному реестру пиров: если на сервере сменились порт/подсеть/параметры,
+    // скачанный файл всё равно будет рабочим (в БД может лежать устаревшая копия).
+    let conf = String((device as any).config || '');
+    try {
+      const peers = await AwgService.readPeersAsync();
+      const peer = peers.find((p) => p.public_key === (device as any).uuid);
+      if (peer && peer.private_key) {
+        const server = await AwgService.readServerAsync();
+        const endpoint = await AwgService.endpointHost();
+        conf = AwgService.buildConf(peer, server, endpoint);
+      }
+    } catch (e: any) {
+      console.warn(`[AWG] rebuild conf on download failed: ${e.message}`);
+    }
+
     const safeName = String(req.user.email || 'izinet').replace(/[^a-zA-Z0-9._-]/g, '_');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="izinet-${safeName}.conf"`);
-    res.send(device.config || '');
+    res.send(conf);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -43,6 +43,8 @@ export interface AwgPeer {
   public_key: string;
   private_key?: string;
   address: string;
+  /** Старый адрес пира после миграции подсети (остаётся в allowed-ips, чтобы выданные ранее конфиги работали). */
+  alias?: string;
   created_at?: string;
 }
 
@@ -52,22 +54,85 @@ function runLocal(command: string, timeout = 20000): string {
   return execSync(command, { timeout, stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
 }
 
-/** Команды awg: в контейнере (userspace, без модуля ядра) или на хосте (модуль ядра). */
-function awgExec(command: string, timeout = 20000): string {
+/** Приводит значение подсети к виду x.y.z (убирает хвосты .0/.1 и /маску). */
+export function subnetBase(subnet?: string | null): string {
+  const parts = String(subnet || '10.9.0').trim().split(/[./]/).filter(Boolean).slice(0, 3);
+  while (parts.length < 3) parts.push('0');
+  return parts.join('.');
+}
+
+/** Режим AmneziaWG из izinet-server.json: ядро (команды на хосте) или контейнер (userspace amneziawg-go). */
+let modeCache: { value: 'kernel' | 'container'; ts: number } | null = null;
+function readAwgMode(): 'kernel' | 'container' {
+  if (modeCache && Date.now() - modeCache.ts < 30000) return modeCache.value;
+  let value: 'kernel' | 'container' = 'kernel';
   try {
-    const running = runLocal(`docker inspect -f "{{.State.Running}}" ${AWG_CONTAINER} 2>/dev/null || echo false`);
-    if (running === "true") {
-      return runLocal(`docker exec ${AWG_CONTAINER} sh -c ${shq(command)}`, timeout);
+    const raw = hostExec(`base64 -w0 ${SERVER_JSON} 2>/dev/null || echo ""`, 10000);
+    if (raw) {
+      const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+      if (parsed?.mode === 'container') value = 'container';
     }
   } catch (e) {}
-  return hostExec(command, timeout);
+  modeCache = { value, ts: Date.now() };
+  return value;
+}
+
+function containerRunning(): boolean {
+  try {
+    return runLocal(`docker inspect -f "{{.State.Running}}" ${AWG_CONTAINER} 2>/dev/null || echo false`) === 'true';
+  } catch (e) { return false; }
+}
+
+function inContainer(command: string, timeout: number): string {
+  return runLocal(`docker exec ${AWG_CONTAINER} sh -c ${shq(command)}`, timeout);
+}
+
+/**
+ * Команды awg: контейнер (userspace) или хост (модуль ядра) — по режиму из izinet-server.json.
+ * Если устаревший контейнер остался запущен, но режим «ядро», команды всё равно идут на хост —
+ * контейнер не должен перехватывать управление живым интерфейсом.
+ */
+function awgExec(command: string, timeout = 20000): string {
+  if (readAwgMode() === 'container') {
+    if (containerRunning()) {
+      try { return inContainer(command, timeout); } catch (e) {}
+    }
+    return hostExec(command, timeout);
+  }
+  try {
+    return hostExec(command, timeout);
+  } catch (e) {
+    if (containerRunning()) {
+      try { return inContainer(command, timeout); } catch (e2) {}
+    }
+    throw e;
+  }
+}
+
+/** Прочитать PrivateKey интерфейса из текущего файла конфигурации (чтобы не потерять его при перезаписи). */
+function readExistingPrivateKey(): string {
+  try {
+    const raw = hostExec(`awk -F' = ' '/^PrivateKey/{print $2; exit}' ${AWG_DIR}/${IFACE}.conf 2>/dev/null || echo ""`, 10000);
+    return raw ? raw.trim() : '';
+  } catch (e) { return ''; }
 }
 
 /** Полная конфигурация интерфейса: [Interface] + пиры из нашего реестра. */
-function buildInterfaceConf(server: AwgServer, peers: AwgPeer[], privateKey?: string): string {
+export function buildInterfaceConf(server: AwgServer, peers: AwgPeer[], privateKey?: string): string {
+  const base = subnetBase(server.subnet);
+  // Маршруты для текущей подсети и подсетей старых адресов (алиасов)
+  const routeNets = new Set<string>([base]);
+  for (const peer of peers) {
+    if (peer.alias) routeNets.add(subnetBase(peer.alias));
+  }
+  const up = [...routeNets].map((n) => `ip -4 route add ${n}.0/24 dev %i || true`).join('; ');
+  const down = [...routeNets].map((n) => `ip -4 route del ${n}.0/24 dev %i || true`).join('; ');
   const lines = [
     "[Interface]",
-    `Address = ${server.subnet}.1/24`,
+    // /32 + маршрут: не конфликтует с уже занятыми адресами на хосте (как в setup_awg.sh)
+    `Address = ${base}.1/32`,
+    `PostUp = ${up}`,
+    `PostDown = ${down}`,
     `ListenPort = ${server.port}`,
   ];
   if (privateKey) lines.push(`PrivateKey = ${privateKey}`);
@@ -85,7 +150,8 @@ function buildInterfaceConf(server: AwgServer, peers: AwgPeer[], privateKey?: st
     ""
   );
   for (const peer of peers) {
-    lines.push("[Peer]", `PublicKey = ${peer.public_key}`, `AllowedIPs = ${peer.address}/32`, "");
+    const ips = peer.alias ? `${peer.address}/32, ${peer.alias}/32` : `${peer.address}/32`;
+    lines.push("[Peer]", `PublicKey = ${peer.public_key}`, `AllowedIPs = ${ips}`, "");
   }
   return lines.join("\n");
 }
@@ -93,6 +159,79 @@ function buildInterfaceConf(server: AwgServer, peers: AwgPeer[], privateKey?: st
 function writeInterfaceConf(conf: string): void {
   const b64 = Buffer.from(conf, "utf8").toString("base64");
   hostExec(`printf %s ${shq(b64)} | base64 -d > ${AWG_DIR}/${IFACE}.conf && chmod 600 ${AWG_DIR}/${IFACE}.conf`);
+}
+
+/** Перезаписать файл конфигурации интерфейса, обязательно сохранив PrivateKey. */
+function persistInterfaceConf(server: AwgServer, peers: AwgPeer[]): void {
+  const priv = server.private_key || readExistingPrivateKey();
+  if (!priv) {
+    console.warn('[AWG] PrivateKey не найден — файл конфигурации интерфейса не перезаписываю (иначе интерфейс не поднимется после перезагрузки)');
+    return;
+  }
+  writeInterfaceConf(buildInterfaceConf(server, peers, priv));
+}
+
+/** Считать параметры сервера из файла конфигурации интерфейса (когда JSON утерян/неполный). */
+function readServerFromConfFile(): AwgServer | null {
+  try {
+    const conf = hostExec(`cat ${AWG_DIR}/${IFACE}.conf 2>/dev/null || echo ""`, 10000);
+    if (!conf) return null;
+    const get = (key: string): string => {
+      const m = conf.match(new RegExp('^' + key + '\\s*=\\s*(.+)$', 'm'));
+      return m ? m[1].trim() : '';
+    };
+    const priv = get('PrivateKey');
+    let pub = '';
+    try { pub = hostExec(`cat ${AWG_DIR}/server.pub 2>/dev/null || echo ""`, 8000).trim(); } catch (e) {}
+    if (!pub && priv) {
+      try { pub = hostExec(`printf %s ${shq(priv)} | awg pubkey`, 8000).trim(); } catch (e) {}
+    }
+    if (!pub) return null;
+    return {
+      interface: IFACE,
+      public_key: pub,
+      private_key: priv || undefined,
+      port: Number(get('ListenPort')) || 51820,
+      subnet: subnetBase(get('Address').replace(/\/.*$/, '')),
+      jc: Number(get('Jc')) || 4,
+      jmin: Number(get('Jmin')) || 50,
+      jmax: Number(get('Jmax')) || 1000,
+      s1: Number(get('S1')) || 64,
+      s2: Number(get('S2')) || 128,
+      h1: Number(get('H1')) || 1,
+      h2: Number(get('H2')) || 2,
+      h3: Number(get('H3')) || 3,
+      h4: Number(get('H4')) || 4,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Share-ссылки wireguard:// и awg:// для клиента. Приватный ключ — только percent-encoded. */
+export function buildShareLinks(peer: AwgPeer, server: AwgServer, endpoint: string, label: string): { wireguardUrl: string; awgUrl: string } {
+  const params = new URLSearchParams({
+    public_key: server.public_key,
+    address: `${peer.address}/32`,
+    dns: '1.1.1.1,8.8.8.8',
+    mtu: '1280',
+    jc: String(server.jc || 4),
+    jmin: String(server.jmin || 50),
+    jmax: String(server.jmax || 1000),
+    s1: String(server.s1 || 64),
+    s2: String(server.s2 || 128),
+    h1: String(server.h1 || 1),
+    h2: String(server.h2 || 2),
+    h3: String(server.h3 || 3),
+    h4: String(server.h4 || 4)
+  });
+  const key = encodeURIComponent(peer.private_key || '');
+  const target = `${endpoint}:${server.port}`;
+  const tag = encodeURIComponent(label);
+  return {
+    wireguardUrl: `wireguard://${key}@${target}?${params.toString()}#${tag}`,
+    awgUrl: `awg://${key}@${target}?${params.toString()}#${tag}`
+  };
 }
 export class AwgService {
   /** Доступен ли сервер AmneziaWG: установлены ли инструменты и поднят ли интерфейс. */
@@ -107,13 +246,13 @@ export class AwgService {
           message: 'Интерфейс AmneziaWG не активен на хосте. Запустите bash scripts/amneziawg/setup_awg.sh по SSH',
           port: server?.port || 51820,
           peers,
-          subnet: server?.subnet || '10.88.0'
+          subnet: server?.subnet || '10.9.0'
         };
       }
-      return { available: true, message: 'AmneziaWG работает', port: server?.port || 51820, peers, subnet: server?.subnet || '10.88.0' };
+      return { available: true, message: 'AmneziaWG работает', port: server?.port || 51820, peers, subnet: server?.subnet || '10.9.0' };
     } catch (e: any) {
       const server = this.readServer();
-      return { available: false, message: 'Проверка AmneziaWG: ' + e.message, port: server?.port || 51820, subnet: server?.subnet || '10.88.0' };
+      return { available: false, message: 'Проверка AmneziaWG: ' + e.message, port: server?.port || 51820, subnet: server?.subnet || '10.9.0' };
     }
   }
 
@@ -123,16 +262,23 @@ export class AwgService {
       if (raw) {
         const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
         if (parsed?.interface && !process.env.AWG_IFACE) IFACE = String(parsed.interface);
-        if (parsed?.public_key) return parsed;
+        if (parsed?.public_key) {
+          if (!parsed.private_key) parsed.private_key = readExistingPrivateKey() || undefined;
+          return parsed;
+        }
       }
     } catch (e) {}
 
-    // Fallback: дефолтные параметры AmneziaWG
+    // Fallback 1: параметры из файла конфигурации интерфейса (JSON мог потеряться)
+    const fromConf = readServerFromConfFile();
+    if (fromConf) return fromConf;
+
+    // Fallback 2: дефолтные параметры AmneziaWG
     return {
       interface: IFACE,
       public_key: process.env.AWG_PUBLIC_KEY || 'izinetAwgServerPublicKeyMock1234567890=',
       port: Number(process.env.AWG_PORT) || 51820,
-      subnet: '10.88.0',
+      subnet: '10.9.0',
       jc: 4, jmin: 50, jmax: 1000,
       s1: 64, s2: 128,
       h1: 1, h2: 2, h3: 3, h4: 4
@@ -146,10 +292,15 @@ export class AwgService {
         const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
         if (parsed?.public_key) {
           if (parsed?.interface && !process.env.AWG_IFACE) IFACE = String(parsed.interface);
+          if (!parsed.private_key) parsed.private_key = readExistingPrivateKey() || undefined;
           return parsed;
         }
       }
     } catch (e) {}
+
+    // Fallback 1: параметры из файла конфигурации интерфейса (JSON мог потеряться)
+    const fromConf = readServerFromConfFile();
+    if (fromConf) return fromConf;
 
     // Чтение из базы настроек
     try {
@@ -167,7 +318,7 @@ export class AwgService {
       public_key: keypair.pub,
       private_key: keypair.priv,
       port: Number(process.env.AWG_PORT) || 51820,
-      subnet: '10.88.0',
+      subnet: '10.9.0',
       jc: 4,
       jmin: 50,
       jmax: 1000,
@@ -274,11 +425,12 @@ export class AwgService {
   }
 
   private static nextAddress(peers: AwgPeer[], subnet: string): string {
+    const base = subnetBase(subnet);
     const used = new Set(peers.map((p) => Number(String(p.address || '').split('.').pop())));
     for (let i = 2; i < 255; i++) {
-      if (!used.has(i)) return `${subnet}.${i}`;
+      if (!used.has(i)) return `${base}.${i}`;
     }
-    return `${subnet}.${Math.floor(Math.random() * 200) + 10}`;
+    return `${base}.${Math.floor(Math.random() * 200) + 10}`;
   }
 
   /** Публичный адрес сервера для клиентского конфига. */
@@ -388,7 +540,7 @@ export class AwgService {
     const filteredPeers = peers.filter(p => p.name !== name);
     filteredPeers.push(peer);
     this.writePeers(filteredPeers);
-    try { writeInterfaceConf(buildInterfaceConf(server, filteredPeers, server.private_key)); } catch (e: any) { console.warn(`[AWG] conf write: ${e.message}`); }
+    try { persistInterfaceConf(server, filteredPeers); } catch (e: any) { console.warn(`[AWG] conf write: ${e.message}`); }
 
     const endpoint = await this.endpointHost();
     const conf = this.buildConf(peer, server, endpoint);
@@ -415,25 +567,7 @@ export class AwgService {
       const endpoint = await this.endpointHost();
       const conf = this.buildConf(peer, server, endpoint);
 
-      const privKey = peer.private_key || '';
-      const params = new URLSearchParams({
-        public_key: server.public_key,
-        address: `${peer.address}/32`,
-        dns: '1.1.1.1,8.8.8.8',
-        mtu: '1280',
-        jc: String(server.jc || 4),
-        jmin: String(server.jmin || 50),
-        jmax: String(server.jmax || 1000),
-        s1: String(server.s1 || 64),
-        s2: String(server.s2 || 128),
-        h1: String(server.h1 || 1),
-        h2: String(server.h2 || 2),
-        h3: String(server.h3 || 3),
-        h4: String(server.h4 || 4)
-      });
-
-      const wireguardUrl = `wireguard://${privKey}@${endpoint}:${server.port}?${params.toString()}#${encodeURIComponent(label)}`;
-      const awgUrl = `awg://${privKey}@${endpoint}:${server.port}?${params.toString()}#${encodeURIComponent(label)}`;
+      const { wireguardUrl, awgUrl } = buildShareLinks(peer, server, endpoint, label);
 
       return { peer, conf, wireguardUrl, awgUrl };
     } catch (e: any) {
@@ -454,7 +588,7 @@ export class AwgService {
     try { this.writePeers(peers); } catch (e: any) { console.warn(`[AWG] peers save failed: ${e.message}`); }
     try {
       const server = this.readServer();
-      if (server) writeInterfaceConf(buildInterfaceConf(server, peers, (server as any).private_key));
+      if (server) persistInterfaceConf(server, peers);
     } catch (e: any) { console.warn(`[AWG] conf rebuild: ${e.message}`); }
   }
 }
