@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../services/supabase';
 import { authenticateUser } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
-import { AwgService } from '../services/awg.service';
+import { AwgService, isValidClientKey } from '../services/awg.service';
 import { MaintenanceService } from '../services/maintenance.service';
 import { BotService } from '../services/bot.service';
 import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
@@ -1079,8 +1079,10 @@ router.get('/user/awg/devices/:deviceId/config', authenticateUser, async (req: a
     let conf = String((device as any).config || '');
     try {
       const peers = await AwgService.readPeersAsync();
-      const peer = peers.find((p) => p.public_key === (device as any).uuid);
-      if (peer && peer.private_key) {
+      // Ищем пир по публичному ключу устройства, запасной вариант — по имени (email)
+      let peer = peers.find((p) => p.public_key === (device as any).uuid);
+      if (!peer && (device as any).email) peer = peers.find((p) => p.name === (device as any).email);
+      if (peer && isValidClientKey(peer.private_key)) {
         const server = await AwgService.readServerAsync();
         const endpoint = await AwgService.endpointHost();
         conf = AwgService.buildConf(peer, server, endpoint);

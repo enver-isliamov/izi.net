@@ -61,6 +61,17 @@ export function subnetBase(subnet?: string | null): string {
   return parts.join('.');
 }
 
+/** Валидный клиентский ключ WireGuard/AmneziaWG: base64, 44 символа, 32 байта. */
+export function isValidClientKey(key?: string | null): boolean {
+  const k = String(key || '').trim();
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(k)) return false;
+  try {
+    return Buffer.from(k, 'base64').length === 32;
+  } catch (e) {
+    return false;
+  }
+}
+
 /** Режим AmneziaWG из izinet-server.json: ядро (команды на хосте) или контейнер (userspace amneziawg-go). */
 let modeCache: { value: 'kernel' | 'container'; ts: number } | null = null;
 function readAwgMode(): 'kernel' | 'container' {
@@ -501,7 +512,12 @@ export class AwgService {
   }
 
   static buildConf(peer: AwgPeer, server: AwgServer, endpoint: string): string {
-    const privKey = peer.private_key || (peer as any).priv || 'CLIENT_PRIVATE_KEY_HERE';
+    const privKey = String(peer.private_key || (peer as any).priv || '').trim();
+    // Никогда не отдаём пользователю конфиг с повреждённым/отсутствующим ключом:
+    // приложение AmneziaWG отклоняет такой файл («не содержит корректной конфигурации»).
+    if (!isValidClientKey(privKey)) {
+      throw new Error('Клиентский ключ отсутствует или повреждён — пересоздайте устройство AmneziaWG');
+    }
     return [
       '[Interface]',
       `PrivateKey = ${privKey}`,
@@ -559,7 +575,8 @@ export class AwgService {
       const peers = await this.readPeersAsync();
       let peer = peers.find(p => p.name === userIdentifier);
 
-      if (!peer || !peer.private_key) {
+      // Если ключ отсутствует или повреждён — пересоздаём пир с новыми ключами (автолечение)
+      if (!peer || !isValidClientKey(peer.private_key)) {
         const created = await this.createPeer(userIdentifier);
         peer = created.peer;
       }

@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { AwgService, buildInterfaceConf, buildShareLinks, subnetBase } from '../services/awg.service';
+import { AwgService, buildInterfaceConf, buildShareLinks, subnetBase, isValidClientKey } from '../services/awg.service';
 import type { AwgPeer, AwgServer } from '../services/awg.service';
 
 const root = process.cwd();
@@ -140,4 +140,17 @@ test('контракт подписки: base64-строка из строк-с�
 test('выдача .conf пользователю пересобирает файл из реестра (а не отдаёт устаревшую копию из БД)', () => {
   assert.ok(userSrc.includes('rebuild conf on download'), 'нет пересборки .conf при скачивании');
   assert.ok(userSrc.includes('AwgService.readPeersAsync'), 'пересборка не читает реестр пиров');
+});
+
+test('повреждённый или отсутствующий клиентский ключ не попадает в конфиг (автолечение)', () => {
+  assert.equal(isValidClientKey(peer.private_key), true, 'валидный ключ должен проходить');
+  assert.equal(isValidClientKey('CLIENT_PRIVATE_KEY_HERE'), false);
+  assert.equal(isValidClientKey(''), false);
+  assert.equal(isValidClientKey('abc='), false);
+  assert.equal(isValidClientKey(null), false);
+  // buildConf не должен молча отдавать конфиг с плейсхолдером — лучше явная ошибка
+  assert.throws(() => AwgService.buildConf({ ...peer, private_key: 'CLIENT_PRIVATE_KEY_HERE' }, server, '1.2.3.4'));
+  // и сервис обязан проверять ключ при выдаче/пересборке (автолечение)
+  const uses = (awgSrc.match(/isValidClientKey/g) || []).length;
+  assert.ok(uses >= 3, `ожидались проверки ключа в awg.service (найдено ${uses})`);
 });
