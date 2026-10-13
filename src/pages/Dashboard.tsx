@@ -941,7 +941,7 @@ export default function Dashboard() {
               <DialogTitle className="text-lg font-bold">{qrData?.title || 'QR-код подключения'}</DialogTitle>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 {qrMode === 'awg' 
-                  ? 'Конфигурация AmneziaWG для роутеров и AmneziaVPN' 
+                  ? 'Отсканируйте QR приложением AmneziaWG · для роутеров — файл .conf' 
                   : (qrData?.subtitle || 'Универсальная подписка (Hiddify / V2Box / Happ)')}
               </p>
            </DialogHeader>
@@ -955,7 +955,7 @@ export default function Dashboard() {
                    awgTab === 'wg' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "text-muted-foreground hover:text-white"
                  )}
                >
-                 WireGuard URL
+                 Конфигурация
                </button>
                <button
                  onClick={() => setAwgTab('awg')}
@@ -964,7 +964,7 @@ export default function Dashboard() {
                    awgTab === 'awg' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "text-muted-foreground hover:text-white"
                  )}
                >
-                 AmneziaVPN URL
+                 Ссылка (URL)
                </button>
              </div>
            )}
@@ -996,7 +996,7 @@ export default function Dashboard() {
               <QRCodeSVG 
                 value={
                   qrMode === 'awg' 
-                    ? (awgTab === 'wg' ? (qrData?.wireguardUrl || awgUrl || qrData?.value || '') : (qrData?.awgUrl || awgUrl || qrData?.value || ''))
+                    ? (awgTab === 'wg' ? (qrData?.conf || awgConfig || qrData?.wireguardUrl || '') : (qrData?.awgUrl || awgUrl || qrData?.value || ''))
                     : qrMode === 'sub' 
                     ? (qrData?.sub || qrData?.value || '') 
                     : (qrData?.key || qrData?.value || '')
@@ -1014,6 +1014,9 @@ export default function Dashboard() {
                 <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-center space-y-2">
                    <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-400">
                      <ShieldCheck className="w-3.5 h-3.5" /> Файл для Keenetic / OpenWrt / ТВ
+                   </div>
+                   <div className="text-[10px] leading-snug text-emerald-300/70">
+                     Наведите камеру в приложении AmneziaWG — туннель добавится автоматически. Или возьмите файл/текст ниже.
                    </div>
                    <div className="grid grid-cols-2 gap-2 pt-0.5">
                      <Button 
