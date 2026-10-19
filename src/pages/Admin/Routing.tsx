@@ -208,8 +208,13 @@ export default function AdminRouting() {
       toast.loading('Применение маршрутизации...', { id: 'routing-sync' });
       await axios.post('/api/admin/system/sync-routing', {}, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
+      }).then(({ data }) => {
+        const hy = data?.hysteria;
+        const hyText = hy?.applied
+          ? `Hysteria2: ${hy.rules} правил в ACL`
+          : `Hysteria2: ${hy?.reason || 'не применено'}`;
+        toast.success(`Правила применены. Xray — ${data?.servers ?? '?'} сервер(ов). ${hyText}.`, { id: 'routing-sync' });
       });
-      toast.success('Правила успешно внедрены на все серверы 3x-ui!', { id: 'routing-sync' });
     } catch (e: any) {
       console.error(e);
       toast.error(e.response?.data?.error || 'Ошибка синхронизации', { id: 'routing-sync' });
@@ -321,7 +326,7 @@ export default function AdminRouting() {
           </div>
           <p className="text-[10px] text-zinc-500 leading-relaxed">
             Поддерживаются домены (yandex.ru), ссылки (https://site.ru/...), IP-адреса и подсети. Домен автоматически сохранится в формате domain:, ссылка — по имени хоста.
-            Правила действуют на всех серверах и всех VLESS-инбаундах (tcp / grpc / xhttp). Изменения применяются сразу после сохранения.
+            Правила действуют на всех серверах и всех VLESS-инбаундах (tcp / grpc / xhttp) и в Hysteria2 (через серверный ACL). Ссылки пользователей не меняются. Изменения применяются сразу после сохранения.
           </p>
         </div>
 
@@ -425,7 +430,7 @@ export default function AdminRouting() {
                       Через VPN
                     </button>
                   </div>
-                  <p className="text-[10px] text-zinc-500">Правила действуют на всех серверах и всех VLESS-инбаундах (tcp / grpc / xhttp).</p>
+                  <p className="text-[10px] text-zinc-500">Правила действуют на всех серверах и всех VLESS-инбаундах (tcp / grpc / xhttp), а также в Hysteria2 (ACL).</p>
                 </div>
 
                 <div className="space-y-1.5 md:col-span-2">

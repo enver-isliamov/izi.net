@@ -132,9 +132,66 @@ export function autoRuleName(domains: string[], ips: string[]): string {
 }
 
 /**
- * Защита Xray: оставляет только корректные правила с известными outbound-тегами.
- * Возвращает очищенный список и пояснения, что было пропущено.
+ * Hysteria2 ACL — маппинг из форматов Xray.
+ * Hysteria ACL: outbound(address); адреса: IP/CIDR, domain (точное), *.wildcard,
+ * suffix:example.com, geoip:xx, geosite:xx, all. regexp/keyword/ext/dotless не поддерживаются.
  */
+export function mapDomainToHysteria(entry: unknown): string | null {
+  const v = String(entry ?? '').trim();
+  if (!v) return null;
+  if (/^geosite:/i.test(v)) return v;
+  if (/^domain:/i.test(v)) return `suffix:${v.slice(7)}`;
+  if (/^full:/i.test(v)) return v.slice(5);
+  if (/^(regexp|keyword|ext|dotless):/i.test(v)) return null;
+  return isDomainName(v) ? `suffix:${v.toLowerCase()}` : null;
+}
+
+export function mapIpToHysteria(entry: unknown): string | null {
+  const v = String(entry ?? '').trim();
+  if (!v) return null;
+  if (/^geoip:/i.test(v)) return v;
+  return isIpOrCidr(v) ? v : null;
+}
+
+/**
+ * Собирает строки ACL для Hysteria2 из тех же правил, что уходят в Xray.
+ * hasOutbound(tag) — какие кастомные outbounds реально есть в конфиге Hysteria.
+ */
+export function buildHysteriaAcl(
+  rules: SanitizedRoutingRule[],
+  options: { hasOutbound?: (tag: string) => boolean } = {}
+): { lines: string[]; skipped: string[] } {
+  const lines: string[] = [];
+  const skipped: string[] = [];
+  const hasOutbound = options.hasOutbound || (() => false);
+
+  for (const rule of rules || []) {
+    let outbound: string | null = null;
+    if (rule.outbound_tag === 'direct') outbound = 'direct';
+    else if (rule.outbound_tag === 'blocked' || rule.outbound_tag === 'block') outbound = 'reject';
+    else if (rule.outbound_tag === 'ipv6-out') outbound = hasOutbound('ipv6-out') ? 'ipv6-out' : null;
+    else if (rule.outbound_tag === 'proxy') outbound = hasOutbound('proxy') ? 'proxy' : null;
+
+    if (!outbound) {
+      skipped.push(`${rule.name}: outbound «${rule.outbound_tag}» не настроен в Hysteria2`);
+      continue;
+    }
+
+    let added = 0;
+    for (const domain of rule.domains || []) {
+      const mapped = mapDomainToHysteria(domain);
+      if (mapped) { lines.push(`${outbound}(${mapped})`); added++; }
+    }
+    for (const ip of rule.ips || []) {
+      const mapped = mapIpToHysteria(ip);
+      if (mapped) { lines.push(`${outbound}(${mapped})`); added++; }
+    }
+    if (!added) skipped.push(`${rule.name}: нет записей, совместимых с ACL Hysteria2`);
+  }
+
+  return { lines, skipped };
+}
+
 export function sanitizeRoutingRules(rules: RoutingRuleInput[]): { rules: SanitizedRoutingRule[]; skipped: string[] } {
   const out: SanitizedRoutingRule[] = [];
   const skipped: string[] = [];

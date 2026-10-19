@@ -12,6 +12,9 @@ import {
   normalizeSiteEntries,
   sanitizeRoutingRules,
   autoRuleName,
+  mapDomainToHysteria,
+  mapIpToHysteria,
+  buildHysteriaAcl,
 } from '../utils/routing';
 
 const root = process.cwd();
@@ -74,4 +77,38 @@ test('контракты: админка даёт быстрое добавле�
   assert.ok(routingPageSrc.includes('Мимо VPN') && routingPageSrc.includes('Через VPN'), 'нет выбора направления');
   assert.ok(routingPageSrc.includes('normalizeSiteEntries'), 'UI не нормализует ввод');
   assert.ok(routingServiceSrc.includes('sanitizeRoutingRules'), 'RoutingService не защищает Xray-конфиг');
+  assert.ok(routingServiceSrc.includes('syncHysteriaAcl'), 'RoutingService не синхронизирует Hysteria2');
+  assert.ok(routingServiceSrc.includes('/etc/hysteria/acl.txt'), 'нет пути ACL-файла Hysteria2');
+});
+
+test('Hysteria2 ACL: маппинг доменов и IP из форматов Xray', () => {
+  assert.equal(mapDomainToHysteria('domain:yandex.ru'), 'suffix:yandex.ru');
+  assert.equal(mapDomainToHysteria('full:example.com'), 'example.com');
+  assert.equal(mapDomainToHysteria('geosite:google'), 'geosite:google');
+  assert.equal(mapDomainToHysteria('regexp:.*\\.ru$'), null);
+  assert.equal(mapDomainToHysteria('keyword:foo'), null);
+  assert.equal(mapDomainToHysteria('8.8.8.8'), null);
+  assert.equal(mapIpToHysteria('geoip:ru'), 'geoip:ru');
+  assert.equal(mapIpToHysteria('10.0.0.0/8'), '10.0.0.0/8');
+  assert.equal(mapIpToHysteria('domain:foo'), null);
+});
+
+test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, ipv6-out, пропуск proxy без outbound)', () => {
+  const rules = [
+    { name: 'RU', domains: ['domain:ru', 'geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct' },
+    { name: 'Block', domains: ['domain:torrent'], ips: [], outbound_tag: 'blocked' },
+    { name: 'Gemini', domains: ['geosite:google'], ips: [], outbound_tag: 'ipv6-out' },
+    { name: 'Proxy правило', domains: ['domain:example.com'], ips: [], outbound_tag: 'proxy' },
+    { name: 'Regexp', domains: ['regexp:.*'], ips: [], outbound_tag: 'direct' },
+  ];
+  const { lines, skipped } = buildHysteriaAcl(rules as any, { hasOutbound: (t) => t === 'ipv6-out' });
+
+  assert.ok(lines.includes('direct(suffix:ru)'));
+  assert.ok(lines.includes('direct(geosite:ru)'));
+  assert.ok(lines.includes('direct(geoip:ru)'));
+  assert.ok(lines.includes('reject(suffix:torrent)'));
+  assert.ok(lines.includes('ipv6-out(geosite:google)'));
+  assert.ok(!lines.some((l) => l.startsWith('proxy')));
+  assert.ok(skipped.some((s) => s.includes('Proxy правило')));
+  assert.ok(skipped.some((s) => s.includes('Regexp')));
 });

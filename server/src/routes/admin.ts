@@ -1027,8 +1027,8 @@ router.post('/system/sync-all', adminOnly, async (req, res) => {
 router.post('/system/sync-routing', adminOnly, async (req, res) => {
   try {
     const { RoutingService } = await import('../services/routing.service');
-    await RoutingService.syncAll();
-    res.json({ success: true });
+    const result = await RoutingService.syncAll();
+    res.json({ success: true, ...(result || {}) });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

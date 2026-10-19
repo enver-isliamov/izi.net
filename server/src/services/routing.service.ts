@@ -2,7 +2,24 @@ import { supabase } from './supabase';
 import { isUnroutableHost } from '../utils/vpn';
 import { getXuiForServer } from './xui.service';
 import { restartContainer } from '../utils/docker';
-import { sanitizeRoutingRules } from '../utils/routing';
+import { sanitizeRoutingRules, buildHysteriaAcl, SanitizedRoutingRule } from '../utils/routing';
+import { execSync } from 'child_process';
+
+const HYSTERIA_CONF = '/etc/hysteria/config.yaml';
+const HYSTERIA_ACL = '/etc/hysteria/acl.txt';
+
+const shq = (value: string) => "'" + String(value).replace(/'/g, "'\\''") + "'";
+
+/** Выполнение команды на ХОСТЕ из контейнера приложения (тот же паттерн, что в AWG/Hysteria-скриптах). */
+function hostExec(command: string, timeout = 30000): string {
+  const wrapped = `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i sh -c ${shq(command)}`;
+  try {
+    return execSync(wrapped, { timeout, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  } catch (e: any) {
+    const stderr = e?.stderr ? String(e.stderr).trim() : '';
+    throw new Error(stderr || e.message);
+  }
+}
 
 export class RoutingService {
   /**
@@ -147,8 +164,84 @@ export class RoutingService {
         }
       }
 
+      // 3. Hysteria2: те же правила → серверный ACL. Ссылки пользователей не меняются.
+      const hysteria = this.syncHysteriaAcl(safeRules);
+
+      return { success: true, servers: servers.length, xrayRules: safeRules.length, skipped, hysteria };
     } catch (err: any) {
       console.error('❌ [Routing] Sync failed:', err.message);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Применяет те же правила к Hysteria2 через серверный ACL (file: /etc/hysteria/acl.txt).
+   * При неудачном рестарте — автоматический откат конфига. Ссылки клиентов не меняются.
+   */
+  private static syncHysteriaAcl(rules: SanitizedRoutingRule[]): { applied: boolean; rules: number; reason?: string; skipped: string[] } {
+    try {
+      if (hostExec('command -v hysteria2 >/dev/null 2>&1 && echo YES || echo NO', 15000) !== 'YES') {
+        return { applied: false, rules: 0, reason: 'hysteria2 не установлен на этом хосте', skipped: [] };
+      }
+
+      const cfgB64 = hostExec(`base64 -w0 ${HYSTERIA_CONF} 2>/dev/null || echo ''`, 15000);
+      if (!cfgB64) {
+        return { applied: false, rules: 0, reason: 'конфиг Hysteria2 не найден', skipped: [] };
+      }
+      let cfg = Buffer.from(cfgB64, 'base64').toString('utf8');
+
+      // ACL: если уже настроен вручную (inline или другой файл) — не перезаписываем
+      const cfgLines = cfg.split('\n');
+      const aclIdx = cfgLines.findIndex((l) => /^acl:[ \t]*$/.test(l));
+      if (aclIdx >= 0) {
+        const block: string[] = [];
+        for (let i = aclIdx + 1; i < cfgLines.length; i++) {
+          if (/^\s/.test(cfgLines[i]) || cfgLines[i].trim() === '') block.push(cfgLines[i]);
+          else break;
+        }
+        if (!block.join('\n').includes(`file: ${HYSTERIA_ACL}`)) {
+          return { applied: false, rules: 0, reason: 'в конфиге уже задан другой ACL (inline/иной файл) — не перезаписываю', skipped: [] };
+        }
+      } else {
+        cfg = cfg.replace(/\s*$/, '') + `\n\nacl:\n  file: ${HYSTERIA_ACL}\n`;
+      }
+
+      // Outbound ipv6-out — при необходимости добавляем в конфиг (только если своего блока outbounds нет)
+      const needsIpv6 = rules.some((r) => r.outbound_tag === 'ipv6-out');
+      const hasOutboundsSection = cfgLines.some((l) => /^outbounds:[ \t]*$/.test(l));
+      const hasIpv6Out = /name:\s*ipv6-out\b/.test(cfg);
+      const hasProxyOut = /name:\s*proxy\b/.test(cfg);
+      if (needsIpv6 && !hasIpv6Out && !hasOutboundsSection) {
+        cfg = cfg.replace(/\s*$/, '') + `\n\noutbounds:\n  - name: ipv6-out\n    type: direct\n    direct:\n      mode: 6\n`;
+      }
+      const ipv6Available = hasIpv6Out || (needsIpv6 && !hasOutboundsSection);
+
+      const { lines, skipped } = buildHysteriaAcl(rules, {
+        hasOutbound: (tag) => (tag === 'ipv6-out' ? ipv6Available : tag === 'proxy' ? hasProxyOut : false),
+      });
+
+      const aclContent = `# izinet managed ACL — auto-generated ${new Date().toISOString()}\n` + (lines.length ? lines.join('\n') + '\n' : '');
+      const toB64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+
+      // Бэкап текущих файлов
+      hostExec(`cp -a ${HYSTERIA_CONF} ${HYSTERIA_CONF}.izinet.bak 2>/dev/null || true; cp -a ${HYSTERIA_ACL} ${HYSTERIA_ACL}.izinet.bak 2>/dev/null || true`, 15000);
+
+      hostExec(`mkdir -p /etc/hysteria && printf %s '${toB64(aclContent)}' | base64 -d > ${HYSTERIA_ACL} && chmod 644 ${HYSTERIA_ACL}`, 15000);
+      hostExec(`printf %s '${toB64(cfg)}' | base64 -d > ${HYSTERIA_CONF} && chmod 644 ${HYSTERIA_CONF}`, 15000);
+
+      hostExec('systemctl restart hysteria2', 45000);
+      const active = hostExec('sleep 2; systemctl is-active hysteria2', 15000);
+      if (active !== 'active') {
+        console.error('❌ [Routing] Hysteria2 не поднялся после применения ACL — откатываю');
+        hostExec(`cp -a ${HYSTERIA_CONF}.izinet.bak ${HYSTERIA_CONF} 2>/dev/null || true; cp -a ${HYSTERIA_ACL}.izinet.bak ${HYSTERIA_ACL} 2>/dev/null || true; systemctl restart hysteria2 || true`, 45000);
+        return { applied: false, rules: 0, reason: 'hysteria2 не запустился с новым ACL — выполнен откат', skipped };
+      }
+
+      console.log(`✅ [Routing] Hysteria2 ACL применён: ${lines.length} правил, пропущено ${skipped.length}`);
+      return { applied: true, rules: lines.length, skipped };
+    } catch (e: any) {
+      console.error('❌ [Routing] Hysteria2 ACL sync failed:', e.message);
+      return { applied: false, rules: 0, reason: e.message, skipped: [] };
     }
   }
 
