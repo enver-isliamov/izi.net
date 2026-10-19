@@ -123,3 +123,17 @@ curl --socks5-hostname 127.0.0.1:19080 https://api.ipify.org   # должен в
 - `server/src/services/awg.service.ts` — `normalizeEndpoint`
 - `server/src/tests/routing.test.ts`, `server/src/tests/compat.test.ts`
 - Коммиты: `235e42a`, `97b5591`, `dc5839d`, `ea82afe`
+
+## 8. Обновление версии Hysteria2
+
+Безопасное обновление — только скриптом `scripts/legacy_fixes/upgrade_hysteria.sh` (бэкап → проверка SHA256 → preflight на копии конфига с `listen: 127.0.0.1:0` → установка → рестарт → функциональная проверка через локальный клиент → автоматический откат при любой ошибке):
+
+```bash
+cd /opt/izinet
+bash scripts/legacy_fixes/upgrade_hysteria.sh
+# другая версия: HYSTERIA_VERSION=2.13.0 bash scripts/legacy_fixes/upgrade_hysteria.sh
+```
+
+Актуальная версия на 2026-10-19 — **v2.13.0**. Скрипт `install_hysteria.sh` для новых серверов обновлён на неё же.
+
+После обновления серверный конфиг Hysteria поддерживает секцию `outbounds` (кастомные direct-режимы 4/6, socks5/http). Это открывает возможность включить для Hysteria правило «Через VPN» (через upstream socks5/http), но только отдельной задачей: первый outbound становится default, поэтому добавлять его можно лишь после теста и с сохранением `direct` первым.

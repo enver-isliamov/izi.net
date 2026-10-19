@@ -4,7 +4,7 @@
 
 set -e
 
-HYSTERIA_VERSION="2.6.1"
+HYSTERIA_VERSION="2.13.0"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/hysteria"
 CERT_DIR="/etc/hysteria"
