@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { isUnroutableHost } from '../utils/vpn';
 import { getXuiForServer } from './xui.service';
 import { restartContainer } from '../utils/docker';
+import { sanitizeRoutingRules } from '../utils/routing';
 
 export class RoutingService {
   /**
@@ -26,7 +27,14 @@ export class RoutingService {
 
       if (!rules || !servers) return;
 
-      const xrayRules = rules.map(r => {
+      // Защита Xray: пропускаем только корректные правила и известные outbound-теги,
+      // чтобы ошибочная запись из админки не могла сломать xrayTemplateConfig.
+      const { rules: safeRules, skipped } = sanitizeRoutingRules(rules);
+      if (skipped.length) {
+        console.warn(`⚠️ [Routing] Пропущены некорректные правила (${skipped.length}): ${skipped.join('; ')}`);
+      }
+
+      const xrayRules = safeRules.map(r => {
         const rule: any = { type: "field", outboundTag: r.outbound_tag, izinet_managed: true };
         if (r.domains?.length) rule.domain = r.domains;
         if (r.ips?.length) rule.ip = r.ips;

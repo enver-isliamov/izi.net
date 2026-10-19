@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
+import { normalizeSiteEntries, normalizeDomainEntries, normalizeIpEntries, autoRuleName } from '../../../server/src/utils/routing';
 
 interface RoutingRule {
   id: string;
@@ -31,6 +32,14 @@ interface RoutingRule {
   outbound_tag: string;
   is_active: boolean;
 }
+
+const OUTBOUND_META: Record<string, { label: string; hint: string }> = {
+  direct: { label: 'Мимо VPN', hint: 'DIRECT — в обход туннеля' },
+  proxy: { label: 'Через VPN', hint: 'PROXY — через туннель' },
+  blocked: { label: 'Блокировка', hint: 'BLOCKED — запрет' },
+  block: { label: 'Блокировка', hint: 'BLOCKED — запрет' },
+  'ipv6-out': { label: 'IPv6-выход', hint: 'IPV6-OUT — серверный outbound' },
+};
 
 export default function AdminRouting() {
   const { session } = useAuth();
@@ -44,7 +53,10 @@ export default function AdminRouting() {
   const [formName, setFormName] = useState('');
   const [formDomains, setFormDomains] = useState('');
   const [formIps, setFormIps] = useState('');
-  const [formOutboundTag, setFormOutboundTag] = useState<'block' | 'direct' | 'proxy'>('block');
+  const [formOutboundTag, setFormOutboundTag] = useState<'blocked' | 'direct' | 'proxy'>('direct');
+  const [quickInput, setQuickInput] = useState('');
+  const [quickAction, setQuickAction] = useState<'direct' | 'proxy'>('direct');
+  const [quickBusy, setQuickBusy] = useState(false);
 
   const fetchRules = async () => {
     try {
@@ -66,11 +78,23 @@ export default function AdminRouting() {
   const handleSaveRule = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     try {
-      const domainsArr = formDomains.split(',').map(d => d.trim()).filter(d => !!d);
-      const ipsArr = formIps.split(',').map(i => i.trim()).filter(i => !!i);
+      const domainParsed = normalizeDomainEntries(formDomains);
+      const ipParsed = normalizeIpEntries(formIps);
+      const domainsArr = domainParsed.values;
+      const ipsArr = ipParsed.values;
+      const invalidEntries = [...domainParsed.invalid, ...ipParsed.invalid];
+
+      if (invalidEntries.length) {
+        toast.warning('Пропущены неверные значения: ' + invalidEntries.slice(0, 4).join(', '));
+      }
 
       if (!formName.trim()) {
         toast.error('Введите название правила');
+        return;
+      }
+
+      if (!domainsArr.length && !ipsArr.length) {
+        toast.error('Добавьте хотя бы один домен или IP-адрес');
         return;
       }
 
@@ -102,12 +126,47 @@ export default function AdminRouting() {
     }
   };
 
+  // Быстрое добавление: свободный список доменов/ссылок/адресов + выбор «мимо/через VPN»
+  const handleQuickAdd = async () => {
+    const parsed = normalizeSiteEntries(quickInput);
+    if (parsed.invalid.length) {
+      toast.warning('Пропущены неверные значения: ' + parsed.invalid.slice(0, 4).join(', '));
+    }
+    if (!parsed.domains.length && !parsed.ips.length) {
+      toast.error('Укажите домен (yandex.ru), ссылку (https://site.ru) или IP-адрес');
+      return;
+    }
+
+    const actionLabel = quickAction === 'direct' ? 'мимо VPN' : 'через VPN';
+    const payload = {
+      name: `${autoRuleName(parsed.domains, parsed.ips)} — ${actionLabel}`,
+      domains: parsed.domains,
+      ips: parsed.ips,
+      outbound_tag: quickAction,
+      is_active: true,
+    };
+
+    setQuickBusy(true);
+    try {
+      const { error } = await supabase.from('vpn_routing_rules').insert([payload]);
+      if (error) throw error;
+      toast.success(`Правило добавлено: ${actionLabel}`);
+      setQuickInput('');
+      await fetchRules();
+      syncToServers();
+    } catch (e: any) {
+      toast.error('Ошибка добавления: ' + e.message);
+    } finally {
+      setQuickBusy(false);
+    }
+  };
+
   const resetForm = () => {
     setEditingId(null);
     setFormName('');
     setFormDomains('');
     setFormIps('');
-    setFormOutboundTag('block');
+    setFormOutboundTag('direct');
     setIsFormOpen(false);
   };
 
@@ -116,7 +175,7 @@ export default function AdminRouting() {
     setFormName(r.name);
     setFormDomains((r.domains || []).join(', '));
     setFormIps((r.ips || []).join(', '));
-    setFormOutboundTag((r.outbound_tag as any) || 'block');
+    setFormOutboundTag(((r.outbound_tag === 'block' ? 'blocked' : r.outbound_tag) as any) || 'direct');
     setIsFormOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -159,7 +218,7 @@ export default function AdminRouting() {
     }
   };
 
-  const blockCount = rules.filter(r => r.outbound_tag === 'block').length;
+  const blockCount = rules.filter(r => r.outbound_tag === 'block' || r.outbound_tag === 'blocked').length;
   const directCount = rules.filter(r => r.outbound_tag === 'direct').length;
   const proxyCount = rules.filter(r => r.outbound_tag === 'proxy').length;
 
@@ -218,6 +277,54 @@ export default function AdminRouting() {
           </div>
         </div>
 
+        {/* Быстрое добавление сайта или адреса */}
+        <div className="p-4 bg-black/30 rounded-xl border border-white/10 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400">
+            <Globe size={14} />
+            Быстрое добавление сайта или адреса
+          </div>
+          <div className="flex flex-col lg:flex-row gap-2">
+            <input
+              value={quickInput}
+              onChange={e => setQuickInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleQuickAdd(); } }}
+              placeholder="yandex.ru, https://mail.ru/inbox, 8.8.8.8, 10.0.0.0/8 — через запятую или пробел"
+              className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm text-white font-mono focus:border-emerald-500/50 outline-none"
+            />
+            <div className="flex rounded-xl overflow-hidden border border-white/10">
+              <button
+                type="button"
+                onClick={() => setQuickAction('direct')}
+                className={`px-3 py-2 text-xs font-semibold transition-colors ${quickAction === 'direct' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-black/30 text-zinc-400 hover:text-white'}`}
+                title="Правило DIRECT: трафик идёт мимо VPN"
+              >
+                Мимо VPN
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickAction('proxy')}
+                className={`px-3 py-2 text-xs font-semibold border-l border-white/10 transition-colors ${quickAction === 'proxy' ? 'bg-blue-500/20 text-blue-300' : 'bg-black/30 text-zinc-400 hover:text-white'}`}
+                title="Правило PROXY: трафик идёт через VPN"
+              >
+                Через VPN
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleQuickAdd}
+              disabled={quickBusy}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              <Plus size={14} />
+              {quickBusy ? 'Добавление...' : 'Добавить'}
+            </button>
+          </div>
+          <p className="text-[10px] text-zinc-500 leading-relaxed">
+            Поддерживаются домены (yandex.ru), ссылки (https://site.ru/...), IP-адреса и подсети. Домен автоматически сохранится в формате domain:, ссылка — по имени хоста.
+            Правила действуют на всех серверах и всех VLESS-инбаундах (tcp / grpc / xhttp). Изменения применяются сразу после сохранения.
+          </p>
+        </div>
+
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between">
@@ -227,7 +334,7 @@ export default function AdminRouting() {
           </div>
 
           <div className="p-3 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between">
-            <span className="text-[11px] text-muted-foreground">Блокировка (BLOCK)</span>
+            <span className="text-[11px] text-muted-foreground">Блокировка (BLOCKED)</span>
             <span className="text-xl font-bold font-mono text-red-400 mt-1">{blockCount}</span>
             <span className="text-[10px] text-red-400/70 font-mono">Запрещенные хосты</span>
           </div>
@@ -293,7 +400,7 @@ export default function AdminRouting() {
                           : 'bg-black/30 text-zinc-400 border-white/5 hover:border-white/15'
                       }`}
                     >
-                      BLOCK
+                      Блокировать
                     </button>
                     <button
                       type="button"
@@ -304,7 +411,7 @@ export default function AdminRouting() {
                           : 'bg-black/30 text-zinc-400 border-white/5 hover:border-white/15'
                       }`}
                     >
-                      DIRECT
+                      Мимо VPN
                     </button>
                     <button
                       type="button"
@@ -315,9 +422,10 @@ export default function AdminRouting() {
                           : 'bg-black/30 text-zinc-400 border-white/5 hover:border-white/15'
                       }`}
                     >
-                      PROXY
+                      Через VPN
                     </button>
                   </div>
+                  <p className="text-[10px] text-zinc-500">Правила действуют на всех серверах и всех VLESS-инбаундах (tcp / grpc / xhttp).</p>
                 </div>
 
                 <div className="space-y-1.5 md:col-span-2">
@@ -325,10 +433,10 @@ export default function AdminRouting() {
                   <input
                     value={formDomains}
                     onChange={e => setFormDomains(e.target.value)}
-                    placeholder="domain:zetflix.com, geosite:ru, regexp:.*\.ru$"
+                    placeholder="yandex.ru, domain:example.com, geosite:ru, regexp:.*\.ru$"
                     className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white font-mono focus:border-blue-500/50 outline-none"
                   />
-                  <p className="text-[10px] text-zinc-500">Поддерживаются форматы: domain:example.com, full:example.com, geosite:category, regexp:pattern</p>
+                  <p className="text-[10px] text-zinc-500">Можно писать просто домен (yandex.ru) или ссылку — приведём к domain:. Также поддерживаются: full:, geosite:, regexp:</p>
                 </div>
 
                 <div className="space-y-1.5 md:col-span-2">
@@ -365,9 +473,10 @@ export default function AdminRouting() {
         {/* Rules List */}
         <div className="space-y-3">
           {rules.map((rule) => {
-            const isBlock = rule.outbound_tag === 'block';
+            const isBlock = rule.outbound_tag === 'block' || rule.outbound_tag === 'blocked';
             const isDirect = rule.outbound_tag === 'direct';
             const isProxy = rule.outbound_tag === 'proxy';
+            const actionMeta = OUTBOUND_META[rule.outbound_tag] || { label: rule.outbound_tag, hint: rule.outbound_tag };
 
             return (
               <motion.div
@@ -395,8 +504,8 @@ export default function AdminRouting() {
                       isBlock ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                       isDirect ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                       'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                    }`}>
-                      {rule.outbound_tag}
+                    }`} title={actionMeta.hint}>
+                      {actionMeta.label}
                     </span>
 
                     {rule.is_active ? (
