@@ -219,6 +219,19 @@ function readServerFromConfFile(): AwgServer | null {
   }
 }
 
+/** Нормализует endpoint: убирает схему/путь/порт панели. «http://194.50.94.28:2053» → «194.50.94.28». */
+export function normalizeEndpoint(raw?: string | null): string {
+  let h = String(raw || '').trim();
+  h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  h = h.split('/')[0].split('?')[0].split('#')[0];
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']');
+    if (end > 0) return h.slice(1, end);
+  }
+  if ((h.match(/:/g) || []).length === 1) h = h.split(':')[0];
+  return h;
+}
+
 /** Share-ссылки wireguard:// и awg:// для клиента. Приватный ключ — только percent-encoded. */
 export function buildShareLinks(peer: AwgPeer, server: AwgServer, endpoint: string, label: string): { wireguardUrl: string; awgUrl: string } {
   const params = new URLSearchParams({
@@ -237,7 +250,7 @@ export function buildShareLinks(peer: AwgPeer, server: AwgServer, endpoint: stri
     h4: String(server.h4 || 4)
   });
   const key = encodeURIComponent(peer.private_key || '');
-  const target = `${endpoint}:${server.port}`;
+  const target = `${normalizeEndpoint(endpoint)}:${server.port}`;
   const tag = encodeURIComponent(label);
   return {
     wireguardUrl: `wireguard://${key}@${target}?${params.toString()}#${tag}`,
@@ -446,11 +459,11 @@ export class AwgService {
 
   /** Публичный адрес сервера для клиентского конфига. */
   static async endpointHost(): Promise<string> {
-    if (process.env.AWG_ENDPOINT) return process.env.AWG_ENDPOINT;
+    if (process.env.AWG_ENDPOINT) return normalizeEndpoint(process.env.AWG_ENDPOINT);
     try {
       const { data } = await supabase.from('vpn_servers').select('ip, domain').eq('is_active', true).limit(1).maybeSingle();
-      const host = data?.ip || data?.domain;
-      if (host && !/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(String(host))) return String(host);
+      const host = normalizeEndpoint(data?.ip) || normalizeEndpoint(data?.domain);
+      if (host && !/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return host;
     } catch (e) {}
     return '194.50.94.28';
   }
@@ -536,7 +549,7 @@ export class AwgService {
       '',
       '[Peer]',
       `PublicKey = ${server.public_key}`,
-      `Endpoint = ${endpoint}:${server.port}`,
+      `Endpoint = ${normalizeEndpoint(endpoint)}:${server.port}`,
       'AllowedIPs = 0.0.0.0/0',
       'PersistentKeepalive = 25',
       ''

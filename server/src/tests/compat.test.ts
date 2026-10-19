@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { AwgService, buildInterfaceConf, buildShareLinks, subnetBase, isValidClientKey } from '../services/awg.service';
+import { AwgService, buildInterfaceConf, buildShareLinks, subnetBase, isValidClientKey, normalizeEndpoint } from '../services/awg.service';
 import type { AwgPeer, AwgServer } from '../services/awg.service';
 
 const root = process.cwd();
@@ -95,6 +95,23 @@ test('wireguard:// и awg:// ссылки: ключ percent-encoded, станд�
   const trickyUrl = new URL(buildShareLinks(tricky as AwgPeer, server, '194.50.94.28', 'x').wireguardUrl);
   assert.equal(trickyUrl.hostname, '194.50.94.28', 'ключ с «/» ломает разбор ссылки');
   assert.equal(decodeURIComponent(trickyUrl.username), tricky.private_key);
+});
+
+test('endpoint из панели не попадает в ссылки и .conf: «http://194.50.94.28:2053» → 194.50.94.28', () => {
+  assert.equal(normalizeEndpoint('http://194.50.94.28:2053'), '194.50.94.28');
+  assert.equal(normalizeEndpoint('https://vpn.izinet.online/'), 'vpn.izinet.online');
+  assert.equal(normalizeEndpoint('194.50.94.28:2053'), '194.50.94.28');
+  assert.equal(normalizeEndpoint('vpn.izinet.online'), 'vpn.izinet.online');
+  const links = buildShareLinks(peer, server, 'http://194.50.94.28:2053', 'izinet_тест');
+  for (const url of [links.wireguardUrl, links.awgUrl]) {
+    const u = new URL(url);
+    assert.equal(u.hostname, '194.50.94.28', 'схема/порт панели попали в host ссылки');
+    assert.equal(u.port, '51820');
+  }
+  const conf = AwgService.buildConf(peer, server, 'http://194.50.94.28:2053');
+  assert.ok(conf.includes('Endpoint = 194.50.94.28:51820'), 'Endpoint в .conf испорчен URL панели');
+  assert.ok(!conf.includes('http://'), '.conf содержит схему — клиенты не примут');
+  assert.ok(awgSrc.includes('export function normalizeEndpoint'), 'нет нормализации endpoint — баг вернётся');
 });
 
 test('подсеть нормализуется: «10.9.0», «10.9.0.0» и «10.9.0.1/24» дают один конфиг интерфейса', () => {
