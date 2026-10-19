@@ -154,6 +154,36 @@ export function mapIpToHysteria(entry: unknown): string | null {
 }
 
 /**
+ * Защита Xray: гарантирует outbounds для используемых тегов.
+ * ipv6-out добавляется автоматически (freedom через IPv6-source), остальные
+ * отсутствующие теги (например proxy без настроенного upstream) — правило пропускается.
+ */
+export function ensureXrayOutbounds(
+  outbounds: any[],
+  rules: Array<{ name: string; outbound_tag: string; domains: string[]; ips: string[] }>
+): { outbounds: any[]; rules: typeof rules; skipped: string[] } {
+  const result = Array.isArray(outbounds) ? [...outbounds] : [];
+  const tags = new Set(result.map((o) => o && o.tag).filter(Boolean));
+  const skipped: string[] = [];
+
+  if (rules.some((r) => r.outbound_tag === 'ipv6-out') && !tags.has('ipv6-out')) {
+    result.push({ protocol: 'freedom', tag: 'ipv6-out', sendThrough: '::', settings: { domainStrategy: 'UseIPv6' } });
+    tags.add('ipv6-out');
+  }
+
+  const kept: typeof rules = [];
+  for (const rule of rules) {
+    if (!tags.has(rule.outbound_tag)) {
+      skipped.push(`${rule.name}: outbound «${rule.outbound_tag}» отсутствует в шаблоне Xray`);
+      continue;
+    }
+    kept.push(rule);
+  }
+
+  return { outbounds: result, rules: kept, skipped };
+}
+
+/**
  * Собирает строки ACL для Hysteria2 из тех же правил, что уходят в Xray.
  * hasOutbound(tag) — какие кастомные outbounds реально есть в конфиге Hysteria.
  */

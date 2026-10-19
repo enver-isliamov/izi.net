@@ -15,6 +15,7 @@ import {
   mapDomainToHysteria,
   mapIpToHysteria,
   buildHysteriaAcl,
+  ensureXrayOutbounds,
 } from '../utils/routing';
 
 const root = process.cwd();
@@ -79,6 +80,8 @@ test('контракты: админка даёт быстрое добавле�
   assert.ok(routingServiceSrc.includes('sanitizeRoutingRules'), 'RoutingService не защищает Xray-конфиг');
   assert.ok(routingServiceSrc.includes('syncHysteriaAcl'), 'RoutingService не синхронизирует Hysteria2');
   assert.ok(routingServiceSrc.includes('/etc/hysteria/acl.txt'), 'нет пути ACL-файла Hysteria2');
+  assert.ok(routingServiceSrc.includes('ensureXrayOutbounds'), 'нет защиты от ссылок на несуществующие outbounds');
+  assert.ok(routingServiceSrc.includes('без изменений — пропускаю'), 'нет пропуска рестарта при отсутствии изменений');
 });
 
 test('Hysteria2 ACL: маппинг доменов и IP из форматов Xray', () => {
@@ -111,4 +114,22 @@ test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, ip
   assert.ok(!lines.some((l) => l.startsWith('proxy')));
   assert.ok(skipped.some((s) => s.includes('Proxy правило')));
   assert.ok(skipped.some((s) => s.includes('Regexp')));
+});
+
+test('Xray: несуществующие outbounds не попадают в конфиг (ipv6-out добавляется, proxy пропускается)', () => {
+  const rules = [
+    { name: 'RU', domains: ['domain:ru'], ips: [], outbound_tag: 'direct' },
+    { name: 'Gemini', domains: ['geosite:google'], ips: [], outbound_tag: 'ipv6-out' },
+    { name: 'Proxy правило', domains: ['domain:x.com'], ips: [], outbound_tag: 'proxy' },
+  ];
+  const outbounds = [
+    { protocol: 'freedom', tag: 'direct' },
+    { protocol: 'blackhole', tag: 'blocked' },
+  ];
+  const res = ensureXrayOutbounds(outbounds as any, rules as any);
+
+  assert.ok(res.outbounds.some((o: any) => o.tag === 'ipv6-out'), 'ipv6-out должен быть добавлен');
+  assert.equal(res.rules.length, 2, 'proxy-правило без outbound должно быть пропущено');
+  assert.ok(!res.rules.some((r: any) => r.outbound_tag === 'proxy'));
+  assert.ok(res.skipped.some((s: string) => s.includes('Proxy правило')));
 });

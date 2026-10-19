@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { isUnroutableHost } from '../utils/vpn';
 import { getXuiForServer } from './xui.service';
 import { restartContainer } from '../utils/docker';
-import { sanitizeRoutingRules, buildHysteriaAcl, SanitizedRoutingRule } from '../utils/routing';
+import { sanitizeRoutingRules, buildHysteriaAcl, ensureXrayOutbounds, SanitizedRoutingRule } from '../utils/routing';
 import { execSync } from 'child_process';
 
 const HYSTERIA_CONF = '/etc/hysteria/config.yaml';
@@ -51,19 +51,13 @@ export class RoutingService {
         console.warn(`⚠️ [Routing] Пропущены некорректные правила (${skipped.length}): ${skipped.join('; ')}`);
       }
 
-      const xrayRules = safeRules.map(r => {
-        const rule: any = { type: "field", outboundTag: r.outbound_tag, izinet_managed: true };
-        if (r.domains?.length) rule.domain = r.domains;
-        if (r.ips?.length) rule.ip = r.ips;
-        return rule;
-      });
-
       for (const server of servers) {
         try {
           const { instance } = await getXuiForServer(server.id);
           const settings = await instance.getSettings();
 
           let xrayConfig = JSON.parse(settings.xrayTemplateConfig || '{}');
+          const beforeConfig = JSON.stringify(xrayConfig);
 
           // DEBUG: Log current state
           console.log(`🔍 [Routing] ${server.name} template BEFORE: api=${!!xrayConfig.api} stats=${!!xrayConfig.stats} policy=${!!xrayConfig.policy} inbounds=${(xrayConfig.inbounds || []).length} rules=${(xrayConfig.routing?.rules || []).length}`);
@@ -96,6 +90,24 @@ export class RoutingService {
               { protocol: 'blackhole', tag: 'blocked' }
             ];
           }
+
+          // Гарантируем outbounds для всех используемых тегов: ipv6-out добавим сами,
+          // а правила с несуществующими тегами (например proxy без upstream) пропустим —
+          // иначе Xray не запустится и у всех пользователей пропадёт VPN.
+          const ensured = ensureXrayOutbounds(xrayConfig.outbounds || [], safeRules);
+          if (ensured.outbounds.length !== (xrayConfig.outbounds || []).length) {
+            xrayConfig.outbounds = ensured.outbounds;
+            console.log('➕ [Routing] Добавлен outbound ipv6-out (freedom, IPv6-source)');
+          }
+          if (ensured.skipped.length) {
+            console.warn(`⚠️ [Routing] ${server.name}: пропущены правила без outbound: ${ensured.skipped.join('; ')}`);
+          }
+          const xrayRules = ensured.rules.map(r => {
+            const rule: any = { type: 'field', outboundTag: r.outbound_tag, izinet_managed: true };
+            if (r.domains?.length) rule.domain = r.domains;
+            if (r.ips?.length) rule.ip = r.ips;
+            return rule;
+          });
 
           // Ensure API inbound exists (dokodemo-door on 127.0.0.1:62789)
           if (!xrayConfig.inbounds) xrayConfig.inbounds = [];
@@ -137,6 +149,13 @@ export class RoutingService {
           // Prepend current rules from DB
           const finalRules = xrayRules.map(r => ({ ...r, izinet_managed: true }));
           xrayConfig.routing.rules = [...finalRules, ...xrayConfig.routing.rules];
+
+          // Если ничего не изменилось — НЕ трогаем панель и Xray (иначе каждый час рвём всем VPN)
+          const afterConfig = JSON.stringify(xrayConfig);
+          if (afterConfig === beforeConfig) {
+            console.log(`⏭️ [Routing] ${server.name}: без изменений — пропускаю updateSettings/перезапуск панели`);
+            continue;
+          }
 
           settings.xrayTemplateConfig = JSON.stringify(xrayConfig, null, 2);
 
@@ -191,6 +210,7 @@ export class RoutingService {
       let cfg = Buffer.from(cfgB64, 'base64').toString('utf8');
 
       // ACL: если уже настроен вручную (inline или другой файл) — не перезаписываем
+      let cfgChanged = false;
       const cfgLines = cfg.split('\n');
       const aclIdx = cfgLines.findIndex((l) => /^acl:[ \t]*$/.test(l));
       if (aclIdx >= 0) {
@@ -204,6 +224,7 @@ export class RoutingService {
         }
       } else {
         cfg = cfg.replace(/\s*$/, '') + `\n\nacl:\n  file: ${HYSTERIA_ACL}\n`;
+        cfgChanged = true;
       }
 
       // Outbound ipv6-out — при необходимости добавляем в конфиг (только если своего блока outbounds нет)
@@ -213,6 +234,7 @@ export class RoutingService {
       const hasProxyOut = /name:\s*proxy\b/.test(cfg);
       if (needsIpv6 && !hasIpv6Out && !hasOutboundsSection) {
         cfg = cfg.replace(/\s*$/, '') + `\n\noutbounds:\n  - name: ipv6-out\n    type: direct\n    direct:\n      mode: 6\n`;
+        cfgChanged = true;
       }
       const ipv6Available = hasIpv6Out || (needsIpv6 && !hasOutboundsSection);
 
@@ -220,7 +242,15 @@ export class RoutingService {
         hasOutbound: (tag) => (tag === 'ipv6-out' ? ipv6Available : tag === 'proxy' ? hasProxyOut : false),
       });
 
-      const aclContent = `# izinet managed ACL — auto-generated ${new Date().toISOString()}\n` + (lines.length ? lines.join('\n') + '\n' : '');
+      const aclContent = `# izinet managed ACL (izinet)\n` + (lines.length ? lines.join('\n') + '\n' : '');
+
+      // Если ACL и конфиг уже совпадают — ничего не перезаписываем и НЕ рестартим сервис
+      const existingAclB64 = hostExec(`base64 -w0 ${HYSTERIA_ACL} 2>/dev/null || echo ''`, 15000);
+      const existingAcl = existingAclB64 ? Buffer.from(existingAclB64, 'base64').toString('utf8') : '';
+      if (!cfgChanged && existingAcl === aclContent) {
+        console.log('⏭️ [Routing] Hysteria2 ACL без изменений — рестарт не требуется');
+        return { applied: true, rules: lines.length, reason: 'без изменений', skipped };
+      }
       const toB64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 
       // Бэкап текущих файлов
