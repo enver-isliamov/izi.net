@@ -209,6 +209,9 @@ export class RoutingService {
       }
       let cfg = Buffer.from(cfgB64, 'base64').toString('utf8');
 
+      // ACL: если уже настроен вручную (inline или другой файл) — не перезаписываем
+      let cfgChanged = false;
+
       // Миграция: убираем блок outbounds, который ранее ошибочно добавлял izinet.
       // В Hysteria 2.6.1 первый outbound становится default: mode 6 делал весь IPv4-трафик недоступным.
       const injectedOutbounds = /\n\noutbounds:\n  - name: ipv6-out\n    type: direct\n    direct:\n      mode: 6\n?/g;
@@ -218,8 +221,6 @@ export class RoutingService {
         console.log('🧹 [Routing] Удалён ранее добавленный блок outbounds (ipv6-out/mode 6)');
       }
 
-      // ACL: если уже настроен вручную (inline или другой файл) — не перезаписываем
-      let cfgChanged = false;
       const cfgLines = cfg.split('\n');
       const aclIdx = cfgLines.findIndex((l) => /^acl:[ \t]*$/.test(l));
       if (aclIdx >= 0) {
