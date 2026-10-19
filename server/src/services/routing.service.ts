@@ -253,18 +253,46 @@ export class RoutingService {
       }
       const toB64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 
-      // Бэкап текущих файлов
-      hostExec(`cp -a ${HYSTERIA_CONF} ${HYSTERIA_CONF}.izinet.bak 2>/dev/null || true; cp -a ${HYSTERIA_ACL} ${HYSTERIA_ACL}.izinet.bak 2>/dev/null || true`, 15000);
+      // Бэкап текущих файлов (только если сервис был жив — чтобы не затереть хороший бэкап битым конфигом)
+      const wasActive = hostExec('systemctl is-active hysteria2 2>/dev/null || true', 15000).trim() === 'active';
+      if (wasActive) {
+        hostExec(`cp -a ${HYSTERIA_CONF} ${HYSTERIA_CONF}.izinet.bak 2>/dev/null || true`, 15000);
+      }
+      hostExec(`cp -a ${HYSTERIA_ACL} ${HYSTERIA_ACL}.izinet.bak 2>/dev/null || true`, 15000);
 
       hostExec(`mkdir -p /etc/hysteria && printf %s '${toB64(aclContent)}' | base64 -d > ${HYSTERIA_ACL} && chmod 644 ${HYSTERIA_ACL}`, 15000);
       hostExec(`printf %s '${toB64(cfg)}' | base64 -d > ${HYSTERIA_CONF} && chmod 644 ${HYSTERIA_CONF}`, 15000);
 
-      hostExec('systemctl restart hysteria2', 45000);
-      const active = hostExec('sleep 2; systemctl is-active hysteria2', 15000);
-      if (active !== 'active') {
-        console.error('❌ [Routing] Hysteria2 не поднялся после применения ACL — откатываю');
-        hostExec(`cp -a ${HYSTERIA_CONF}.izinet.bak ${HYSTERIA_CONF} 2>/dev/null || true; cp -a ${HYSTERIA_ACL}.izinet.bak ${HYSTERIA_ACL} 2>/dev/null || true; systemctl restart hysteria2 || true`, 45000);
-        return { applied: false, rules: 0, reason: 'hysteria2 не запустился с новым ACL — выполнен откат', skipped };
+      /** Откат к предыдущим файлам Hysteria2 при любой ошибке применения. */
+      const rollback = () => {
+        try {
+          hostExec(`cp -a ${HYSTERIA_CONF}.izinet.bak ${HYSTERIA_CONF} 2>/dev/null || true; cp -a ${HYSTERIA_ACL}.izinet.bak ${HYSTERIA_ACL} 2>/dev/null || true; systemctl restart hysteria2 || true`, 45000);
+          console.error('↩️ [Routing] Hysteria2: выполнен откат конфига и ACL');
+        } catch (e2: any) {
+          console.error('❌ [Routing] Hysteria2 rollback failed:', e2.message);
+        }
+      };
+
+      try {
+        hostExec('systemctl restart hysteria2', 45000);
+
+        // Проверка статуса без выброса исключения: systemctl is-active возвращает non-zero,
+        // если сервис не активен — раньше это ломало авто-откат.
+        let active = '';
+        for (let i = 0; i < 8; i++) {
+          active = hostExec('systemctl is-active hysteria2 2>/dev/null || true', 15000).trim();
+          if (active === 'active') break;
+          hostExec('sleep 1', 5000);
+        }
+        if (active !== 'active') {
+          console.error('❌ [Routing] Hysteria2 не поднялся после применения ACL — откатываю');
+          rollback();
+          return { applied: false, rules: 0, reason: 'hysteria2 не запустился с новым ACL — выполнен откат', skipped };
+        }
+      } catch (e: any) {
+        console.error('❌ [Routing] Hysteria2 restart failed:', e.message);
+        rollback();
+        return { applied: false, rules: 0, reason: 'ошибка применения ACL — выполнен откат: ' + e.message, skipped };
       }
 
       console.log(`✅ [Routing] Hysteria2 ACL применён: ${lines.length} правил, пропущено ${skipped.length}`);

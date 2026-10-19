@@ -9,6 +9,8 @@ export class MaintenanceService {
   private static interval: NodeJS.Timeout | null = null;
   private static isSyncing = false;
   private static isSyncingServers = false;
+  /** Routing-правила применяются один раз за запуск приложения (обычно сразу после деплоя). */
+  private static routingInitialSyncDone = false;
 
   static init() {
     if (this.interval) return;
@@ -34,7 +36,15 @@ export class MaintenanceService {
       await this.syncAwgDevices().catch(e => console.error('❌ [Maintenance] syncAwgDevices failed:', e.message));
       await this.syncAwgForSubscribers().catch(e => console.error('❌ [Maintenance] syncAwgForSubscribers failed:', e.message));
       await this.syncAllServers().catch(e => console.error('❌ [Maintenance] syncAllServers failed:', e.message));
-      await RoutingService.syncAll().catch(e => console.error('❌ [Maintenance] Routing syncAll failed:', e.message));
+      // Routing: применяем правила ОДИН раз за запуск приложения (после деплоя).
+      // Раньше вызывалось каждый цикл (раз в час) — это перезапускало панель
+      // и рвало VPN у всех пользователей каждые 60 минут.
+      if (!this.routingInitialSyncDone) {
+        this.routingInitialSyncDone = true;
+        await RoutingService.syncAll().catch(e => console.error('❌ [Maintenance] Routing syncAll failed:', e.message));
+      } else {
+        console.log('⏭️ [Maintenance] Routing sync пропущен (уже применён после запуска)');
+      }
 
       console.log('✅ [Maintenance] Full maintenance cycle complete.');
     } catch (err: any) {

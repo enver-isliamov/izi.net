@@ -21,6 +21,7 @@ import {
 const root = process.cwd();
 const routingPageSrc = fs.readFileSync(path.join(root, 'src/pages/Admin/Routing.tsx'), 'utf8');
 const routingServiceSrc = fs.readFileSync(path.join(root, 'server/src/services/routing.service.ts'), 'utf8');
+const maintenanceSrc = fs.readFileSync(path.join(root, 'server/src/services/maintenance.service.ts'), 'utf8');
 
 test('normalizeDomainRule: домены, ссылки и Xray-префиксы', () => {
   assert.equal(normalizeDomainRule('yandex.ru'), 'domain:yandex.ru');
@@ -82,21 +83,26 @@ test('контракты: админка даёт быстрое добавле�
   assert.ok(routingServiceSrc.includes('/etc/hysteria/acl.txt'), 'нет пути ACL-файла Hysteria2');
   assert.ok(routingServiceSrc.includes('ensureXrayOutbounds'), 'нет защиты от ссылок на несуществующие outbounds');
   assert.ok(routingServiceSrc.includes('без изменений — пропускаю'), 'нет пропуска рестарта при отсутствии изменений');
+  assert.ok(routingServiceSrc.includes('is-active hysteria2 2>/dev/null || true'), 'проверка статуса Hysteria2 может бросать исключение и ломать откат');
+  assert.ok(routingServiceSrc.includes('const rollback ='), 'нет функции отката Hysteria2');
+  assert.ok(maintenanceSrc.includes('routingInitialSyncDone'), 'routing-синк в maintenance должен быть один раз за запуск');
+  assert.ok(maintenanceSrc.includes('Routing sync пропущен'), 'нет пропуска hourly-синка routing');
 });
 
 test('Hysteria2 ACL: маппинг доменов и IP из форматов Xray', () => {
   assert.equal(mapDomainToHysteria('domain:yandex.ru'), 'suffix:yandex.ru');
   assert.equal(mapDomainToHysteria('full:example.com'), 'example.com');
-  assert.equal(mapDomainToHysteria('geosite:google'), 'geosite:google');
+  // geosite без geo-баз в конфиге Hysteria2 валит сервис — пропускаем
+  assert.equal(mapDomainToHysteria('geosite:google'), null);
   assert.equal(mapDomainToHysteria('regexp:.*\\.ru$'), null);
   assert.equal(mapDomainToHysteria('keyword:foo'), null);
   assert.equal(mapDomainToHysteria('8.8.8.8'), null);
-  assert.equal(mapIpToHysteria('geoip:ru'), 'geoip:ru');
+  assert.equal(mapIpToHysteria('geoip:ru'), null);
   assert.equal(mapIpToHysteria('10.0.0.0/8'), '10.0.0.0/8');
   assert.equal(mapIpToHysteria('domain:foo'), null);
 });
 
-test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, ipv6-out, пропуск proxy без outbound)', () => {
+test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, без geo-записей, пропуск proxy без outbound)', () => {
   const rules = [
     { name: 'RU', domains: ['domain:ru', 'geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct' },
     { name: 'Block', domains: ['domain:torrent'], ips: [], outbound_tag: 'blocked' },
@@ -107,11 +113,12 @@ test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, ip
   const { lines, skipped } = buildHysteriaAcl(rules as any, { hasOutbound: (t) => t === 'ipv6-out' });
 
   assert.ok(lines.includes('direct(suffix:ru)'));
-  assert.ok(lines.includes('direct(geosite:ru)'));
-  assert.ok(lines.includes('direct(geoip:ru)'));
+  assert.ok(!lines.some((l) => l.includes('geosite') || l.includes('geoip')), 'geosite/geoip не должны попадать в ACL');
   assert.ok(lines.includes('reject(suffix:torrent)'));
-  assert.ok(lines.includes('ipv6-out(geosite:google)'));
+  assert.ok(!lines.some((l) => l.startsWith('ipv6-out')));
   assert.ok(!lines.some((l) => l.startsWith('proxy')));
+  assert.ok(skipped.some((s) => s.includes('geosite/geoip')));
+  assert.ok(skipped.some((s) => s.includes('Gemini')));
   assert.ok(skipped.some((s) => s.includes('Proxy правило')));
   assert.ok(skipped.some((s) => s.includes('Regexp')));
 });
