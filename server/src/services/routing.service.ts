@@ -227,20 +227,10 @@ export class RoutingService {
         cfgChanged = true;
       }
 
-      // Outbound ipv6-out — при необходимости добавляем в конфиг (только если своего блока outbounds нет)
-      const needsIpv6 = rules.some((r) => r.outbound_tag === 'ipv6-out');
-      const hasOutboundsSection = cfgLines.some((l) => /^outbounds:[ \t]*$/.test(l));
-      const hasIpv6Out = /name:\s*ipv6-out\b/.test(cfg);
-      const hasProxyOut = /name:\s*proxy\b/.test(cfg);
-      if (needsIpv6 && !hasIpv6Out && !hasOutboundsSection) {
-        cfg = cfg.replace(/\s*$/, '') + `\n\noutbounds:\n  - name: ipv6-out\n    type: direct\n    direct:\n      mode: 6\n`;
-        cfgChanged = true;
-      }
-      const ipv6Available = hasIpv6Out || (needsIpv6 && !hasOutboundsSection);
-
-      const { lines, skipped } = buildHysteriaAcl(rules, {
-        hasOutbound: (tag) => (tag === 'ipv6-out' ? ipv6Available : tag === 'proxy' ? hasProxyOut : false),
-      });
+      // В Hysteria 2.6.1 серверный ACL знает только built-in outbounds (direct/reject).
+      // Кастомные ipv6-out/proxy без объявленных outbounds валят старт сервиса
+      // («invalid syntax»), поэтому разрешаем только direct/reject — остальное пропускаем.
+      const { lines, skipped } = buildHysteriaAcl(rules, { hasOutbound: () => false });
 
       const aclContent = `# izinet managed ACL (izinet)\n` + (lines.length ? lines.join('\n') + '\n' : '');
 
@@ -252,6 +242,26 @@ export class RoutingService {
         return { applied: true, rules: lines.length, reason: 'без изменений', skipped };
       }
       const toB64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+
+      // PRE-FLIGHT: проверяем новый конфиг на временной копии (listen :0), не трогая боевой сервис.
+      // Это ловит ошибки ACL/конфига ДО перезапуска — чтобы Hysteria не падала в crash-loop.
+      try {
+        const escapedAcl = HYSTERIA_ACL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        let checkCfg = cfg.replace(/^listen:[ \t].*$/m, 'listen: 127.0.0.1:0');
+        checkCfg = checkCfg.replace(new RegExp(`file:\\s*${escapedAcl}`), 'file: /tmp/izinet-acl-check.txt');
+        hostExec(`printf %s '${toB64(aclContent)}' | base64 -d > /tmp/izinet-acl-check.txt`, 15000);
+        hostExec(`printf %s '${toB64(checkCfg)}' | base64 -d > /tmp/izinet-hysteria-check.yaml`, 15000);
+        const checkOut = hostExec('timeout 5 hysteria2 server -c /tmp/izinet-hysteria-check.yaml 2>&1 || true', 20000);
+        hostExec('rm -f /tmp/izinet-acl-check.txt /tmp/izinet-hysteria-check.yaml', 10000);
+        if (/FATAL|failed to load server config|invalid config/i.test(checkOut)) {
+          const short = checkOut.split('\n').filter((l) => /FATAL|invalid config|failed/i.test(l)).slice(0, 2).join(' | ').slice(0, 350);
+          console.error('❌ [Routing] Hysteria2 preflight failed:', short);
+          return { applied: false, rules: 0, reason: 'preflight-проверка конфига Hysteria2 не прошла: ' + short, skipped };
+        }
+      } catch (e: any) {
+        console.error('❌ [Routing] Hysteria2 preflight error:', e.message);
+        return { applied: false, rules: 0, reason: 'preflight-проверка Hysteria2 не выполнена: ' + e.message, skipped };
+      }
 
       // Бэкап текущих файлов (только если сервис был жив — чтобы не затереть хороший бэкап битым конфигом)
       const wasActive = hostExec('systemctl is-active hysteria2 2>/dev/null || true', 15000).trim() === 'active';

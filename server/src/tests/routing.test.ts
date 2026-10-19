@@ -85,6 +85,8 @@ test('контракты: админка даёт быстрое добавле�
   assert.ok(routingServiceSrc.includes('без изменений — пропускаю'), 'нет пропуска рестарта при отсутствии изменений');
   assert.ok(routingServiceSrc.includes('is-active hysteria2 2>/dev/null || true'), 'проверка статуса Hysteria2 может бросать исключение и ломать откат');
   assert.ok(routingServiceSrc.includes('const rollback ='), 'нет функции отката Hysteria2');
+  assert.ok(routingServiceSrc.includes('izinet-hysteria-check'), 'нет preflight-проверки конфига Hysteria2 перед применением');
+  assert.ok(routingServiceSrc.includes("hasOutbound: () => false"), 'Hysteria ACL не должен ссылаться на кастомные outbounds (2.6.1 не поддерживает)');
   assert.ok(maintenanceSrc.includes('routingInitialSyncDone'), 'routing-синк в maintenance должен быть один раз за запуск');
   assert.ok(maintenanceSrc.includes('Routing sync пропущен'), 'нет пропуска hourly-синка routing');
 });
