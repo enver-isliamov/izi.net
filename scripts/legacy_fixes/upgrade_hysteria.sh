@@ -28,7 +28,7 @@ fail() { echo -e "\033[1;31m[✗]\033[0m $*" >&2; exit 1; }
 [ -x "$BIN" ] || fail "не найден $BIN"
 [ -f "$CONF" ] || fail "не найден $CONF"
 
-CUR="$("$BIN" version 2>&1 | head -1 || true)"
+CUR="$("$BIN" version 2>&1 | awk -F'\t' '/^Version:/{print $2; exit}' || true)"
 log "Текущая версия: ${CUR:-unknown}"
 
 # ---------- 1. Бэкап ----------
@@ -101,7 +101,7 @@ if [ "$ACTIVE" != "yes" ]; then
   rollback
   fail "новая версия не запустилась — обновление отменено"
 fi
-log "Сервис активен: $("$BIN" version | head -1)"
+log "Сервис активен: $("$BIN" version 2>&1 | awk -F'\t' '/^Version:/{print $2; exit}')"
 
 # ---------- 5. Функциональная проверка ----------
 PW="$(awk '/^auth:/{f=1;next} f&&/^[[:space:]]*password:/{sub(/^[[:space:]]*password:[[:space:]]*/,"");print;exit}' "$CONF" || true)"
@@ -137,8 +137,9 @@ else
 fi
 
 # ---------- 6. Итог ----------
-log "Готово. Версия: $("$BIN" version | head -1)"
+log "Готово. Версия: $("$BIN" version 2>&1 | awk -F'\t' '/^Version:/{print $2; exit}')"
 systemctl status "$SERVICE" --no-pager | head -6
 echo
 echo "Бэкап для отката: $BAK"
 echo "Откат вручную: cp -a $BAK/hysteria2.old $BIN && systemctl restart $SERVICE"
+
