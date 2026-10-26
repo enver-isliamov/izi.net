@@ -72,6 +72,7 @@ test('safe update: не делает compose down, не трогает x3-ui п�
   assert.ok(nat.includes('net.ipv4.ip_forward=1'), 'NAT-скрипт не включает forwarding');
   assert.ok(!nat.includes('SUBNET%.0'), 'NAT-скрипт снова ломает 10.9.0 → 10.9');
   assert.ok(nat.includes('awk -F.'), 'NAT-скрипт не нормализует подсеть');
+  assert.ok(nat.includes('SUBNETS'), 'NAT-скрипт не учитывает алиасы 10.88/старые подсети');
   const setup = read('scripts/amneziawg/setup_awg.sh');
   assert.ok(setup.includes('ensure_awg_nat.sh'), 'setup_awg.sh не вызывает NAT persistence');
 });

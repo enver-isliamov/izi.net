@@ -21,6 +21,7 @@ AWG_DIR="${AWG_DIR:-/etc/amnezia/amneziawg}"
 IFACE="${AWG_IFACE:-awg0}"
 SUBNET="${AWG_SUBNET:-}"
 SERVER_JSON="$AWG_DIR/izinet-server.json"
+PEERS_JSON="$AWG_DIR/izinet-peers.json"
 
 log()  { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*"; }
 warn() { printf '⚠ %s\n' "$*" >&2; }
@@ -48,12 +49,40 @@ SUBNET="${SUBNET%%/*}"
 SUBNET="$(printf '%s\n' "$SUBNET" | awk -F. 'NF >= 3 {print $1"."$2"."$3; exit}')"
 [[ "$SUBNET" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Некорректная подсеть: $SUBNET"
 
+# Старые клиенты могут иметь адрес из 10.88.0.0/24 (алиас после миграции).
+# NAT нужен для ВСЕХ подсетей, которые встречаются в реестре пиров.
+SUBNETS=("$SUBNET")
+if [[ -f "$PEERS_JSON" ]]; then
+  while IFS= read -r extra; do
+    [[ -n "$extra" ]] || continue
+    found=0
+    for existing in "${SUBNETS[@]}"; do
+      [[ "$existing" = "$extra" ]] && { found=1; break; }
+    done
+    (( found )) || SUBNETS+=("$extra")
+  done < <(python3 - "$PEERS_JSON" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    peers = json.load(open(sys.argv[1])).get("peers", [])
+except Exception:
+    peers = []
+nets = set()
+for p in peers:
+    for key in ("address", "alias"):
+        parts = str(p.get(key) or "").split(".")
+        if len(parts) >= 3 and all(x.isdigit() for x in parts[:3]):
+            nets.add(".".join(parts[:3]))
+print("\n".join(sorted(nets)))
+PY
+)
+fi
+
 WAN="${AWG_WAN:-$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')}"
 [[ -n "$WAN" ]] || die "Не найден default route (WAN-интерфейс)"
 command -v iptables >/dev/null || die "iptables не установлен"
 command -v sysctl >/dev/null || die "sysctl не установлен"
 
-log "AWG NAT: iface=$IFACE subnet=${SUBNET}.0/24 wan=$WAN"
+log "AWG NAT: iface=$IFACE subnets=$(printf '%s.0/24 ' "${SUBNETS[@]}") wan=$WAN"
 
 # 1. IP forwarding (сразу и постоянно)
 sysctl -w net.ipv4.ip_forward=1 >/dev/null || warn "sysctl -w ip_forward не сработал"
@@ -62,8 +91,10 @@ printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-izinet-awg.conf
 sysctl --system >/dev/null 2>&1 || true
 
 # 2. NAT + forward (idempotent)
-iptables -w 5 -t nat -C POSTROUTING -s "${SUBNET}.0/24" -o "$WAN" -j MASQUERADE 2>/dev/null || \
-  iptables -w 5 -t nat -A POSTROUTING -s "${SUBNET}.0/24" -o "$WAN" -j MASQUERADE
+for net in "${SUBNETS[@]}"; do
+  iptables -w 5 -t nat -C POSTROUTING -s "${net}.0/24" -o "$WAN" -j MASQUERADE 2>/dev/null || \
+    iptables -w 5 -t nat -A POSTROUTING -s "${net}.0/24" -o "$WAN" -j MASQUERADE
+done
 
 iptables -w 5 -C FORWARD -i "$IFACE" -o "$WAN" -j ACCEPT 2>/dev/null || \
   iptables -w 5 -A FORWARD -i "$IFACE" -o "$WAN" -j ACCEPT
@@ -108,7 +139,9 @@ fi
 # 5. Показать фактическое состояние
 echo
 echo "=== iptables NAT ==="
-iptables -w 5 -t nat -S POSTROUTING | grep -F "${SUBNET}.0/24" || true
+for net in "${SUBNETS[@]}"; do
+  iptables -w 5 -t nat -S POSTROUTING | grep -F "${net}.0/24" || true
+done
 echo "=== iptables FORWARD ==="
 iptables -w 5 -S FORWARD | grep -E "(${IFACE}|${WAN}).*ACCEPT" || true
 echo "=== ip_forward ==="
