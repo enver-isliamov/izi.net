@@ -44,7 +44,8 @@ if [[ -z "$SUBNET" ]]; then
   SUBNET="$(ip -4 -o addr show dev "$IFACE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | awk -F. '{print $1"."$2"."$3}' | head -1)"
 fi
 [[ -n "$SUBNET" ]] || SUBNET="10.9.0"
-SUBNET="${SUBNET%.0}"
+SUBNET="${SUBNET%%/*}"
+SUBNET="$(printf '%s\n' "$SUBNET" | awk -F. 'NF >= 3 {print $1"."$2"."$3; exit}')"
 [[ "$SUBNET" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Некорректная подсеть: $SUBNET"
 
 WAN="${AWG_WAN:-$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')}"

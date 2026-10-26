@@ -70,6 +70,8 @@ test('safe update: не делает compose down, не трогает x3-ui п�
   const nat = read('scripts/amneziawg/ensure_awg_nat.sh');
   assert.ok(nat.includes('MASQUERADE'), 'NAT-скрипт не добавляет MASQUERADE');
   assert.ok(nat.includes('net.ipv4.ip_forward=1'), 'NAT-скрипт не включает forwarding');
+  assert.ok(!nat.includes('SUBNET%.0'), 'NAT-скрипт снова ломает 10.9.0 → 10.9');
+  assert.ok(nat.includes('awk -F.'), 'NAT-скрипт не нормализует подсеть');
   const setup = read('scripts/amneziawg/setup_awg.sh');
   assert.ok(setup.includes('ensure_awg_nat.sh'), 'setup_awg.sh не вызывает NAT persistence');
 });
