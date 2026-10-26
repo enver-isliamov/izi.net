@@ -2,12 +2,19 @@ import axios from 'axios';
 import https from 'https';
 import http from 'http';
 
-// Global agents to reuse sockets and prevent listener leaks
-export const sharedHttpsAgent = new https.Agent({ 
+// Панель 3x-ui часто стоит с self-signed сертификатом или на localhost, поэтому
+// небезопасный агент разрешён ТОЛЬКО для запросов к панели (getRequestConfig).
+// Платежи, Supabase и Telegram должны проверять сертификат обычным способом.
+export const panelHttpsAgent = new https.Agent({
   rejectUnauthorized: false,
   keepAlive: true,
   maxSockets: 50,
-  checkServerIdentity: () => undefined // Ignore hostname/cert mismatch (future date fix)
+  checkServerIdentity: () => undefined // 3x-ui: локальная панель без публичного CA
+});
+
+export const sharedHttpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 50
 });
 
 export const sharedHttpAgent = new http.Agent({ 
@@ -27,7 +34,7 @@ export function getRequestConfig(url: string, headers: any = {}, customTimeout?:
       'Accept': 'application/json, text/plain, */*',
       ...headers
     },
-    httpsAgent: isHttps ? sharedHttpsAgent : undefined,
+    httpsAgent: isHttps ? panelHttpsAgent : undefined,
     httpAgent: !isHttps ? sharedHttpAgent : undefined,
     timeout: timeout
   };

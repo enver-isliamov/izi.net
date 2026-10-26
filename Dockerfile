@@ -1,4 +1,4 @@
-# Этап сборки (Builder)
+﻿# Этап сборки (Builder)
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -39,7 +39,6 @@ COPY --from=builder /app ./
 
 # Настройки среды
 ENV NODE_ENV=production
-ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 
 EXPOSE 3005
 

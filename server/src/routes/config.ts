@@ -5,6 +5,7 @@ import { parseVpnDevices, getPublishedVlessPorts } from '../utils/vpn';
 import { MaintenanceService } from '../services/maintenance.service';
 import { AwgService } from '../services/awg.service';
 import { BotService } from '../services/bot.service';
+import { authenticateUser } from '../utils/auth';
 
 const router = Router();
 
@@ -31,7 +32,7 @@ router.get('/servers/status', async (_req, res) => {
 });
 
 // Синхронизация серверов (фронтенд вызывает это через /api/subscription/sync-servers)
-router.post('/sync-servers', async (req, res) => {
+router.post('/sync-servers', authenticateUser, async (req, res) => {
   try {
     // В фоне запускаем синхронизацию
     MaintenanceService.syncAllServers().catch(e => console.error('Background sync servers error:', e));
@@ -42,7 +43,7 @@ router.post('/sync-servers', async (req, res) => {
 });
 
 // Синхронизация трафика (/api/subscription/sync-traffic)
-router.post('/sync-traffic', async (req, res) => {
+router.post('/sync-traffic', authenticateUser, async (req, res) => {
   try {
     MaintenanceService.syncTraffic().catch(e => console.error('Background sync traffic error:', e));
     res.json({ success: true, message: 'Синхронизация трафика запущена' });

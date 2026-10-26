@@ -1,7 +1,6 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { supabase } from './supabase';
-import { sharedHttpsAgent } from '../utils/axios';
 import { stableJsonStringify } from '../utils/json';
 
 export class PaymentService {
@@ -75,7 +74,6 @@ export class PaymentService {
         'x-api-key': secretKey
       },
       timeout: 15000,
-      httpsAgent: sharedHttpsAgent,
       validateStatus: () => true
     });
 
@@ -107,7 +105,6 @@ export class PaymentService {
         'x-api-key': secretKey
       },
       timeout: 10000,
-      httpsAgent: sharedHttpsAgent,
       validateStatus: () => true
     });
 
@@ -151,54 +148,77 @@ export class PaymentService {
     return matchesStable || matchesCompact;
   }
 
-    async processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
+  async processSuccessfulPayment(userId: string, amount: number, orderId: string, provider: string) {
     console.log(`Processing payment: ${amount} for user ${userId} via ${provider}`);
 
-    const { data: existingPayment, error: paymentReadErr } = await supabase
+    // Idempotency: атомарно забираем платёж в статус processing.
+    // Только один параллельный webhook получит строку и зачислит деньги.
+    const { data: claimed, error: claimErr } = await supabase
       .from('payments')
-      .select('status')
+      .update({ status: 'processing' })
       .eq('id', orderId)
+      .eq('status', 'pending')
+      .select('id')
       .maybeSingle();
 
-    if (paymentReadErr) throw new Error(`Payment read failed: ${paymentReadErr.message}`);
-    if (existingPayment?.status === 'completed') {
-      console.log(`Payment ${orderId} already processed.`);
-      return;
+    if (claimErr) throw new Error(`Payment claim failed: ${claimErr.message}`);
+    if (!claimed) {
+      const { data: current, error: readErr } = await supabase
+        .from('payments')
+        .select('status')
+        .eq('id', orderId)
+        .maybeSingle();
+      if (readErr) throw new Error(`Payment read failed: ${readErr.message}`);
+      if (current?.status === 'completed' || current?.status === 'processing') {
+        console.log(`Payment ${orderId} already processed or processing.`);
+        return;
+      }
+      throw new Error(`Payment ${orderId} cannot be claimed (status=${current?.status ?? 'missing'})`);
     }
 
-    // PAY-007: атомарное зачисление через RPC (INSERT ... ON CONFLICT (user_id)
-    // DO UPDATE SET amount = balances.amount + p_amount) — исключает гонку
-    // read-modify-write при параллельных платежах одного пользователя.
-    const { error: creditErr } = await supabase.rpc('refund_user_balance', {
-      p_user_id: userId,
-      p_amount: amount
-    });
-    if (creditErr) throw new Error(`Balance credit failed: ${creditErr.message}`);
-
-    const { error: paymentStatusErr } = await supabase
-      .from('payments')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', orderId);
-
-    if (paymentStatusErr) console.error('Failed to update payment status:', paymentStatusErr.message);
-
-    const { error: txInsertErr } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: userId,
-        amount,
-        currency: 'RUB',
-        type: 'deposit',
-        status: 'completed',
-        description: `Balance top-up via ${provider}. Payment ID: ${orderId}`
+    try {
+      // PAY-007: атомарное зачисление через RPC (INSERT ... ON CONFLICT (user_id)
+      // DO UPDATE SET amount = balances.amount + p_amount) — исключает гонку
+      // read-modify-write при параллельных платежах одного пользователя.
+      const { error: creditErr } = await supabase.rpc('refund_user_balance', {
+        p_user_id: userId,
+        p_amount: amount
       });
+      if (creditErr) throw new Error(`Balance credit failed: ${creditErr.message}`);
 
-    if (txInsertErr) console.error('Failed to insert transaction journal row:', txInsertErr.message);
+      const { error: paymentStatusErr } = await supabase
+        .from('payments')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', orderId);
 
-    console.log(`Balance successfully credited for user ${userId}: +${amount}`);
+      if (paymentStatusErr) console.error('Failed to update payment status:', paymentStatusErr.message);
+
+      const { error: txInsertErr } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          amount,
+          currency: 'RUB',
+          type: 'deposit',
+          status: 'completed',
+          description: `Balance top-up via ${provider}. Payment ID: ${orderId}`
+        });
+
+      if (txInsertErr) console.error('Failed to insert transaction journal row:', txInsertErr.message);
+
+      console.log(`Balance successfully credited for user ${userId}: +${amount}`);
+    } catch (err) {
+      // Возвращаем pending, чтобы повторный webhook мог повторить попытку.
+      await supabase
+        .from('payments')
+        .update({ status: 'pending' })
+        .eq('id', orderId)
+        .eq('status', 'processing');
+      throw err;
+    }
   }
 }
 

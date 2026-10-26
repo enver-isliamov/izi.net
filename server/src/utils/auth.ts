@@ -9,7 +9,12 @@ export async function adminOnly(req: any, res: any, next: any) {
 
   if (authErr || !user) return res.status(401).json({ error: 'Invalid Session' });
 
-  if (user.email === 'enverphoto@gmail.com') {
+  // Bootstrap-суперадмины задаются только через env, без email в коде.
+  const superadminEmails = (process.env.SUPERADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (user.email && superadminEmails.includes(user.email.toLowerCase())) {
     req.user = { ...user, role: 'superadmin' };
     return next();
   }

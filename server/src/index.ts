@@ -5,8 +5,6 @@ dotenv.config();
 process.on('uncaughtException', (err) => console.error('🔥 [CRITICAL] Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('🔥 [CRITICAL] Rejection:', reason));
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -63,6 +61,17 @@ const adminLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many admin requests, please try again later.' }
 });
+
+// Синхронизация подписки/трафика — только для авторизованных и не чаще 10 раз за 5 минут.
+const syncLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Sync is rate-limited, try again later.' }
+});
+
+app.use(['/api/subscription/sync-servers', '/api/subscription/sync-traffic', '/api/sync-servers', '/api/sync-traffic'], syncLimiter);
 
 app.use('/api/subscription/buy', authLimiter);
 app.use('/api/pay/create', authLimiter);

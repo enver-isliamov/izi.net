@@ -377,7 +377,7 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
     const newUuid = crypto.randomUUID();
     const expiresAtMs = new Date(sub.expires_at).getTime();
 
-    let configLines: string[] = [];
+    const provisioned: Array<{ instance: any; serverName: string; config: string }> = [];
     for (const server of activeServers) {
       try {
         const { instance, server: serverData } = await getXuiForServer(server.id);
@@ -396,18 +396,27 @@ router.post('/user/devices/:deviceId/regenerate', authenticateUser, async (req: 
           } catch (e) {}
         }
 
-        if (target.uuid && target.email) await instance.deleteClient(target.uuid, target.email).catch(() => {});
         const rawConfig = await instance.addClient(newEmail, newUuid, effectiveInboundId, expiresAtMs, limitBytes);
         if (rawConfig) {
-          const configWithSuffix = rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`);
-          configLines.push(configWithSuffix);
+          provisioned.push({ instance, serverName: server.name, config: rawConfig.replace(/(#.*)?$/, `#${server.name.replace(/\s+/g,'_')}`) });
         }
       } catch (e: any) {
         console.error(`❌ [User] regenerate failed for device ${deviceId} on ${server.name}: ${e.message}`);
       }
     }
 
-    if (configLines.length === 0) throw new Error('Не удалось связаться с VPN серверами. Проверьте настройки сервера в админке.');
+    // Не удаляем старый ключ, пока новый не создан на всех серверах.
+    if (provisioned.length !== activeServers.length) {
+      for (const p of provisioned) {
+        await p.instance.deleteClient(newUuid, newEmail).catch(() => {});
+      }
+      throw new Error('Не удалось обновить все VPN-серверы. Старый ключ сохранён.');
+    }
+
+    const configLines = provisioned.map((p) => p.config);
+    for (const p of provisioned) {
+      if (target.uuid && target.email) await p.instance.deleteClient(target.uuid, target.email).catch(() => {});
+    }
 
     devices[targetIdx] = { ...target, config: configLines.join('\n'), email: newEmail, uuid: newUuid };
     await supabase.from('subscriptions').update({ v2ray_config: JSON.stringify(devices) }).eq('id', sub.id);
