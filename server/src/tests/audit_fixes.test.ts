@@ -61,3 +61,15 @@ test('AWG: общий sync не трогает AmneziaWG-инбаунды и AWG
   assert.ok(/if \(!supportsClients\) continue;/.test(xui), 'AWG/WireGuard снова попадает в ensureClientInAllInbounds');
   assert.ok(maintenance.includes("String(d.serverType).toUpperCase() !== 'AWG'"), 'AWG-устройства снова идут в общий sync');
 });
+test('safe update: не делает compose down, не трогает x3-ui по умолчанию, восстанавливает AWG NAT', () => {
+  const update = read('update.sh');
+  assert.ok(!/^\\s*docker compose down/m.test(update), 'update.sh снова останавливает весь compose');
+  assert.ok(update.includes('docker compose build "$APP_SERVICE"'), 'нет сборки только приложения');
+  assert.ok(update.includes('--no-deps --no-build'), 'нет запуска только app');
+  assert.ok(update.includes('ensure_awg_nat.sh'), 'update.sh не восстанавливает NAT после reboot');
+  const nat = read('scripts/amneziawg/ensure_awg_nat.sh');
+  assert.ok(nat.includes('MASQUERADE'), 'NAT-скрипт не добавляет MASQUERADE');
+  assert.ok(nat.includes('net.ipv4.ip_forward=1'), 'NAT-скрипт не включает forwarding');
+  const setup = read('scripts/amneziawg/setup_awg.sh');
+  assert.ok(setup.includes('ensure_awg_nat.sh'), 'setup_awg.sh не вызывает NAT persistence');
+});

@@ -188,7 +188,8 @@ collect_used_ports() {
     ss -lun 2>/dev/null | grep -v '^State' | awk '{print $4}' | sed 's/.*://'
     wg show all listen-port 2>/dev/null
     awg show all listen-port 2>/dev/null
-  } | grep -E '^[0-9]{2,5}
+  } | grep -E '^[0-9]{2,5}$' | sort -un
+}
 
 # Пиры сохраняем из реестра, чтобы не потерять выданных клиентов
 PEERS_BLOCK="$(
@@ -289,8 +290,6 @@ echo " Проверка:  awg show ${IFACE}"
 echo " В кабинете: «Мои устройства» → «Файл AmneziaWG (роутер)» → «Скачать файл»"
 echo " В админке:  Настройки → «AmneziaWG» → «Проверить AmneziaWG»"
 echo "==============================================="
- | sort -un
-}
 USED_PORTS="$(collect_used_ports | tr '\n' ' ')"
 echo "  занятые UDP-порты: ${USED_PORTS:-нет}"
 port_free() { echo " ${USED_PORTS} " | grep -q " $1 " && return 1; return 0; }
@@ -405,3 +404,11 @@ echo " Проверка:  awg show ${IFACE}"
 echo " В кабинете: «Мои устройства» → «Файл AmneziaWG (роутер)» → «Скачать файл»"
 echo " В админке:  Настройки → «AmneziaWG» → «Проверить AmneziaWG»"
 echo "==============================================="
+
+echo "=== 10/10 NAT persistence ==="
+NAT_SCRIPT="$(cd "$(dirname "$0")" && pwd)/ensure_awg_nat.sh"
+if [ -f "$NAT_SCRIPT" ]; then
+  bash "$NAT_SCRIPT" || echo "  ⚠️ NAT persistence script failed — проверьте iptables/systemd"
+else
+  echo "  ⚠️ ensure_awg_nat.sh не найден рядом с setup_awg.sh"
+fi

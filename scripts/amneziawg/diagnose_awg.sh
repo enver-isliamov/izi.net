@@ -53,6 +53,19 @@ done
 echo "=========== 8. Логи ядра (последние строки) ==========="
 dmesg 2>/dev/null | tail -8 | sed 's/^/  /' || echo "  dmesg недоступен"
 
+echo "=========== 9. NAT и forwarding ==========="
+sysctl -n net.ipv4.ip_forward 2>/dev/null | sed 's/^/  ip_forward: /' || true
+WAN="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+echo "  WAN: ${WAN:-не найден}"
+echo "  NAT:"
+iptables -t nat -S POSTROUTING 2>/dev/null | grep -E "(${SUBNET}\.|MASQUERADE)" | sed 's/^/    /' || echo "    не найдено"
+echo "  FORWARD:"
+iptables -S FORWARD 2>/dev/null | grep -E "(awg|${WAN})" | sed 's/^/    /' || echo "    не найдено"
+
+echo "=========== 10. Handshake и UDP ==========="
+awg show "${IFACE}" 2>/dev/null | sed 's/^/  /' || echo "  awg show: интерфейс не найден"
+ss -lunp 2>/dev/null | grep -E ":(${AWG_PORT:-51820})\b" | sed 's/^/  /' || echo "  UDP-порт ${AWG_PORT:-51820} не слушается"
+
 echo ""
 echo "Что делать с результатом:"
 echo "  • если раздел 6 пишет «АДРЕС ЗАНЯТ» — пришлите вывод раздела 3: удалим конфликтующий адрес."
