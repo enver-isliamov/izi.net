@@ -312,7 +312,10 @@ export class MaintenanceService {
 
       for (const sub of activeSubs) {
         try {
-          const devices = parseVpnDevices(sub.v2ray_config);
+          // AWG-устройства живут в отдельном реестре и не должны попадать
+          // в общий sync VLESS-клиентов: для них нужен allowedIPs, а не UUID.
+          const devices = parseVpnDevices(sub.v2ray_config)
+            .filter((d) => String(d.serverType).toUpperCase() !== 'AWG');
           if (devices.length === 0) continue;
 
           const defaultInboundId = 0;

@@ -486,10 +486,11 @@ export class XUIService {
       const protocol = String(ib.protocol || '').toLowerCase();
       if (!protocol || protocol === 'dokodemo-door' || protocol === 'tunnel') continue;
       if (ib.tag === 'api') continue;
-      const settings = this.parseJson<any>(ib.settings, {});
-      const hasClients = Array.isArray(settings?.clients);
+      // Только протоколы, куда можно добавить обычного VLESS-клиента.
+      // AmneziaWG/WireGuard требуют allowedIPs и отдельного формата клиента:
+      // попытка добавить туда VLESS-клиента ломает updateInbound и перезапускает Xray.
       const supportsClients = ['vless', 'vmess', 'trojan', 'shadowsocks'].includes(protocol);
-      if (!hasClients && !supportsClients) continue;
+      if (!supportsClients) continue;
       const stream = this.parseJson<any>(ib.streamSettings, {});
       result.push({ id: ib.id, port: Number(ib.port || 0), protocol, network: String(stream?.network || 'tcp') });
     }

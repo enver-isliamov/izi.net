@@ -53,3 +53,11 @@ test('must-fix 6: в коде нет жёстко прописанного email
   assert.ok(!auth.includes('enverphoto@gmail.com'), 'hardcoded email вернулся');
   assert.ok(auth.includes('SUPERADMIN_EMAILS'), 'нет env-allowlist для bootstrap');
 });
+
+test('AWG: общий sync не трогает AmneziaWG-инбаунды и AWG-устройства', () => {
+  const xui = read('server/src/services/xui.service.ts');
+  const maintenance = read('server/src/services/maintenance.service.ts');
+  assert.ok(xui.includes("['vless', 'vmess', 'trojan', 'shadowsocks']"), 'нет allowlist клиентских протоколов');
+  assert.ok(/if \(!supportsClients\) continue;/.test(xui), 'AWG/WireGuard снова попадает в ensureClientInAllInbounds');
+  assert.ok(maintenance.includes("String(d.serverType).toUpperCase() !== 'AWG'"), 'AWG-устройства снова идут в общий sync');
+});
