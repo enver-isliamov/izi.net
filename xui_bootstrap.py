@@ -342,7 +342,7 @@ def patch_xray_template(cursor):
     if not row or not row[1] or row[1] == '{}':
         config = {
             "dns": {"servers": SAFE_DNS_SERVERS, "queryStrategy": "UseIPv4", "disableFallback": True},
-            "routing": {"domainStrategy": "UseIPv4"},
+            "routing": {"domainStrategy": "IPIfNonMatch"},
             "outbounds": [
                 {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIPv4"}},
                 {"protocol": "blackhole", "tag": "blocked"}
@@ -365,8 +365,8 @@ def patch_xray_template(cursor):
             dns["disableFallback"] = True
             changed = True
         routing = config.setdefault("routing", {})
-        if routing.get("domainStrategy") != "UseIPv4":
-            routing["domainStrategy"] = "UseIPv4"
+        if routing.get("domainStrategy") != "IPIfNonMatch":
+            routing["domainStrategy"] = "IPIfNonMatch"
             changed = True
         if not config.get("outbounds") or len(config["outbounds"]) == 0:
             config["outbounds"] = [

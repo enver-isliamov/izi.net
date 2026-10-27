@@ -139,8 +139,9 @@ export function autoRuleName(domains: string[], ips: string[]): string {
 export function mapDomainToHysteria(entry: unknown): string | null {
   const v = String(entry ?? '').trim();
   if (!v) return null;
-  // geosite без geo-баз в конфиге Hysteria2 не даёт сервису запуститься — пропускаем
-  if (/^geosite:/i.test(v)) return null;
+  // Hysteria 2.13 ships v2geo and supports geosite/geoip in ACL.
+  // Keep the original prefix; do not silently drop the rule.
+  if (/^geosite:/i.test(v)) return v;
   if (/^domain:/i.test(v)) return `suffix:${v.slice(7)}`;
   if (/^full:/i.test(v)) return v.slice(5);
   if (/^(regexp|keyword|ext|dotless):/i.test(v)) return null;
@@ -150,8 +151,8 @@ export function mapDomainToHysteria(entry: unknown): string | null {
 export function mapIpToHysteria(entry: unknown): string | null {
   const v = String(entry ?? '').trim();
   if (!v) return null;
-  // geoip без geo-баз в конфиге Hysteria2 не даёт сервису запуститься — пропускаем
-  if (/^geoip:/i.test(v)) return null;
+  // Hysteria 2.13 ships v2geo and supports geosite/geoip in ACL.
+  if (/^geoip:/i.test(v)) return v;
   return isIpOrCidr(v) ? v : null;
 }
 
@@ -210,18 +211,14 @@ export function buildHysteriaAcl(
     }
 
     let added = 0;
-    let geoDropped = 0;
     for (const domain of rule.domains || []) {
-      if (/^geosite:/i.test(domain)) { geoDropped++; continue; }
       const mapped = mapDomainToHysteria(domain);
       if (mapped) { lines.push(`${outbound}(${mapped})`); added++; }
     }
     for (const ip of rule.ips || []) {
-      if (/^geoip:/i.test(ip)) { geoDropped++; continue; }
       const mapped = mapIpToHysteria(ip);
       if (mapped) { lines.push(`${outbound}(${mapped})`); added++; }
     }
-    if (geoDropped) skipped.push(`${rule.name}: ${geoDropped} записей geosite/geoip пропущены (нужны geo-базы Hysteria2)`);
     if (!added) skipped.push(`${rule.name}: нет записей, совместимых с ACL Hysteria2`);
   }
 

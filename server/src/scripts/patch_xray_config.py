@@ -39,7 +39,7 @@ ROUTING_RULES = [
 ]
 
 
-def patch():
+def patch(force=False):
     if not os.path.exists(CONFIG_PATH):
         print(f"❌ Config not found: {CONFIG_PATH}")
         return False
@@ -50,6 +50,12 @@ def patch():
     # Add/update routing
     if 'routing' not in config:
         config['routing'] = {}
+
+    existing_rules = config['routing'].get('rules') or []
+    if existing_rules and not force:
+        print("⚠️ Existing routing rules found; preserving them.")
+        print("   Use --force to replace with the legacy static rule set.")
+        return True
 
     config['routing']['domainStrategy'] = 'IPIfNonMatch'
     config['routing']['rules'] = ROUTING_RULES
@@ -72,10 +78,11 @@ def patch():
 
 
 if __name__ == "__main__":
+    force = '--force' in sys.argv[1:]
     print("=" * 50)
     print("  IZINET — Patch Xray config.json routing")
     print("=" * 50)
-    if patch():
+    if patch(force=force):
         print("\nRestart Xray to apply: kill -USR1 $(pgrep xray) or restart x3-ui")
     else:
         print("\nFailed to patch")

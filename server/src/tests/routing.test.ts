@@ -92,20 +92,20 @@ test('контракты: админка даёт быстрое добавле�
   assert.ok(maintenanceSrc.includes('Routing sync пропущен'), 'нет пропуска hourly-синка routing');
 });
 
-test('Hysteria2 ACL: маппинг доменов и IP из форматов Xray', () => {
+test('Hysteria2 ACL: маппинг доменов и IP из форматов Xray, включая v2geo', () => {
   assert.equal(mapDomainToHysteria('domain:yandex.ru'), 'suffix:yandex.ru');
   assert.equal(mapDomainToHysteria('full:example.com'), 'example.com');
-  // geosite без geo-баз в конфиге Hysteria2 валит сервис — пропускаем
-  assert.equal(mapDomainToHysteria('geosite:google'), null);
+  // Hysteria 2.13 v2geo supports geosite/geoip in ACL.
+  assert.equal(mapDomainToHysteria('geosite:google'), 'geosite:google');
   assert.equal(mapDomainToHysteria('regexp:.*\\.ru$'), null);
   assert.equal(mapDomainToHysteria('keyword:foo'), null);
   assert.equal(mapDomainToHysteria('8.8.8.8'), null);
-  assert.equal(mapIpToHysteria('geoip:ru'), null);
+  assert.equal(mapIpToHysteria('geoip:ru'), 'geoip:ru');
   assert.equal(mapIpToHysteria('10.0.0.0/8'), '10.0.0.0/8');
   assert.equal(mapIpToHysteria('domain:foo'), null);
 });
 
-test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, без geo-записей, пропуск proxy без outbound)', () => {
+test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, v2geo, пропуск proxy без outbound)', () => {
   const rules = [
     { name: 'RU', domains: ['domain:ru', 'geosite:ru'], ips: ['geoip:ru'], outbound_tag: 'direct' },
     { name: 'Block', domains: ['domain:torrent'], ips: [], outbound_tag: 'blocked' },
@@ -113,14 +113,14 @@ test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, б
     { name: 'Proxy правило', domains: ['domain:example.com'], ips: [], outbound_tag: 'proxy' },
     { name: 'Regexp', domains: ['regexp:.*'], ips: [], outbound_tag: 'direct' },
   ];
-  const { lines, skipped } = buildHysteriaAcl(rules as any, { hasOutbound: (t) => t === 'ipv6-out' });
+  const { lines, skipped } = buildHysteriaAcl(rules as any, { hasOutbound: () => false });
 
   assert.ok(lines.includes('direct(suffix:ru)'));
-  assert.ok(!lines.some((l) => l.includes('geosite') || l.includes('geoip')), 'geosite/geoip не должны попадать в ACL');
+  assert.ok(lines.includes('direct(geosite:ru)'));
+  assert.ok(lines.includes('direct(geoip:ru)'));
   assert.ok(lines.includes('reject(suffix:torrent)'));
   assert.ok(!lines.some((l) => l.startsWith('ipv6-out')));
   assert.ok(!lines.some((l) => l.startsWith('proxy')));
-  assert.ok(skipped.some((s) => s.includes('geosite/geoip')));
   assert.ok(skipped.some((s) => s.includes('Gemini')));
   assert.ok(skipped.some((s) => s.includes('Proxy правило')));
   assert.ok(skipped.some((s) => s.includes('Regexp')));
