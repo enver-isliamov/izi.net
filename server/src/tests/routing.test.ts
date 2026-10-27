@@ -97,6 +97,10 @@ test('Hysteria2 ACL: маппинг доменов и IP из форматов X
   assert.equal(mapDomainToHysteria('full:example.com'), 'example.com');
   // Hysteria 2.13 v2geo supports geosite/geoip in ACL.
   assert.equal(mapDomainToHysteria('geosite:google'), 'geosite:google');
+  assert.equal(mapDomainToHysteria('geosite:ru'), 'geosite:category-ru');
+  assert.equal(mapDomainToHysteria('geosite:ru-available-only-inside'), 'geosite:category-ru');
+  assert.equal(mapDomainToHysteria('geosite:gemini'), 'geosite:google');
+  assert.equal(mapDomainToHysteria('geosite:unknown-category'), null);
   assert.equal(mapDomainToHysteria('regexp:.*\\.ru$'), null);
   assert.equal(mapDomainToHysteria('keyword:foo'), null);
   assert.equal(mapDomainToHysteria('8.8.8.8'), null);
@@ -116,7 +120,7 @@ test('Hysteria2 ACL: сборка правил как у Xray (direct/reject, v2
   const { lines, skipped } = buildHysteriaAcl(rules as any, { hasOutbound: () => false });
 
   assert.ok(lines.includes('direct(suffix:ru)'));
-  assert.ok(lines.includes('direct(geosite:ru)'));
+  assert.ok(lines.includes('direct(geosite:category-ru)'));
   assert.ok(lines.includes('direct(geoip:ru)'));
   assert.ok(lines.includes('reject(suffix:torrent)'));
   assert.ok(!lines.some((l) => l.startsWith('ipv6-out')));

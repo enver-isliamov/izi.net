@@ -261,7 +261,9 @@ export class RoutingService {
         checkCfg = checkCfg.replace(new RegExp(`file:\\s*${escapedAcl}`), 'file: /tmp/izinet-acl-check.txt');
         hostExec(`printf %s '${toB64(aclContent)}' | base64 -d > /tmp/izinet-acl-check.txt`, 15000);
         hostExec(`printf %s '${toB64(checkCfg)}' | base64 -d > /tmp/izinet-hysteria-check.yaml`, 15000);
-        const checkOut = hostExec('timeout 5 hysteria2 server -c /tmp/izinet-hysteria-check.yaml 2>&1 || true', 20000);
+        // v2geo can download geoip.dat/geosite.dat on first use; 5s is too short
+        // and would reject a valid ACL before Hysteria even starts.
+        const checkOut = hostExec('timeout 30 hysteria2 server -c /tmp/izinet-hysteria-check.yaml 2>&1 || true', 45000);
         hostExec('rm -f /tmp/izinet-acl-check.txt /tmp/izinet-hysteria-check.yaml', 10000);
         if (/FATAL|failed to load server config|invalid config/i.test(checkOut)) {
           const short = checkOut.split('\n').filter((l) => /FATAL|invalid config|failed/i.test(l)).slice(0, 2).join(' | ').slice(0, 350);

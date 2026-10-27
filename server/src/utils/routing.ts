@@ -136,12 +136,35 @@ export function autoRuleName(domains: string[], ips: string[]): string {
  * Hysteria ACL: outbound(address); адреса: IP/CIDR, domain (точное), *.wildcard,
  * suffix:example.com, geoip:xx, geosite:xx, all. regexp/keyword/ext/dotless не поддерживаются.
  */
+const HYSTERIA_GEOSITE_ALIASES: Record<string, string> = {
+  'geosite:ru': 'geosite:category-ru',
+  'geosite:ru-available-only-inside': 'geosite:category-ru',
+  'geosite:gemini': 'geosite:google',
+  'geosite:category-ads-all': '',
+};
+
+// Hysteria v2geo uses the Loyalsoldier database. It has category-ru,
+// google, openai, anthropic, yandex, mailru, but not every Xray category.
+const HYSTERIA_GEOSITE_ALLOWED = new Set([
+  'google', 'openai', 'anthropic', 'yandex', 'mailru',
+  'category-ru', 'category-ai-ru', 'category-gov-ru', 'category-bank-ru',
+  'category-media-ru', 'category-ecommerce-ru', 'category-entertainment-ru',
+  'category-education-ru', 'category-travel-ru', 'category-retail-ru', 'tbank-ru',
+]);
+
 export function mapDomainToHysteria(entry: unknown): string | null {
   const v = String(entry ?? '').trim();
   if (!v) return null;
   // Hysteria 2.13 ships v2geo and supports geosite/geoip in ACL.
-  // Keep the original prefix; do not silently drop the rule.
-  if (/^geosite:/i.test(v)) return v;
+  // Map Xray category names to the names present in Hysteria's v2geo DB.
+  if (/^geosite:/i.test(v)) {
+    const key = v.toLowerCase();
+    if (key in HYSTERIA_GEOSITE_ALIASES) {
+      const mapped = HYSTERIA_GEOSITE_ALIASES[key];
+      return mapped || null;
+    }
+    return HYSTERIA_GEOSITE_ALLOWED.has(key.slice(8)) ? key : null;
+  }
   if (/^domain:/i.test(v)) return `suffix:${v.slice(7)}`;
   if (/^full:/i.test(v)) return v.slice(5);
   if (/^(regexp|keyword|ext|dotless):/i.test(v)) return null;
