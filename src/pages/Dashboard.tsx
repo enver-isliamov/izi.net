@@ -253,6 +253,21 @@ export default function Dashboard() {
   useEffect(() => {
     if (user?.id) {
       fetchDashboardData(true);
+
+      // Привязка реферального кода, если пользователь перешёл по реферальной ссылке
+      const pendingRef = sessionStorage.getItem('referral_code') || localStorage.getItem('izinet_referral_code');
+      if (pendingRef) {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session?.access_token) {
+            axios.post('/api/user/referral/claim', { referralCode: pendingRef }, {
+              headers: { Authorization: `Bearer ${session.access_token}` }
+            }).then(() => {
+              sessionStorage.removeItem('referral_code');
+              localStorage.removeItem('izinet_referral_code');
+            }).catch(() => {});
+          }
+        });
+      }
     }
   }, [user?.id]);
 

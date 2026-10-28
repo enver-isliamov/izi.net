@@ -4,6 +4,7 @@ import { authenticateUser } from '../utils/auth';
 import { getXuiForServer } from '../services/xui.service';
 import { AwgService, isValidClientKey } from '../services/awg.service';
 import { MaintenanceService } from '../services/maintenance.service';
+import { NotificationService } from '../services/notification.service';
 import { BotService } from '../services/bot.service';
 import { parseVpnDevices, VpnDevice, getPublishedVlessPorts } from '../utils/vpn';
 import crypto from 'crypto';
@@ -625,7 +626,7 @@ router.get('/user/profile-summary', authenticateUser, async (req: any, res) => {
         name: user?.name || null,
         referral_code: user?.referral_code || null,
         telegram_id: user?.telegram_id || null,
-        telegram_linked: Boolean(user?.telegram_linked),
+        telegram_linked: Boolean(user?.telegram_id || (user as any)?.telegram_linked),
         balance: Number(user?.balance || 0),
         role: user?.role || 'user'
       },
@@ -660,6 +661,60 @@ router.get('/user/profile-summary', authenticateUser, async (req: any, res) => {
 });
 
 // 2. Реферальный код: выдать, если ещё не выдан (клиентская запись блокировалась RLS)
+// 2.1 Привязка реферала к пригласившему пользователю
+router.post('/user/referral/claim', authenticateUser, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const rawCode = String(req.body?.referralCode || req.body?.code || '').trim();
+    if (!rawCode) return res.status(400).json({ error: 'Referral code is required' });
+
+    // Проверяем, не привязан ли уже пользователь
+    const { data: currentUser } = await supabase
+      .from('users')
+      .select('id, referred_by')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (currentUser?.referred_by) {
+      return res.json({ status: 'already_referred', message: 'Реферер уже привязан' });
+    }
+
+    // Ищем реферера по коду
+    const { data: referrer } = await supabase
+      .from('users')
+      .select('id, email, referral_code')
+      .eq('referral_code', rawCode)
+      .maybeSingle();
+
+    if (!referrer || referrer.id === userId) {
+      return res.status(400).json({ error: 'Недействительный реферальный код' });
+    }
+
+    // Привязываем реферера
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ referred_by: referrer.id })
+      .eq('id', userId);
+
+    if (updateErr) throw updateErr;
+
+    // Мягко фиксируем запись в таблице referrals
+    try {
+      await supabase.from('referrals').upsert({
+        referrer_id: referrer.id,
+        referred_user_id: userId,
+        status: 'active',
+        commission_earned: 0,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'referrer_id,referred_user_id' });
+    } catch (_) {}
+
+    res.json({ status: 'claimed', referrerId: referrer.id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/user/referral/ensure', authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.id;
@@ -818,6 +873,17 @@ router.post('/user/support/tickets', authenticateUser, async (req: any, res) => 
       .select()
       .single();
     if (error) throw error;
+
+    // Уведомляем администратора в Telegram
+    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+    if (adminChatId) {
+      const userIdent = req.user?.email || userId.slice(0, 8);
+      NotificationService.sendTelegram(
+        adminChatId,
+        `🎧 <b>Новый тикет в поддержку izinet</b>\nОт: <code>${userIdent}</code>\nТема: <b>${String(req.body?.subject || 'Поддержка izinet')}</b>\n\n<i>${message}</i>`
+      ).catch(() => {});
+    }
+
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -860,6 +926,17 @@ router.post('/user/support/messages', authenticateUser, async (req: any, res) =>
     try {
       await supabase.from('support_tickets').update({ updated_at: new Date().toISOString(), status: 'open' }).eq('id', ticketId);
     } catch (e: any) {}
+
+    // Уведомляем администратора в Telegram
+    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+    if (adminChatId) {
+      const userIdent = req.user?.email || userId.slice(0, 8);
+      NotificationService.sendTelegram(
+        adminChatId,
+        `💬 <b>Новое сообщение в тикете поддержки</b>\nОт: <code>${userIdent}</code>\nТикет: <code>${ticketId.slice(0, 8)}</code>\n\n<i>${content}</i>`
+      ).catch(() => {});
+    }
+
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -915,7 +992,6 @@ router.get('/user/auth/telegram/verify', async (req: any, res) => {
             id: createdId,
             email: syntheticEmail,
             telegram_id: chatId,
-            telegram_linked: true,
             referral_code: refCode,
             role: 'user',
             balance: 0

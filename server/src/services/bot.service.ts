@@ -38,7 +38,31 @@ export class BotService {
 
     this.bot.action('action_status', (ctx) => this.handleStatus(ctx));
     this.bot.action('action_help', (ctx) => ctx.reply('❓ Инструкция:\n1. Скачайте приложение Hiddify, V2Box или AmneziaVPN.\n2. В личном кабинете на сайте скопируйте ссылку подписки или скачайте .conf файл.\n3. Вставьте ссылку в приложение или импортируйте файл в роутер.'));
-    this.bot.action('action_support', (ctx) => ctx.reply('🎧 Поддержка izinet:\nЕсли у вас возникли вопросы или сложности с подключением, напишите в тикеты в личном кабинете на сайте.'));
+    this.bot.action('action_support', (ctx) => ctx.reply('🎧 Поддержка izinet:\nНапишите ваш вопрос прямо сюда в чат, и оператор поддержки ответит вам в ближайшее время.'));
+
+    // Поддержка: приём текстовых сообщений от пользователей боту
+    this.bot.on('text', async (ctx) => {
+      const text = (ctx.message as any)?.text || '';
+      if (text.startsWith('/')) return;
+
+      const chatId = ctx.chat?.id?.toString();
+      const from = ctx.from as any;
+      const username = from?.username ? ('@' + from.username) : (from?.first_name || 'Пользователь');
+
+      if (this.adminId && chatId !== this.adminId) {
+        try {
+          await ctx.telegram.sendMessage(
+            this.adminId,
+            `📩 <b>Новое обращение в поддержку izinet</b>\nОт: ${username} (ID: <code>${chatId}</code>)\n\n<i>${text}</i>`,
+            { parse_mode: 'HTML' }
+          );
+          return ctx.reply('✅ Ваше сообщение передано в службу поддержки izinet. Мы ответим вам в этом чате.');
+        } catch (err: any) {
+          console.warn('[BotService] Не удалось переслать сообщение админу:', err.message);
+          return ctx.reply('Спасибо за обращение! Если вопрос срочный, вы также можете создать тикет в личном кабинете на сайте.');
+        }
+      }
+    });
 
     this.bot.launch().catch(err => console.error('Bot launch failed:', err));
   }
@@ -65,14 +89,27 @@ export class BotService {
         const username = (ctx.from as any)?.username || null;
         const firstName = (ctx.from as any)?.first_name || '';
 
+        // FIX: Отвязываем chatId от старых временных записей, если они были
+        await supabase
+          .from('users')
+          .update({ telegram_id: null, telegram_username: null })
+          .eq('telegram_id', chatId)
+          .neq('id', data.user_id);
+
+        const updatePayload: Record<string, any> = {
+          telegram_id: chatId,
+          ...(username ? { telegram_username: username } : {})
+        };
+
         const { error: updateErr } = await supabase
           .from('users')
-          .update({ 
-            telegram_id: chatId, 
-            telegram_linked: true,
-            ...(username ? { telegram_username: username } : {})
-          })
+          .update(updatePayload)
           .eq('id', data.user_id);
+
+        // Мягко пытаемся обновить telegram_linked, если колонка существует в БД
+        try {
+          await supabase.from('users').update({ telegram_linked: true }).eq('id', data.user_id);
+        } catch (_) {}
 
         if (updateErr) {
           console.error('Telegram link update error:', updateErr);

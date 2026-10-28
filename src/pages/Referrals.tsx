@@ -36,24 +36,19 @@ export default function Referrals() {
       try {
         const [
           { data: userRes, error: userErr },
-          { data: refRes, error: refErr }
+          { data: refRes }
         ] = await Promise.all([
           supabase.from('users').select('*').eq('id', user.id).single(),
-          supabase.from('referrals').select('*').eq('referrer_id', user.id)
+          Promise.resolve(supabase.from('referrals').select('*').eq('referrer_id', user.id)).catch(() => ({ data: [] as any[] }))
         ]);
 
         if (userErr && userErr.code !== 'PGRST116') {
-          console.error('Error fetching user:', userErr);
-          toast.error('Ошибка при загрузке данных профиля');
-        }
-        if (refErr) {
-          console.error('Error fetching referrals:', refErr);
-          toast.error('Ошибка при загрузке списка рефералов');
+          console.warn('Error fetching user:', userErr);
         }
 
         let currentUserData = userRes;
 
-        // Реферальный код выдаёт сервер: клиентская запись в users блокировалась RLS
+        // Реферальный код выдаёт сервер
         if (currentUserData && !currentUserData.referral_code) {
           try {
             const { data: ensureRes } = await axios.post('/api/user/referral/ensure', {}, {
@@ -65,8 +60,27 @@ export default function Referrals() {
           }
         }
 
+        let refList = refRes || [];
+        if (!refList.length) {
+          try {
+            const { data: referredUsers } = await supabase.from('users').select('id, created_at').eq('referred_by', user.id);
+            if (referredUsers && referredUsers.length > 0) {
+              const { data: bonusTxs } = await supabase.from('transactions').select('amount').eq('user_id', user.id).eq('type', 'referral_bonus');
+              const totalBonus = (bonusTxs || []).reduce((acc: number, tx: any) => acc + (Number(tx.amount) || 0), 0);
+              refList = referredUsers.map((u: any, idx: number) => ({
+                id: u.id,
+                referrer_id: user.id,
+                referred_user_id: u.id,
+                status: 'active',
+                commission_earned: idx === 0 ? totalBonus : 0,
+                created_at: u.created_at
+              }));
+            }
+          } catch (_) {}
+        }
+
         setUserData(currentUserData);
-        setReferrals(refRes || []);
+        setReferrals(refList);
       } catch (error) {
         console.error('Referral data fetch error:', error);
         toast.error('Проблема с сетью при получении данных');

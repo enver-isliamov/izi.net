@@ -9,21 +9,36 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Wallet, ShieldCheck, Zap, ArrowRight, CheckCircle } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function WelcomeWizard() {
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState(1);
 
+  const { user } = useAuth();
+
   useEffect(() => {
     const isCompleted = localStorage.getItem('izinet_tutorial_completed');
-    if (!isCompleted) {
+    if (isCompleted === 'true') return;
+    if (!user) return;
+
+    // Проверяем: аккаунт действительно новый (зарегистрирован менее 15 минут назад или флаг первой сессии)?
+    const createdAt = user.created_at ? new Date(user.created_at).getTime() : 0;
+    const isRecentlyCreated = createdAt > 0 && (Date.now() - createdAt) < 15 * 60 * 1000;
+    const justRegistered = sessionStorage.getItem('izinet_just_registered') === 'true';
+
+    if (isRecentlyCreated || justRegistered) {
       setIsOpen(true);
+    } else {
+      // Существующий пользователь на новом устройстве / в инкогнито — помечаем просмотренным и не показываем
+      localStorage.setItem('izinet_tutorial_completed', 'true');
     }
-  }, []);
+  }, [user]);
 
   const handleClose = () => {
     setIsOpen(false);
     localStorage.setItem('izinet_tutorial_completed', 'true');
+    sessionStorage.removeItem('izinet_just_registered');
   };
 
   const nextStep = () => {

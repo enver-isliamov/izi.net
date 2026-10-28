@@ -210,6 +210,64 @@ export class PaymentService {
       if (txInsertErr) console.error('Failed to insert transaction journal row:', txInsertErr.message);
 
       console.log(`Balance successfully credited for user ${userId}: +${amount}`);
+
+      // 🎁 Реферальное вознаграждение 10% пригласившему
+      try {
+        const { data: payerUser } = await supabase
+          .from('users')
+          .select('referred_by')
+          .eq('id', userId)
+          .maybeSingle();
+
+        const referrerId = payerUser?.referred_by;
+        if (referrerId && referrerId !== userId) {
+          const commission = Math.round(amount * 0.10);
+          if (commission > 0) {
+            await supabase.rpc('refund_user_balance', {
+              p_user_id: referrerId,
+              p_amount: commission
+            });
+
+            await supabase.from('transactions').insert({
+              user_id: referrerId,
+              amount: commission,
+              currency: 'RUB',
+              type: 'referral_bonus',
+              status: 'completed',
+              description: `Реферальное вознаграждение 10% от платежа ${orderId}`
+            });
+
+            // Мягко инкрементируем в таблице referrals
+            try {
+              const { data: refRow } = await supabase
+                .from('referrals')
+                .select('id, commission_earned')
+                .eq('referrer_id', referrerId)
+                .eq('referred_user_id', userId)
+                .maybeSingle();
+
+              if (refRow) {
+                const updatedEarned = (Number(refRow.commission_earned) || 0) + commission;
+                await supabase
+                  .from('referrals')
+                  .update({ commission_earned: updatedEarned, status: 'active', updated_at: new Date().toISOString() })
+                  .eq('id', refRow.id);
+              } else {
+                await supabase.from('referrals').insert({
+                  referrer_id: referrerId,
+                  referred_user_id: userId,
+                  status: 'active',
+                  commission_earned: commission
+                });
+              }
+            } catch (_) {}
+
+            console.log(`🎉 Реферальное вознаграждение ${commission}₽ начислено рефереру ${referrerId}`);
+          }
+        }
+      } catch (refErr: any) {
+        console.warn('[PaymentService] Ошибка начисления реферального бонуса:', refErr.message);
+      }
     } catch (err) {
       // Возвращаем pending, чтобы повторный webhook мог повторить попытку.
       await supabase
