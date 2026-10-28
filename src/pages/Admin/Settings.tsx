@@ -31,6 +31,7 @@ export default function AdminSettings() {
   const { session } = useAuth();
   const [settings, setSettings] = useState<Record<string, string>>({
     MONTHLY_PRICE: '100',
+    ROUTER_MONTHLY_PRICE: '200',
     PUBLIC_URL: '',
     ENOT_MERCHANT_ID: '',
     ENOT_SECRET_KEY: '',
@@ -45,6 +46,7 @@ export default function AdminSettings() {
   const [showKeys, setShowKeys] = useState<{ [key: string]: boolean }>({});
   const [editLocks, setEditLocks] = useState<Record<string, boolean>>({
     MONTHLY_PRICE: true,
+    ROUTER_MONTHLY_PRICE: true,
     PUBLIC_URL: true,
     ENOT_MERCHANT_ID: true,
     ENOT_SECRET_KEY: true,
@@ -98,6 +100,7 @@ export default function AdminSettings() {
       setSaving(true);
       const cleanSettings = {
         MONTHLY_PRICE: settings.MONTHLY_PRICE?.trim() || '100',
+        ROUTER_MONTHLY_PRICE: settings.ROUTER_MONTHLY_PRICE?.trim() || '200',
         PUBLIC_URL: settings.PUBLIC_URL?.trim() || '',
         ENOT_MERCHANT_ID: settings.ENOT_MERCHANT_ID?.trim() || '',
         ENOT_SECRET_KEY: settings.ENOT_SECRET_KEY?.trim() || '',
@@ -232,7 +235,35 @@ export default function AdminSettings() {
                 </button>
               </div>
               <p className="text-[10px] text-muted-foreground ml-1">
-                Базовая цена 1 месяца подписки за 1 устройство. Для роутеров применяется коэффициент x2.
+                Базовая цена 1 месяца подписки за 1 стандартное устройство (смартфон, ПК).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider ml-1">Тариф для роутеров за 1 месяц (₽)</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-4 flex items-center text-muted-foreground group-focus-within:text-emerald-400 transition-colors">
+                  <Wallet size={18} />
+                </div>
+                <input
+                  type="number"
+                  disabled={editLocks.ROUTER_MONTHLY_PRICE}
+                  value={settings.ROUTER_MONTHLY_PRICE || ''}
+                  onChange={(e) => setSettings({ ...settings, ROUTER_MONTHLY_PRICE: e.target.value })}
+                  className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:outline-none focus:border-emerald-500/50 focus:bg-white/[0.07] transition-all font-mono text-sm"
+                  placeholder="200"
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleLock('ROUTER_MONTHLY_PRICE')}
+                  className="absolute inset-y-0 right-4 flex items-center text-muted-foreground hover:text-white transition-colors"
+                  title={editLocks.ROUTER_MONTHLY_PRICE ? 'Разблокировать для редактирования' : 'Заблокировать'}
+                >
+                  {editLocks.ROUTER_MONTHLY_PRICE ? <Lock size={16} className="text-red-400/70" /> : <Unlock size={16} className="text-green-400" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground ml-1">
+                Цена 1 месяца для роутеров и домашних сетей (AmneziaWG .conf для Keenetic/OpenWrt/TV).
               </p>
             </div>
           </div>

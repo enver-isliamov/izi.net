@@ -16,4 +16,5 @@
 - **Node Server Port**: Dynamic `process.env.PORT || (isDocker/Prod ? 3005 : 3000)`. NEVER hardcode `const PORT = 3000` because Nginx proxies to `127.0.0.1:3005` in production (causing 502 Bad Gateway if 3000 is hardcoded).
 - **Hysteria 2**: Uses UDP on port 443 (ensure UFW allows 443/udp).
 - **Code comments**: Tag significant bug fixes with `// FIX-ID: Description`.
+- **Ponytail Mode**: Skills installed in `skills/ponytail*`. Use the smallest complete change that solves the issue, no unrequested features/abstractions, standard library first, note skipped items/risks.
 - **Validation**: Always run `npm run lint` and `npm run build` before concluding changes.

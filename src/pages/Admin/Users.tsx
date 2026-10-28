@@ -34,7 +34,10 @@ export default function AdminUsers() {
   const [subCreateUser, setSubCreateUser] = useState<any>(null);
   const [subCreateData, setSubCreateData] = useState({
     serverId: '',
-    periodMonths: '1',
+    planType: 'basic' as 'basic' | 'trial',
+    durationUnit: 'months' as 'days' | 'months',
+    periodValue: '1',
+    deviceLimit: '2',
     trafficLimitGb: '0'
   });
 
@@ -65,6 +68,9 @@ export default function AdminUsers() {
     try {
       const payload = {
         ...subCreateData,
+        days: subCreateData.durationUnit === 'days' ? parseInt(subCreateData.periodValue) || 3 : (parseInt(subCreateData.periodValue) || 1) * 30,
+        periodMonths: subCreateData.durationUnit === 'months' ? subCreateData.periodValue : Math.ceil((parseInt(subCreateData.periodValue) || 3) / 30),
+        deviceLimit: parseInt(subCreateData.deviceLimit) || 2,
         trafficLimitMb: subCreateData.trafficLimitGb ? String(parseFloat(subCreateData.trafficLimitGb) * 1024) : '0'
       };
       await axios.post(`/api/admin/users/${subCreateUser.id}/subscription`, payload, {
@@ -72,6 +78,25 @@ export default function AdminUsers() {
       });
       toast.success('Подписка успешно выдана');
       setSubCreateUser(null);
+      fetchData();
+    } catch (err: any) {
+      toast.error('Ошибка: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handleUpdateDeviceLimit = async (userId: string, currentLimit: number) => {
+    const val = prompt('Укажите лимит устройств (от 1 до 20):', String(currentLimit || 2));
+    if (!val) return;
+    const num = parseInt(val, 10);
+    if (isNaN(num) || num < 1 || num > 20) {
+      toast.error('Лимит должен быть числом от 1 до 20');
+      return;
+    }
+    try {
+      await axios.put(`/api/admin/users/${userId}`, { device_limit: num }, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      toast.success(`Лимит устройств изменен на ${num}`);
       fetchData();
     } catch (err: any) {
       toast.error('Ошибка: ' + (err.response?.data?.error || err.message));
@@ -575,9 +600,20 @@ export default function AdminUsers() {
                     <td className="px-6 py-4 border-l border-white/5 align-top">
                       <div className="flex flex-col items-end justify-start gap-2 h-full">
                                                 {sub ? (
-                          <div className="w-full text-center text-[9px] font-mono text-muted-foreground" title="Текущий срок подписки">
-                            {isExpired ? 'истекла ' : 'до '}{expiryDate ? expiryDate.toLocaleDateString('ru-RU') : '—'}
-                          </div>
+                          <>
+                            <div className="w-full flex items-center justify-center gap-1.5 mb-1">
+                              <button
+                                onClick={() => handleUpdateDeviceLimit(user.id, sub.device_limit || 2)}
+                                className="text-[9px] text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 rounded px-1.5 py-0.5 font-mono transition-colors"
+                                title="Нажмите, чтобы изменить лимит устройств"
+                              >
+                                📱 Лимит: {sub.device_limit || 2}
+                              </button>
+                            </div>
+                            <div className="w-full text-center text-[9px] font-mono text-muted-foreground" title="Текущий срок подписки">
+                              {isExpired ? 'истекла ' : 'до '}{expiryDate ? expiryDate.toLocaleDateString('ru-RU') : '—'}
+                            </div>
+                          </>
                         ) : null}
                         <button
                           onClick={() => { if (sub) { setExtendUser(user); setExtendMonths('1'); } else { setSubCreateUser(user); } }}
@@ -977,27 +1013,112 @@ export default function AdminUsers() {
                  </select>
                </div>
 
-               <div className="grid grid-cols-2 gap-4">
-                 <div className="space-y-2">
-                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Срок (мес)</label>
+               {/* Режим: Обычная подписка или Пробный доступ */}
+               <div className="space-y-1.5">
+                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Тип подписки</label>
+                 <div className="grid grid-cols-2 gap-2 p-1 bg-white/5 rounded-xl border border-white/5">
+                   <button
+                     type="button"
+                     onClick={() => setSubCreateData(prev => ({ ...prev, planType: 'basic', durationUnit: 'months', periodValue: '1' }))}
+                     className={cn("py-2 text-xs font-bold rounded-lg transition-all", subCreateData.planType === 'basic' ? "bg-blue-600 text-white shadow" : "text-muted-foreground hover:text-white")}
+                   >
+                     Стандартная
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => setSubCreateData(prev => ({ ...prev, planType: 'trial', durationUnit: 'days', periodValue: '3' }))}
+                     className={cn("py-2 text-xs font-bold rounded-lg transition-all", subCreateData.planType === 'trial' ? "bg-amber-600 text-white shadow" : "text-muted-foreground hover:text-white")}
+                   >
+                     🎁 Пробный доступ
+                   </button>
+                 </div>
+               </div>
+
+               {/* Срок и пресеты */}
+               <div className="space-y-1.5">
+                 <div className="flex justify-between items-center">
+                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                     Срок ({subCreateData.durationUnit === 'days' ? 'дней' : 'мес'})
+                   </label>
+                   <div className="flex gap-1 text-[10px]">
+                     <button
+                       type="button"
+                       onClick={() => setSubCreateData(prev => ({ ...prev, durationUnit: 'days', periodValue: '3' }))}
+                       className={cn("px-2 py-0.5 rounded", subCreateData.durationUnit === 'days' ? "bg-white/20 text-white font-bold" : "text-muted-foreground hover:text-white")}
+                     >
+                       Дни
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => setSubCreateData(prev => ({ ...prev, durationUnit: 'months', periodValue: '1' }))}
+                       className={cn("px-2 py-0.5 rounded", subCreateData.durationUnit === 'months' ? "bg-white/20 text-white font-bold" : "text-muted-foreground hover:text-white")}
+                     >
+                       Месяцы
+                     </button>
+                   </div>
+                 </div>
+
+                 {subCreateData.durationUnit === 'days' ? (
+                   <div className="grid grid-cols-4 gap-1.5">
+                     {['1', '3', '7', '14'].map(d => (
+                       <button
+                         key={d}
+                         type="button"
+                         onClick={() => setSubCreateData(prev => ({ ...prev, periodValue: d }))}
+                         className={cn("py-1 text-xs rounded-lg border font-mono transition-all", subCreateData.periodValue === d ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-white/5 border-white/5 text-muted-foreground hover:text-white")}
+                       >
+                         {d} дн
+                       </button>
+                     ))}
+                   </div>
+                 ) : (
+                   <div className="grid grid-cols-4 gap-1.5">
+                     {['1', '3', '6', '12'].map(m => (
+                       <button
+                         key={m}
+                         type="button"
+                         onClick={() => setSubCreateData(prev => ({ ...prev, periodValue: m }))}
+                         className={cn("py-1 text-xs rounded-lg border font-mono transition-all", subCreateData.periodValue === m ? "bg-blue-500/20 text-blue-300 border-blue-500/40" : "bg-white/5 border-white/5 text-muted-foreground hover:text-white")}
+                       >
+                         {m} мес
+                       </button>
+                     ))}
+                   </div>
+                 )}
+
+                 <input
+                   type="number"
+                   value={subCreateData.periodValue}
+                   onChange={(e) => setSubCreateData(prev => ({ ...prev, periodValue: e.target.value }))}
+                   className="w-full bg-black/40 border border-white/5 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-blue-500/50 mt-1"
+                   min="1"
+                   placeholder="Количество"
+                 />
+               </div>
+
+               <div className="grid grid-cols-2 gap-3">
+                 <div className="space-y-1.5">
+                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Лимит устройств</label>
                    <input
                      type="number"
-                     value={subCreateData.periodMonths}
-                     onChange={(e) => setSubCreateData(prev => ({ ...prev, periodMonths: e.target.value }))}
-                     className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                     value={subCreateData.deviceLimit}
+                     onChange={(e) => setSubCreateData(prev => ({ ...prev, deviceLimit: e.target.value }))}
+                     className="w-full bg-black/40 border border-white/5 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-blue-500/50"
                      min="1"
+                     max="20"
+                     placeholder="2"
                    />
                  </div>
-                 <div className="space-y-2">
+                 <div className="space-y-1.5">
                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Трафик (ГБ)</label>
                    <input
                      type="number"
                      value={subCreateData.trafficLimitGb}
                      onChange={(e) => setSubCreateData(prev => ({ ...prev, trafficLimitGb: e.target.value }))}
-                     className="w-full bg-black/40 border border-white/5 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500/50"
+                     className="w-full bg-black/40 border border-white/5 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-blue-500/50"
                      min="0"
-                     step="0.1"
-                     placeholder="0 = безлимит"
+                     step="1"
+                     placeholder="0 = 100 ГБ"
                    />
                  </div>
                </div>
@@ -1006,7 +1127,7 @@ export default function AdminUsers() {
                   Отмена
                 </Button>
                 <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleCreateSub}>
-                  Создать (1 устройство)
+                  {subCreateData.planType === 'trial' ? 'Выдать триал' : 'Создать подписку'}
                 </Button>
               </div>
             </div>

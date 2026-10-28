@@ -32,10 +32,13 @@ async function getServerPlan(planId: string, serverType: string = 'WIFI') {
   const basePrice = parseInt(monthlyPriceStr, 10) || 100;
   const selected = PLAN_OPTIONS[planId];
   if (!selected) return null;
-  const multiplier = String(serverType).toUpperCase() === 'ROUTER' ? 2 : 1;
+  const routerPriceStr = await getSystemSetting('ROUTER_MONTHLY_PRICE', String(basePrice * 2));
+  const routerBasePrice = parseInt(routerPriceStr, 10) || (basePrice * 2);
+  const isRouter = String(serverType).toUpperCase() === 'ROUTER';
+  const unitPrice = isRouter ? routerBasePrice : basePrice;
   return {
     ...selected,
-    pricePerDevice: Math.round(basePrice * selected.months * multiplier)
+    pricePerDevice: Math.round(unitPrice * selected.months)
   };
 }
 
@@ -324,6 +327,8 @@ router.get('/subscription/plans', async (req, res) => {
   try {
     const monthlyPriceStr = await getSystemSetting('MONTHLY_PRICE', '100');
     const basePrice = parseInt(monthlyPriceStr, 10) || 100;
+    const routerPriceStr = await getSystemSetting('ROUTER_MONTHLY_PRICE', String(basePrice * 2));
+    const routerBasePrice = parseInt(routerPriceStr, 10) || (basePrice * 2);
     const deviceLimit = parseInt(await getSystemSetting('DEVICE_LIMIT', '2'));
 
     // Все цены округляются до целых чисел (Fix Платежей)
@@ -336,7 +341,7 @@ router.get('/subscription/plans', async (req, res) => {
 
     const serverTypes = [
       { id: 'wifi', label: '📱 Смартфон / ПК', price: 0, description: 'Стандартное VLESS Reality + Hysteria 2 подключение' },
-      { id: 'router', label: '📡 Роутер / Домашняя сеть', price: basePrice, description: 'Конфигурация AmneziaWG (.conf) для Keenetic, OpenWrt, TV (удвоенный ресурс)' }
+      { id: 'router', label: '📡 Роутер / Домашняя сеть', price: routerBasePrice, description: 'Конфигурация AmneziaWG (.conf) для Keenetic, OpenWrt, TV' }
     ];
 
     res.json({ periods, serverTypes, deviceLimit });

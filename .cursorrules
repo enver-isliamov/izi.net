@@ -11,4 +11,5 @@
 - Hysteria2 runs on UDP 443 (ensure UDP rules are preserved).
 - When resolving bugs, record them in `fix.md` with format: `- [x] [YYYY-MM-DD HH:MM] **SYS/BUG-ID**: Description`.
 - Tag critical code changes with `// FIX-ID: Description`.
+- Apply Ponytail mindset: smallest complete change, no over-engineering, use `skills/ponytail*`.
 - Always check type safety: `npm run lint` and `npm run build` must pass.

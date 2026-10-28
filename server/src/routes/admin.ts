@@ -21,6 +21,7 @@ const router = Router();
 
 const DEFAULT_SETTINGS: Record<string, string> = {
   MONTHLY_PRICE: '100',
+  ROUTER_MONTHLY_PRICE: '200',
   PUBLIC_URL: process.env.PUBLIC_URL || 'https://izinet.online',
   ENOT_MERCHANT_ID: process.env.ENOT_MERCHANT_ID || '',
   ENOT_SECRET_KEY: process.env.ENOT_SECRET_KEY || '',
@@ -505,7 +506,7 @@ router.get('/users', adminOnly, async (req: any, res) => {
 // ADMIN-CREATE-001: создание пользователя (модалка CreateUserModal)
 router.post('/users/create', adminOnly, async (req: any, res) => {
   try {
-    const { email, password, initialBalance = '0', createSubscription, serverId, trafficLimitMb, periodMonths } = req.body || {};
+    const { email, password, initialBalance = '0', createSubscription, serverId, trafficLimitMb, periodMonths, days: customDays, deviceLimit: customDeviceLimit, planType: customPlanType } = req.body || {};
     if (!email || typeof email !== 'string' || !email.includes('@')) return res.status(400).json({ error: 'Введите корректный Email' });
     const genPassword = password || (crypto.randomBytes(6).toString('hex') + 'A1!');
     const { data: created, error } = await supabase.auth.admin.createUser({ email, password: genPassword, email_confirm: true });
@@ -517,7 +518,10 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
     }
     let provisioningFailed = false;
     if (createSubscription) {
-      const days = (parseInt(periodMonths) || 1) * 30;
+      const days = parseInt(customDays) || (parseInt(periodMonths) || 1) * 30;
+    const deviceLimit = Math.max(1, Math.min(20, parseInt(customDeviceLimit) || 2));
+    const planType = customPlanType === 'trial' ? 'trial' : 'basic';
+    const subStatus = customPlanType === 'trial' ? 'trial' : 'active';
       const expiresAtMs = Date.now() + days * 86400000;
       const limitMb = parseInt(trafficLimitMb) || 102400;
       // ADMIN-CREATE-002: провижининг VPN-ключей (как в ADMIN-011), чтобы подписка не была пустой
@@ -552,8 +556,8 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
         }
       }
       const { data: newSub, error: subErr } = await supabase.from('subscriptions').insert({
-        user_id: uid, server_id: serverId || activeServers?.[0]?.id || null, plan_type: 'basic', status: 'active',
-        traffic_limit_mb: limitMb, traffic_used_mb: 0, device_limit: 2,
+        user_id: uid, server_id: serverId || activeServers?.[0]?.id || null, plan_type: planType, status: subStatus,
+        traffic_limit_mb: limitMb, traffic_used_mb: 0, device_limit: deviceLimit,
         period_months: parseInt(periodMonths) || 1, expires_at: new Date(expiresAtMs).toISOString(),
         v2ray_config: JSON.stringify(devices)
       }).select('id').single();
@@ -570,12 +574,15 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
 // ADMIN-011: Выдача подписки пользователю из админки
 router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
   const { userId } = req.params;
-  const { serverId, periodMonths, trafficLimitMb } = req.body;
+  const { serverId, periodMonths, trafficLimitMb, days: customDays, deviceLimit: customDeviceLimit, planType: customPlanType } = req.body;
   try {
     const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
     if (userErr || !user) return res.status(404).json({ error: 'User not found' });
 
-    const days = (parseInt(periodMonths) || 1) * 30;
+    const days = parseInt(customDays) || (parseInt(periodMonths) || 1) * 30;
+    const deviceLimit = Math.max(1, Math.min(20, parseInt(customDeviceLimit) || 2));
+    const planType = customPlanType === 'trial' ? 'trial' : 'basic';
+    const subStatus = customPlanType === 'trial' ? 'trial' : 'active';
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
 
@@ -591,7 +598,9 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     if (existingSub) {
       // Шаг 2a: Обновляем существующую подписку
       const { error: updateErr } = await supabase.from('subscriptions').update({
-        status: 'active',
+        status: subStatus,
+        plan_type: planType,
+        device_limit: deviceLimit,
         expires_at: expiresAt.toISOString(),
         traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
         traffic_used_mb: 0,
@@ -606,11 +615,13 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
       const { data: newSub, error: insertErr } = await supabase.from('subscriptions').insert({
         user_id: userId,
         server_id: serverId,
-        plan_type: 'basic',
-        status: 'active',
+
+        status: subStatus,
+        plan_type: planType,
+        device_limit: deviceLimit,
         traffic_limit_mb: parseInt(trafficLimitMb) || 102400,
         traffic_used_mb: 0,
-        device_limit: 2,
+
         period_months: parseInt(periodMonths) || 1,
         expires_at: expiresAt.toISOString(),
         v2ray_config: '[]'
@@ -831,11 +842,16 @@ router.post('/users/:userId/subscription/extend', adminOnly, async (req, res) =>
 
 router.put('/users/:userId', adminOnly, async (req, res) => {
   const { userId } = req.params;
-  const { role, is_pro, universal_access, balance } = req.body;
+  const { role, is_pro, universal_access, balance, device_limit } = req.body;
   try {
     if (role !== undefined) {
       const { error } = await supabase.from('users').update({ role }).eq('id', userId);
       if (error) throw error;
+    }
+    if (device_limit !== undefined) {
+      const limit = Math.max(1, Math.min(20, parseInt(String(device_limit)) || 2));
+      const { error: dlErr } = await supabase.from('subscriptions').update({ device_limit: limit, updated_at: new Date().toISOString() }).eq('user_id', userId);
+      if (dlErr) console.warn(`⚠️ [Admin] Failed to update device_limit: ${dlErr.message}`);
     }
 
     if (is_pro !== undefined) {
@@ -855,6 +871,11 @@ router.put('/users/:userId', adminOnly, async (req, res) => {
       if (!Number.isFinite(amount)) return res.status(400).json({ error: 'Invalid balance value' });
       const { error } = await supabase.from('balances').upsert({ user_id: userId, amount, currency: 'RUB', updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
       if (error) throw error;
+    }
+    if (device_limit !== undefined) {
+      const limit = Math.max(1, Math.min(20, parseInt(String(device_limit)) || 2));
+      const { error: dlErr } = await supabase.from('subscriptions').update({ device_limit: limit, updated_at: new Date().toISOString() }).eq('user_id', userId);
+      if (dlErr) console.warn(`⚠️ [Admin] Failed to update device_limit: ${dlErr.message}`);
     }
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

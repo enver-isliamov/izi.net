@@ -387,6 +387,98 @@ export default function Instructions() {
           </Card>
         );
       })()}
+
+      {/* Инструкция для жителей РФ: обход блокировок магазинов приложений */}
+      <Card className="glass-card border-amber-500/20 bg-gradient-to-br from-amber-500/[0.03] via-black/40 to-black/60 p-4 sm:p-5 space-y-4">
+        <div className="flex items-start gap-3 border-b border-white/5 pb-3">
+          <div className="p-2 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl shrink-0 mt-0.5">
+            <Globe size={18} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                🇷🇺 Приложение не доступно в регионе РФ?
+              </h3>
+              <Badge variant="outline" className="border-amber-500/30 text-amber-400 text-[9px] font-bold uppercase">
+                Решение за 2 минуты
+              </Badge>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              В российском App Store и Google Play часть VPN-приложений скрыта по требованию регуляторов. Вот как легко установить их в России:
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          {/* iOS / Apple */}
+          <div className="p-3.5 bg-black/40 border border-white/5 rounded-xl space-y-2">
+            <div className="flex items-center gap-2 text-white font-bold">
+              <Apple size={16} className="text-primary" />
+              <span>Для iPhone / iPad (App Store)</span>
+            </div>
+            
+            <div className="space-y-1.5 text-[11px] text-zinc-300">
+              <div className="p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                <span className="font-bold text-emerald-400 block mb-0.5">Способ 1 (Рекомендуемый): Второй Apple ID</span>
+                <p className="text-muted-foreground leading-normal">
+                  Создайте зарубежный Apple ID (США или Казахстан) на <a href="https://appleid.apple.com" target="_blank" rel="noreferrer" className="text-primary underline">appleid.apple.com</a>. Способ оплаты выберите <b>«Нет / None»</b>. В App Store выйдите из профиля и войдите под новым ID ➔ скачайте Happ / INCY / Hiddify ➔ вернитесь на основной аккаунт. Приложения продолжат работать и обновляться!
+                </p>
+              </div>
+
+              <div className="p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                <span className="font-bold text-amber-400 block mb-0.5">Способ 2: Смена региона текущего аккаунта</span>
+                <p className="text-muted-foreground leading-normal">
+                  Откройте <i>Настройки iPhone ➔ Ваше имя ➔ Контент и покупки ➔ Просмотреть ➔ Страна/регион ➔ Изменить ➔ Казахстан или США ➔ Способ оплаты: «Нет»</i>.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Android */}
+          <div className="p-3.5 bg-black/40 border border-white/5 rounded-xl space-y-2">
+            <div className="flex items-center gap-2 text-white font-bold">
+              <Smartphone size={16} className="text-primary" />
+              <span>Для Android (Прямая загрузка APK)</span>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground leading-normal">
+              На Android не обязательно менять регион Google Play. Вы можете скачать официальный установочный APK-файл напрямую от проверенных разработчиков:
+            </p>
+
+            <div className="space-y-1.5 pt-1">
+              <a
+                href="https://github.com/2dust/v2rayNG/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-[11px] font-bold text-white transition-colors"
+              >
+                <span>📦 Скачать v2rayNG APK (GitHub)</span>
+                <ExternalLink size={12} className="text-primary" />
+              </a>
+
+              <a
+                href="https://github.com/hiddify/hiddify-next/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-[11px] font-bold text-white transition-colors"
+              >
+                <span>📦 Скачать Hiddify APK (GitHub)</span>
+                <ExternalLink size={12} className="text-primary" />
+              </a>
+
+              <a
+                href="https://github.com/amnezia-vpn/amnezia-client/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-[11px] font-bold text-white transition-colors"
+              >
+                <span>📦 Скачать AmneziaVPN APK (GitHub)</span>
+                <ExternalLink size={12} className="text-primary" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
