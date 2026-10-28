@@ -642,13 +642,16 @@ export default function Dashboard() {
                   className="rounded-lg text-primary hover:bg-primary/10 h-7 w-7"
                   title="QR-код подписки"
                   onClick={() => {
+                    const primaryVless = vpnDevices.find(d => String(d.serverType).toUpperCase() !== 'AWG')?.config || vpnDevices[0]?.config || '';
+                    const cleanKey = primaryVless ? primaryVless.trim().split('\n')[0] : '';
                     setQrData({
-                      value: subUrl,
+                      value: cleanKey || subUrl,
+                      key: cleanKey,
                       sub: subUrl,
                       title: 'Универсальная подписка',
-                      subtitle: 'Автоматическое обновление серверов (VLESS + Hysteria2 + AmneziaWG)'
+                      subtitle: 'Наведите камеру в приложении (v2rayNG / Hiddify / Happ)'
                     });
-                    setQrMode('sub');
+                    setQrMode(cleanKey ? 'key' : 'sub');
                     setIsQrOpen(true);
                   }}
                 >
@@ -800,14 +803,15 @@ export default function Dashboard() {
                               title="Показать QR-код подключения"
                               onClick={() => {
                                 const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
+                                const cleanKey = device.config ? device.config.trim().split('\n')[0] : '';
                                 setQrData({
-                                  value: deviceSubUrl,
-                                  key: device.config,
+                                  value: cleanKey || deviceSubUrl,
+                                  key: cleanKey,
                                   sub: deviceSubUrl,
                                   title: device.label || 'Подключение устройства',
-                                  subtitle: 'VLESS Reality • Hysteria 2'
+                                  subtitle: 'Наведите камеру в приложении (v2rayNG / Hiddify / Happ)'
                                 });
-                                setQrMode('sub');
+                                setQrMode(cleanKey ? 'key' : 'sub');
                                 setIsQrOpen(true);
                               }}
                             >
@@ -997,9 +1001,9 @@ export default function Dashboard() {
                 value={
                   qrMode === 'awg' 
                     ? (awgTab === 'wg' ? (qrData?.conf || awgConfig || qrData?.wireguardUrl || '') : (qrData?.awgUrl || awgUrl || qrData?.value || ''))
-                    : qrMode === 'sub' 
-                    ? (qrData?.sub || qrData?.value || '') 
-                    : (qrData?.key || qrData?.value || '')
+                    : qrMode === 'key' 
+                    ? (qrData?.key || qrData?.value || '') 
+                    : (qrData?.sub || qrData?.value || '')
                 } 
                 size={175}
                 level="M"

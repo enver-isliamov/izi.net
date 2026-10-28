@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Monitor, 
@@ -69,6 +69,21 @@ export default function Installation() {
   const [selectedPlatform, setSelectedPlatform] = useState('ios');
   const [copied, setCopied] = useState(false);
   const [subscription, setSubscription] = useState<any>(null);
+  const [qrMode, setQrMode] = useState<'key' | 'sub'>('key');
+
+  const vlessKey = useMemo(() => {
+    if (!subscription?.v2ray_config) return '';
+    try {
+      if (subscription.v2ray_config.trim().startsWith('[')) {
+        const devs = JSON.parse(subscription.v2ray_config);
+        const dev = devs.find((d: any) => String(d.serverType).toUpperCase() !== 'AWG') || devs[0];
+        return (dev?.config || '').trim().split('\n')[0];
+      }
+      return subscription.v2ray_config.split('\n---KEY_SEP---\n')[0].trim().split('\n')[0];
+    } catch {
+      return subscription.v2ray_config.trim().split('\n')[0];
+    }
+  }, [subscription]);
 
   React.useEffect(() => {
     async function fetchSub() {
@@ -212,26 +227,53 @@ export default function Installation() {
               <CardTitle className="text-2xl font-bold">Способ А: QR-код</CardTitle>
               <CardDescription>Отсканируйте камерой приложения</CardDescription>
             </CardHeader>
-            <CardContent className="p-8 pt-4 flex flex-col items-center gap-6">
-              <div className="p-6 bg-white rounded-[32px] shadow-2xl shadow-primary/10 transition-transform hover:scale-105 duration-500">
+            <CardContent className="p-8 pt-4 flex flex-col items-center gap-4">
+              {subscription && vlessKey && subUrl && (
+                <div className="flex p-1 bg-muted/40 rounded-lg w-full max-w-[280px]">
+                  <button
+                    onClick={() => setQrMode('key')}
+                    className={cn(
+                      "flex-1 py-1 text-[11px] font-bold rounded-md transition-all",
+                      qrMode === 'key' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
+                    )}
+                  >
+                    VPN-ключ (Сканер)
+                  </button>
+                  <button
+                    onClick={() => setQrMode('sub')}
+                    className={cn(
+                      "flex-1 py-1 text-[11px] font-bold rounded-md transition-all",
+                      qrMode === 'sub' ? "bg-primary text-black" : "text-muted-foreground hover:text-white"
+                    )}
+                  >
+                    Ссылка (URL)
+                  </button>
+                </div>
+              )}
+
+              <div className="p-5 bg-white rounded-[28px] shadow-2xl shadow-primary/10 transition-transform hover:scale-105 duration-500">
                 {subscription ? (
                   <QRCodeSVG 
-                    value={subUrl} 
-                    size={200}
-                    level="H"
+                    value={qrMode === 'key' ? (vlessKey || subUrl) : subUrl} 
+                    size={190}
+                    level="M"
                     includeMargin={false}
                     bgColor="#FFFFFF"
                     fgColor="#000000"
                   />
                 ) : (
-                  <div className="w-[200px] h-[200px] flex items-center justify-center text-black/20 font-bold border-2 border-dashed border-black/10 rounded-2xl">
+                  <div className="w-[190px] h-[190px] flex items-center justify-center text-black/20 font-bold border-2 border-dashed border-black/10 rounded-2xl">
                     Нет подписки
                   </div>
                 )}
               </div>
-              <div className="flex items-start gap-3 p-4 bg-primary/5 rounded-2xl border border-primary/10">
+              <div className="flex items-start gap-3 p-3.5 bg-primary/5 rounded-2xl border border-primary/10 w-full">
                 <Info className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-                <p className="text-[11px] leading-snug">Просто откройте приложение и выберите "Import from QR" или "Scan". Код содержит все настройки.</p>
+                <p className="text-[11px] leading-snug">
+                  {qrMode === 'key' 
+                    ? 'Откройте сканер в приложении (v2rayNG / Hiddify / Happ) и наведите на этот QR-код для мгновенного добавления.'
+                    : 'Ссылка авто-обновления подписки со списком всех серверов для Hiddify.'}
+                </p>
               </div>
             </CardContent>
           </Card>

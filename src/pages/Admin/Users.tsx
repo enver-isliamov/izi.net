@@ -393,9 +393,17 @@ export default function AdminUsers() {
                             <button
                               onClick={() => {
                                 const subUrl = `${window.location.origin}/api/sub/${sub.id}`;
-                                setQrInfo({ value: subUrl, sub: subUrl });
+                                let firstKey = '';
+                                if (sub.v2ray_config) {
+                                  try {
+                                    const devs = typeof sub.v2ray_config === 'string' ? JSON.parse(sub.v2ray_config) : sub.v2ray_config;
+                                    const dev = Array.isArray(devs) ? devs[0] : null;
+                                    firstKey = (dev?.config || '').trim().split('\n')[0];
+                                  } catch (e) {}
+                                }
+                                setQrInfo({ value: firstKey || subUrl, sub: subUrl, key: firstKey });
                                 setQrType('subscription');
-                                setQrMode('sub');
+                                setQrMode(firstKey ? 'key' : 'sub');
                                 setQrTitle(`Подписка: ${user.email}`);
                                 setIsQrOpen(true);
                               }}
@@ -541,8 +549,9 @@ export default function AdminUsers() {
                                     <button
                                       onClick={() => {
                                         const deviceSubUrl = `${window.location.origin}/api/sub/${sub.id}?deviceId=${device.id}`;
-                                        setQrInfo({ key: device.config, sub: deviceSubUrl });
-                                        setQrType('device'); setQrMode('sub'); setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
+                                        const cleanKey = (device.config || '').trim().split('\n')[0];
+                                        setQrInfo({ key: cleanKey, sub: deviceSubUrl, value: cleanKey || deviceSubUrl });
+                                        setQrType('device'); setQrMode('key'); setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
                                         setIsQrOpen(true);
                                       }}
                                       className="text-muted-foreground hover:text-primary p-1 rounded-md hover:bg-white/10 transition-colors" title="QR Ключ"
@@ -689,9 +698,17 @@ export default function AdminUsers() {
                         <button
                           onClick={() => {
                             const subUrl = `${window.location.origin}/api/sub/${sub.id}`;
-                            setQrInfo({ value: subUrl, sub: subUrl });
+                            let firstKey = '';
+                            if (sub.v2ray_config) {
+                              try {
+                                const devs = typeof sub.v2ray_config === 'string' ? JSON.parse(sub.v2ray_config) : sub.v2ray_config;
+                                const dev = Array.isArray(devs) ? devs[0] : null;
+                                firstKey = (dev?.config || '').trim().split('\n')[0];
+                              } catch (e) {}
+                            }
+                            setQrInfo({ value: firstKey || subUrl, sub: subUrl, key: firstKey });
                             setQrType('subscription');
-                            setQrMode('sub');
+                            setQrMode(firstKey ? 'key' : 'sub');
                             setQrTitle(`Подписка: ${user.email}`);
                             setIsQrOpen(true);
                           }}
@@ -867,8 +884,9 @@ export default function AdminUsers() {
                                     <button
                                       onClick={() => {
                                         const deviceSubUrl = `${window.location.origin}/api/sub/${sub.id}?deviceId=${device.id}`;
-                                        setQrInfo({ key: device.config, sub: deviceSubUrl });
-                                        setQrType('device'); setQrMode('sub'); setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
+                                        const cleanKey = (device.config || '').trim().split('\n')[0];
+                                        setQrInfo({ key: cleanKey, sub: deviceSubUrl, value: cleanKey || deviceSubUrl });
+                                        setQrType('device'); setQrMode('key'); setQrTitle(`Ключ: ${device.label || 'Устройство'}`);
                                         setIsQrOpen(true);
                                       }}
                                       className="text-muted-foreground hover:text-primary p-1.5 rounded-md hover:bg-white/10 transition-colors" title="QR Ключ"
@@ -1211,7 +1229,7 @@ export default function AdminUsers() {
              
              <div className="bg-white p-6 rounded-3xl shadow-2xl shadow-blue-500/10">
                <QRCodeSVG 
-                 value={qrMode === 'sub' ? (qrInfo?.sub || qrInfo?.value || '') : (qrInfo?.key || qrInfo?.value || '')} 
+                 value={qrMode === 'key' ? (qrInfo?.key || qrInfo?.value || '') : (qrInfo?.sub || qrInfo?.value || '')} 
                  size={240}
                  level="M"
                  includeMargin={false}

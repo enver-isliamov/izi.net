@@ -67,9 +67,9 @@ export default function Instructions() {
               if (data.v2ray_config.trim().startsWith('[')) {
                 const devices = JSON.parse(data.v2ray_config);
                 const vlessDev = devices.find((d: any) => String(d.serverType).toUpperCase() !== 'AWG') || devices[0];
-                setCleanVlessKey(vlessDev?.config || '');
+                setCleanVlessKey((vlessDev?.config || '').trim().split('\n')[0]);
               } else {
-                setCleanVlessKey(data.v2ray_config);
+                setCleanVlessKey(data.v2ray_config.trim().split('\n')[0]);
               }
             } catch {
               setCleanVlessKey(data.v2ray_config);
