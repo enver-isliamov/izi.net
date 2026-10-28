@@ -42,6 +42,7 @@ export default function AdminMaintenance() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncingInbounds, setIsSyncingInbounds] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isOptimizingTransports, setIsOptimizingTransports] = useState(false);
   const [isGitUpdating, setIsGitUpdating] = useState(false);
   const [gitUpdateLogs, setGitUpdateLogs] = useState<string[]>([]);
   const [showGitConfirmModal, setShowGitConfirmModal] = useState(false);
@@ -269,6 +270,44 @@ export default function AdminMaintenance() {
     }
   };
 
+  
+  const handleOptimizeTransports = async () => {
+    try {
+      setIsOptimizingTransports(true);
+      setSystemLogs([
+        '[Старт] Оптимизация инбаундов и транспортов (gRPC, XHTTP, Reality) по API 3x-ui...',
+        '[Система] Заменяю microsoft.com на cloudflare.com, снимаю несовместимый Vision-flow с gRPC/XHTTP, настраиваю mode=auto...'
+      ]);
+      toast.loading('Оптимизация транспортов...', { id: 'opt-transports' });
+
+      const { data } = await axios.post('/api/admin/maintenance/optimize-transports', {}, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+
+      const fixedList = [];
+      (data.results || []).forEach((r: any) => {
+        if (r.fixed && r.fixed.length > 0) {
+          fixedList.push(...r.fixed);
+        } else if (r.error) {
+          fixedList.push(`Ошибка на ${r.server}: ${r.error}`);
+        }
+      });
+
+      const msg = fixedList.length > 0
+        ? `Транспорты оптимизированы! Исправлений: ${fixedList.length}`
+        : 'Все инбаунды и транспорты уже настроены оптимально';
+
+      setSystemLogs(prev => [...prev, ...fixedList.map(f => `[Фикс] ${f}`), `[Успех] ${msg}`]);
+      toast.success(msg, { id: 'opt-transports' });
+    } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message;
+      setSystemLogs(prev => [...prev, `[Ошибка] ${errMsg}`]);
+      toast.error('Ошибка оптимизации: ' + errMsg, { id: 'opt-transports' });
+    } finally {
+      setIsOptimizingTransports(false);
+    }
+  };
+
   const handleRegenerateLinks = async () => {
     try {
       setIsRegenerating(true);
@@ -436,7 +475,28 @@ export default function AdminMaintenance() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          {/* Optimize Transports Card */}
+          <div className="p-4 bg-black/30 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                Починить gRPC & XHTTP
+              </h3>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Исправит SNI на cloudflare, снимет Vision-flow с gRPC/XHTTP и настроит mode=auto.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={isOptimizingTransports}
+              onClick={handleOptimizeTransports}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 disabled:opacity-50 rounded-xl transition-colors font-bold text-xs border border-cyan-500/20"
+            >
+              {isOptimizingTransports ? <RefreshCw className="animate-spin" size={12} /> : <Wrench size={12} />}
+              Настроить транспорты
+            </button>
+          </div>
           {/* Sync Card */}
           <div className="p-4 bg-black/30 rounded-xl flex flex-col justify-between border border-white/5 space-y-3">
             <div className="space-y-1">

@@ -76,3 +76,18 @@ test('safe update: не делает compose down, не трогает x3-ui п�
   const setup = read('scripts/amneziawg/setup_awg.sh');
   assert.ok(setup.includes('ensure_awg_nat.sh'), 'setup_awg.sh не вызывает NAT persistence');
 });
+
+test('transports: gRPC и XHTTP не содержат xtls-rprx-vision, mode и serviceName формируются корректно', () => {
+  const xui = read('server/src/services/xui.service.ts');
+  assert.ok(xui.includes("mode=gun"), 'gRPC ссылка не содержит mode=gun');
+  assert.ok(xui.includes("mode=${encodeURIComponent(xhttpMode)}"), 'XHTTP ссылка не содержит mode');
+  assert.ok(xui.includes("(network === 'tcp' && security === 'reality') ? '&flow=xtls-rprx-vision' : ''"), 'flow=vision применяется не только к TCP Reality');
+  assert.ok(xui.includes("optimizeTransports(): Promise<"), 'нет метода optimizeTransports в XUIService');
+});
+
+test('subscriptions: trial подписки сохраняются со статусом active и отображаются во всех выборках', () => {
+  const admin = read('server/src/routes/admin.ts');
+  const user = read('server/src/routes/user.ts');
+  assert.ok(!admin.includes("subStatus = customPlanType === 'trial' ? 'trial' : 'active'"), 'subStatus снова делает статус trial вместо active');
+  assert.ok(admin.includes(".in('status', ['active', 'trial', 'limited'])"), 'админка не учитывает trial и limited при выборках');
+});

@@ -212,3 +212,22 @@ flow: xtls-rprx-vision
   - `src/pages/Admin/Settings.tsx`: В блоке «Финансы и тарифы» добавлено поле настройки базовой стоимости роутеров с защитным замком (Lock/Unlock) и сохранением.
 - [x] [2026-10-28 14:10] **UX/APP-STORE-RF-GUIDE-001**: Руководство по смене региона магазина приложений для пользователей из РФ:
   - `src/pages/Instructions.tsx`: Добавлен адаптивный информационный блок для жителей РФ с подробной инструкцией по созданию/смене Apple ID без банковской карты для App Store и прямыми кнопками скачивания официальных APK-файлов с GitHub (v2rayNG, Hiddify, AmneziaVPN).
+
+- [x] [2026-10-28 15:20] **SYS/SUB-TRIAL-VISIBILITY-001**: Восстановление видимости триал-подписок в админ-панели и пользовательском кабинете:
+  - Проблема: При выдаче триала подписке присваивался `status = 'trial'`. Но все фронтенд-компоненты (`Dashboard.tsx`, `Subscription.tsx`, `Installation.tsx`, `Instructions.tsx`, `Profile.tsx`) и бэкенд (`GET /api/admin/users`, `maintenance.service.ts`) фильтровали записи строго по `.eq('status', 'active')`. В результате выданная триал-подписка не отображалась ни у пользователя, ни у администратора.
+  - Решение:
+    - `server/src/routes/admin.ts`: Подпискам теперь всегда назначается рабочий статус `status = 'active'`, а тип тарифа корректно пишется в `plan_type = 'trial'`. В роуте `GET /users` выборка расширена до `.in('status', ['active', 'trial', 'limited'])` с маппингом наиболее актуальной подписки.
+    - `src/pages/Admin/Users.tsx`: В колонку подписок добавлен цветной бейдж тарифа (`⏳ ТРИАЛ`, `★ БАЗОВЫЙ`, `📶 РОУТЕР`).
+    - `src/pages/Dashboard.tsx`, `Subscription.tsx`, `Installation.tsx`, `Instructions.tsx`, `Profile.tsx`: Селектор расширен до `.in('status', ['active', 'trial', 'limited'])`.
+    - `server/src/index.ts`: Добавлено автоматическое лечение старых записей (`UPDATE subscriptions SET status='active', plan_type='trial' WHERE status='trial'`).
+
+- [x] [2026-10-28 15:20] **SYS/VLESS-TRANSPORTS-GRPC-XHTTP-001**: Починка VLESS с альтернативными транспортами (gRPC, XHTTP) и авто-настройка инбаундов по API 3x-ui:
+  - Проблема:
+    1. Критический баг: В `updateClient` метод принудительно выставлял `flow: xtls-rprx-vision` на ВСЕ Reality-инбаунды, включая gRPC и XHTTP. Xray-core категорически запрещает Vision-flow для gRPC и XHTTP, из-за чего соединения отсекались.
+    2. В ссылках gRPC отсутствовал `mode=gun` и возникали пустые `serviceName`, возвращавшие `status 12 UNIMPLEMENTED`. В XHTTP отсутствовал параметр `mode=auto`.
+    3. Часть инбаундов в 3x-ui содержала заблокированный ТСПУ в РФ SNI `www.microsoft.com`.
+  - Решение:
+    - `server/src/services/xui.service.ts`: В `getInboundLink` и `updateClient` параметр `flow=xtls-rprx-vision` строго ограничен только `network === 'tcp'`. Для gRPC настроены `serviceName` и `mode=gun`, для XHTTP — `mode=auto`.
+    - Добавлен метод `optimizeTransports()`, который по API 3x-ui находит все Reality инбаунды, очищает Vision-flow у клиентов gRPC/XHTTP, задает SNI `www.cloudflare.com`, настраивает `target: host.docker.internal:3443` и параметры транспортов.
+    - `server/src/routes/admin.ts`: Добавлен роут `POST /maintenance/optimize-transports`.
+    - `src/pages/Admin/Maintenance.tsx`: Добавлена кнопка «Починить gRPC & XHTTP» в раздел обслуживания для ручного запуска оптимизации узлов в 1 клик.

@@ -601,7 +601,20 @@ export default function AdminUsers() {
                       <div className="flex flex-col items-end justify-start gap-2 h-full">
                                                 {sub ? (
                           <>
-                            <div className="w-full flex items-center justify-center gap-1.5 mb-1">
+                            <div className="w-full flex items-center justify-center gap-1.5 mb-1 flex-wrap">
+                              {sub.plan_type === 'trial' ? (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                  ⏳ ТРИАЛ
+                                </span>
+                              ) : sub.plan_type === 'router' ? (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                  📶 РОУТЕР
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                  ★ БАЗОВЫЙ
+                                </span>
+                              )}
                               <button
                                 onClick={() => handleUpdateDeviceLimit(user.id, sub.device_limit || 2)}
                                 className="text-[9px] text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 rounded px-1.5 py-0.5 font-mono transition-colors"

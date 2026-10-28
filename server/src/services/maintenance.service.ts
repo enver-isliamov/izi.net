@@ -71,6 +71,7 @@ export class MaintenanceService {
 
           // Get current pbk from panel
           const inbounds = await instance.getInbounds();
+          await instance.optimizeTransports().catch(() => {});
           const realityInbound = inbounds.find((ib: any) => {
             try {
               const ss = JSON.parse(ib.streamSettings || '{}');
@@ -85,7 +86,7 @@ export class MaintenanceService {
           if (!currentPbk) continue;
 
           // Check if any subscription has stale pbk
-          const { data: subs } = await supabase.from('subscriptions').select('id, v2ray_config').in('status', ['active', 'limited']);
+          const { data: subs } = await supabase.from('subscriptions').select('id, v2ray_config').in('status', ['active', 'trial', 'limited']);
           if (!subs) continue;
 
           let staleFound = false;
@@ -116,7 +117,7 @@ export class MaintenanceService {
 
   private static async regenerateLinksForServer(server: any, currentPbk: string) {
     try {
-      const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+      const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'trial', 'limited']);
       if (!subs) return;
 
       const { getXuiForServer } = await import('../services/xui.service');
@@ -250,7 +251,7 @@ export class MaintenanceService {
       const { data: expiredSubs, error } = await supabase
         .from('subscriptions')
         .select('*')
-        .eq('status', 'active')
+        .in('status', ['active', 'trial', 'limited'])
         .lt('expires_at', now);
 
       if (error || !expiredSubs || expiredSubs.length === 0) {
@@ -306,7 +307,7 @@ export class MaintenanceService {
     try {
       const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true)
         .then((r: any) => ({ ...r, data: (r.data || []).filter((s: any) => !isUnroutableHost(s.ip || s.public_host || s.domain)) }));
-      const { data: activeSubs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+      const { data: activeSubs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'trial', 'limited']);
 
       if (!activeServers || !activeSubs) return;
 
@@ -423,7 +424,7 @@ export class MaintenanceService {
       const { data: subs, error } = await supabase
         .from('subscriptions')
         .select('*')
-        .in('status', ['active', 'limited']);
+        .in('status', ['active', 'trial', 'limited']);
 
       if (error || !subs) throw error || new Error('No active subs');
 

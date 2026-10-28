@@ -229,6 +229,132 @@ export class XUIService {
     }
   }
 
+  async updateInbound(inboundId: number, inboundData: any): Promise<boolean> {
+    await this.login();
+    try {
+      const url = `${this.host}${this.basePath}/panel/api/inbounds/update/${inboundId}`;
+      const resp = await axios.post(url, inboundData, getRequestConfig(url, this.authHeaders({ 'Content-Type': 'application/json' })));
+      return Boolean(resp.data?.success);
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        this.sessionCookie = null;
+        await this.login(true);
+        return this.updateInbound(inboundId, inboundData);
+      }
+      console.error(`❌ [XUI] updateInbound ${inboundId} error:`, err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Автоматическая оптимизация инбаундов и транспортов (gRPC, XHTTP, TCP) по API 3x-ui:
+   * - Заменяет устаревший или заблокированный SNI (www.microsoft.com) на www.cloudflare.com
+   * - Задает target: host.docker.internal:3443 для правильного Fallback
+   * - Очищает ошибочный flow=xtls-rprx-vision у клиентов gRPC и XHTTP (критический баг)
+   * - Настраивает mode=auto для XHTTP и serviceName=grpc, mode=gun для gRPC
+   */
+  async optimizeTransports(): Promise<{ fixed: string[]; inbounds: number[] }> {
+    await this.login();
+    const inbounds = await this.getInbounds();
+    const fixed: string[] = [];
+    const modifiedIds: number[] = [];
+
+    for (const ib of inbounds) {
+      try {
+        const stream = this.parseJson<Record<string, any>>(ib.streamSettings, {});
+        if (stream.security !== 'reality') continue;
+
+        let changed = false;
+        const reality = stream.realitySettings || {};
+        const rs = reality.settings || reality;
+        const network = String(stream.network || 'tcp').toLowerCase();
+
+        // 1. Проверяем и очищаем serverNames от microsoft.com и пробелов
+        const currentNames: string[] = Array.isArray(reality.serverNames) ? reality.serverNames : [];
+        const hasBlockedSni = currentNames.some(n => typeof n !== 'string' || n.includes('microsoft') || n.includes('google') || n.trim() !== n);
+        if (hasBlockedSni || currentNames.length === 0) {
+          reality.serverNames = ['www.cloudflare.com'];
+          if (rs) rs.serverName = 'www.cloudflare.com';
+          changed = true;
+          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен на www.cloudflare.com`);
+        }
+
+        // 2. target / dest
+        for (const k of ['dest', 'target']) {
+          if (!reality[k] || String(reality[k]).includes('microsoft') || String(reality[k]).includes('google')) {
+            reality[k] = 'host.docker.internal:3443';
+            changed = true;
+          }
+        }
+
+        // 3. fingerprint
+        if (rs && rs.fingerprint !== 'chrome') {
+          rs.fingerprint = 'chrome';
+          changed = true;
+        }
+
+        // 4. Настройки клиентов (Clients flow)
+        const settings = this.parseJson<Record<string, any>>(ib.settings, {});
+        const clients = Array.isArray(settings.clients) ? settings.clients : [];
+        let clientsChanged = false;
+
+        for (const client of clients) {
+          if (network === 'tcp') {
+            if (client.flow !== 'xtls-rprx-vision') {
+              client.flow = 'xtls-rprx-vision';
+              clientsChanged = true;
+            }
+          } else {
+            // Для grpc, xhttp, ws - Vision flow ЗАПРЕЩЕН и ломает соединение
+            if (client.flow) {
+              client.flow = '';
+              clientsChanged = true;
+              fixed.push(`Inbound ${ib.id} (${network}): очищен несовместимый flow у клиента ${client.email}`);
+            }
+          }
+        }
+
+        // 5. Специфические настройки транспортов
+        if (network === 'grpc') {
+          stream.grpcSettings = stream.grpcSettings || {};
+          if (!stream.grpcSettings.serviceName) {
+            stream.grpcSettings.serviceName = 'grpc';
+            changed = true;
+            fixed.push(`Inbound ${ib.id} (grpc): установлен serviceName='grpc'`);
+          }
+        } else if (network === 'xhttp') {
+          stream.xhttpSettings = stream.xhttpSettings || {};
+          if (!stream.xhttpSettings.path) {
+            stream.xhttpSettings.path = '/xhttp';
+            changed = true;
+          }
+          if (!stream.xhttpSettings.mode) {
+            stream.xhttpSettings.mode = 'auto';
+            changed = true;
+          }
+          if (!stream.xhttpSettings.host) {
+            stream.xhttpSettings.host = 'www.cloudflare.com';
+            changed = true;
+          }
+        }
+
+        if (changed || clientsChanged) {
+          ib.streamSettings = JSON.stringify(stream);
+          ib.settings = JSON.stringify(settings);
+          const ok = await this.updateInbound(ib.id, ib);
+          if (ok) {
+            modifiedIds.push(ib.id);
+            console.log(`✅ [XUI] Inbound ${ib.id} (${network}) successfully optimized`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`⚠️ [XUI] optimizeTransports failed for inbound ${ib.id}:`, err.message);
+      }
+    }
+
+    return { fixed, inbounds: modifiedIds };
+  }
+
   async addClient(email: string, uuid: string, inboundId: number, expiryTime: number = 0, limitBytes: number = 0) {
     await this.login();
 
@@ -350,14 +476,15 @@ export class XUIService {
         } else if (network === 'xhttp') {
           const xhttpPath = streamSettings.xhttpSettings?.path || '/xhttp';
           const xhttpHost = streamSettings.xhttpSettings?.host || sni || 'www.cloudflare.com';
-          transportParams = `type=xhttp&path=${encodeURIComponent(xhttpPath)}&host=${encodeURIComponent(xhttpHost)}`;
+          const xhttpMode = streamSettings.xhttpSettings?.mode || 'auto';
+          transportParams = `type=xhttp&path=${encodeURIComponent(xhttpPath)}&host=${encodeURIComponent(xhttpHost)}&mode=${encodeURIComponent(xhttpMode)}`;
         } else if (network === 'grpc') {
-          const grpcService = streamSettings.grpcSettings?.serviceName || '';
-          transportParams = `type=grpc&serviceName=${encodeURIComponent(grpcService)}`;
+          const grpcService = streamSettings.grpcSettings?.serviceName || 'grpc';
+          transportParams = `type=grpc&serviceName=${encodeURIComponent(grpcService)}&mode=gun`;
         }
 
         console.log(`✅ [XUI] Reality link for ${email}: transport=${network}, SNI=${sni}, SID=${sid.substring(0, 10)}...`);
-        const flowParam = network === 'tcp' ? '&flow=xtls-rprx-vision' : '';
+        const flowParam = (network === 'tcp' && security === 'reality') ? '&flow=xtls-rprx-vision' : '';
         let link = `vless://${uuid}@${hostName}:${port}?${transportParams}&encryption=none&security=reality&sni=${encodeURIComponent(sni)}&pbk=${encodeURIComponent(pbk)}&fp=${fp}&sid=${encodeURIComponent(sid)}&spx=${encodeURIComponent(spiderX)}${flowParam}`;
         return `${link}#${encodedEmail}`;
       }
@@ -412,13 +539,15 @@ export class XUIService {
 
     if (!effectiveUuid) return false;
 
-    let flow = 'xtls-rprx-vision';
+    let flow = '';
     try {
       const url = `${this.host}${this.basePath}/panel/api/inbounds/get/${effectiveInboundId}`;
       const resp = await axios.get(url, getRequestConfig(url, this.authHeaders()));
       if (resp.data?.success) {
         const streamSettings = this.parseJson<any>(resp.data.obj?.streamSettings, {});
-        if (streamSettings.security === 'reality') flow = 'xtls-rprx-vision';
+        if (streamSettings.security === 'reality' && streamSettings.network === 'tcp') {
+          flow = 'xtls-rprx-vision';
+        }
       }
     } catch (e) {}
 

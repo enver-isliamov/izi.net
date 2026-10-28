@@ -477,18 +477,22 @@ router.get('/users', adminOnly, async (req: any, res) => {
     const { data: users, error } = await query.order('created_at', { ascending: false });
     if (error) throw error;
 
-    // Получаем активные подписки отдельно
+    // Получаем подписки пользователей (активные, триал, лимитированные или последние)
     const userIds = (users || []).map(u => u.id);
-    const { data: activeSubs } = await supabase
+    const { data: allSubs } = await supabase
       .from('subscriptions')
       .select('*')
-      .eq('status', 'active')
-      .in('user_id', userIds);
+      .in('user_id', userIds)
+      .order('created_at', { ascending: false });
 
-    // Маппим подписки к пользователям
+    // Маппим наиболее актуальные подписки к пользователям
     const subMap: Record<string, any> = {};
-    (activeSubs || []).forEach(sub => {
-      if (!subMap[sub.user_id]) subMap[sub.user_id] = sub;
+    (allSubs || []).forEach(sub => {
+      if (!subMap[sub.user_id]) {
+        subMap[sub.user_id] = sub;
+      } else if (['active', 'trial', 'limited'].includes(sub.status) && !['active', 'trial', 'limited'].includes(subMap[sub.user_id].status)) {
+        subMap[sub.user_id] = sub;
+      }
     });
 
     const { data: balances } = await supabase.from('balances').select('*');
@@ -521,7 +525,7 @@ router.post('/users/create', adminOnly, async (req: any, res) => {
       const days = parseInt(customDays) || (parseInt(periodMonths) || 1) * 30;
     const deviceLimit = Math.max(1, Math.min(20, parseInt(customDeviceLimit) || 2));
     const planType = customPlanType === 'trial' ? 'trial' : 'basic';
-    const subStatus = customPlanType === 'trial' ? 'trial' : 'active';
+    const subStatus = 'active';
       const expiresAtMs = Date.now() + days * 86400000;
       const limitMb = parseInt(trafficLimitMb) || 102400;
       // ADMIN-CREATE-002: провижининг VPN-ключей (как в ADMIN-011), чтобы подписка не была пустой
@@ -582,7 +586,7 @@ router.post('/users/:userId/subscription', adminOnly, async (req, res) => {
     const days = parseInt(customDays) || (parseInt(periodMonths) || 1) * 30;
     const deviceLimit = Math.max(1, Math.min(20, parseInt(customDeviceLimit) || 2));
     const planType = customPlanType === 'trial' ? 'trial' : 'basic';
-    const subStatus = customPlanType === 'trial' ? 'trial' : 'active';
+    const subStatus = 'active';
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
 
@@ -885,7 +889,7 @@ router.put('/users/:userId', adminOnly, async (req, res) => {
 router.post('/users/:userId/devices/:deviceId/regenerate', adminOnly, async (req, res) => {
   const { userId, deviceId } = req.params;
   try {
-    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).in('status', ['active', 'limited']).maybeSingle();
+    const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', userId).in('status', ['active', 'trial', 'limited']).maybeSingle();
     if (!sub) return res.status(404).json({ error: 'Subscription not found' });
     const devices = parseVpnDevices(sub.v2ray_config, sub.expires_at, sub.server_type);
     const targetIdx = devices.findIndex((d) => d.id === deviceId);
@@ -1226,7 +1230,7 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
     const { data: subs, error: subErr } = await supabase
       .from('subscriptions')
       .select('*')
-      .in('status', ['active', 'limited']);
+      .in('status', ['active', 'trial', 'limited']);
     if (subErr) throw subErr;
     if (!subs || subs.length === 0) return res.json({ success: true, updated: 0, message: 'Нет активных подписок' });
 
@@ -1325,7 +1329,7 @@ router.post('/system/regenerate-all-links', adminOnly, async (req, res) => {
 router.post('/system/sync-clients-all-inbounds', adminOnly, async (_req, res) => {
   try {
     const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
-    const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+    const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'trial', 'limited']);
     const report: Array<{ server: string; device: string; inboundCount: number; added: number[]; existing: number[]; failed: number[] }> = [];
 
     for (const server of (servers || [])) {
@@ -1704,7 +1708,7 @@ router.post('/servers/:id/client-check', adminOnly, async (req, res) => {
 router.post('/subscriptions/:id/regenerate', adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
-    const { data: sub, error: subErr } = await supabase.from('subscriptions').select('*').eq('id', id).in('status', ['active', 'limited']).maybeSingle();
+    const { data: sub, error: subErr } = await supabase.from('subscriptions').select('*').eq('id', id).in('status', ['active', 'trial', 'limited']).maybeSingle();
     if (subErr) throw subErr;
     if (!sub) return res.status(404).json({ ok: false, error: 'Subscription not found' });
 
@@ -1751,7 +1755,7 @@ router.post('/subscriptions/:id/regenerate', adminOnly, async (req, res) => {
 // === BUG-VPN-02: Batch регенерация всех активных подписок ===
 router.post('/subscriptions/regenerate-all', adminOnly, async (req, res) => {
   try {
-    const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+    const { data: subs, error: subErr } = await supabase.from('subscriptions').select('*').in('status', ['active', 'trial', 'limited']);
     if (subErr) throw subErr;
     if (!subs || subs.length === 0) return res.json({ ok: true, updated: 0, total: 0 });
 
@@ -2300,6 +2304,29 @@ router.get('/system/git-update/status', adminOnly, async (_req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message, logs: [] });
+  }
+});
+
+
+// ADMIN-OPT-001: Оптимизация инбаундов и транспортов (gRPC, XHTTP, Reality) по API
+router.post('/maintenance/optimize-transports', adminOnly, async (_req, res) => {
+  try {
+    const { data: servers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);
+    const results = [];
+    for (const server of (servers || [])) {
+      try {
+        const { instance } = await getXuiForServer(server.id);
+        const opt = await instance.optimizeTransports();
+        results.push({ server: server.name, ...opt });
+      } catch (e) {
+        results.push({ server: server.name, error: e.message });
+      }
+    }
+    // Автоматическое лечение подписок со status = 'trial' -> status = 'active', plan_type = 'trial'
+    await supabase.from('subscriptions').update({ status: 'active', plan_type: 'trial' }).eq('status', 'trial');
+    res.json({ ok: true, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

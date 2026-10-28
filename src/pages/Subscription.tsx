@@ -85,7 +85,7 @@ export default function Subscription() {
         .from('subscriptions')
         .select('*')
         .eq('user_id', user.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'trial', 'limited'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
