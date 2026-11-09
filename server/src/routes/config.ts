@@ -278,18 +278,18 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       }
     }
 
-    // 2. Add Hysteria 2 links for each active server
+    // 2. Add Hysteria 2 links for each active server (using port 24433 to bypass Russia UDP 443 QUIC drops)
     try {
       const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
       const hyPassword = hySettings?.value;
       if (hyPassword) {
         if (activeServers.length > 0) {
           for (const server of activeServers) {
-            const host = server.domain || server.ip || '194.50.94.28';
-            finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
+            const host = server.domain || server.ip || '89.125.17.44';
+            finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
           }
         } else {
-          finalLinks.push(`hysteria2://${hyPassword}@194.50.94.28:443?insecure=1#izinet_Hysteria2`);
+          finalLinks.push(`hysteria2://${hyPassword}@89.125.17.44:24433?insecure=1&sni=izinet.online#izinet_Hysteria2`);
         }
       }
     } catch (e: any) {
