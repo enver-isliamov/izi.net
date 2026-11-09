@@ -177,13 +177,15 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     // Helper: Find server from host/ip in link
     const findMatchingServer = (link: string) => {
       const hostMatch = link.match(/@([^:/?#]+):/);
-      if (!hostMatch) return null;
+      if (!hostMatch) return activeServers[0] || null;
       const host = hostMatch[1].toLowerCase();
-      return activeServers.find((s: any) => 
-        (s.ip && s.ip.toLowerCase() === host) ||
+      const found = activeServers.find((s: any) => 
+        (s.ip && s.ip.toLowerCase().includes(host)) ||
         (s.domain && s.domain.toLowerCase() === host) ||
-        (s.public_host && s.public_host.toLowerCase() === host)
+        (s.public_host && s.public_host.toLowerCase() === host) ||
+        (host === 'izinet.online' && (s.domain === 'vpn.izinet.online' || s.public_host === 'vpn.izinet.online'))
       );
+      return found || activeServers[0] || null;
     };
 
     // Helper: Clean remark format
@@ -252,7 +254,11 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
         // Format each VLESS link with proper server name and heal outdated/blocked SNIs
         for (let rawVless of collectedVless) {
           const matchedServer = findMatchingServer(rawVless);
-          const activeHost = matchedServer?.domain || matchedServer?.ip || 'izinet.online';
+          const activeHost = matchedServer?.domain || matchedServer?.ip || 'vpn.izinet.online';
+
+          // Route node directly to VPS (vpn.izinet.online) to bypass Cloudflare CDN edge
+          const targetHost = (activeHost && activeHost !== 'izinet.online') ? activeHost : 'vpn.izinet.online';
+          rawVless = rawVless.replace(/@[^:/?#]+:/, `@${targetHost}:`);
 
           // Heal blocked/mismatched SNI in cached links to use Russian-unblocked Apple SNI
           if (rawVless.includes('security=reality')) {
