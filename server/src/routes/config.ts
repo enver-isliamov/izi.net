@@ -267,18 +267,11 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
               .replace(/([?&]host=)[^&#]+/, '$1gateway.icloud.com');
           }
 
-          let title = '';
-          if (matchedServer?.name) {
-            title = formatRemark(matchedServer.name, 'Reality');
-          } else {
-            const hashMatch = rawVless.match(/#(.+)$/);
-            const rawTag = hashMatch ? decodeURIComponent(hashMatch[1]) : '';
-            if (rawTag && !rawTag.includes('@') && !rawTag.startsWith('user_')) {
-              title = formatRemark(rawTag.replace(/^izinet_/, ''));
-            } else {
-              title = formatRemark('Reality');
-            }
-          }
+          const portMatch = rawVless.match(/:(\d+)\?/);
+          const port = portMatch ? portMatch[1] : '';
+          const protoSuffix = rawVless.includes('type=grpc') ? 'gRPC' : (rawVless.includes('type=xhttp') ? 'XHTTP' : (port === '443' ? 'Reality' : `Reality_${port}`));
+          const serverBaseName = matchedServer?.name || 'OneD';
+          const title = formatRemark(serverBaseName, protoSuffix);
           finalLinks.push(rawVless.replace(/(#.*)?$/, `#${title}`));
         }
       }
