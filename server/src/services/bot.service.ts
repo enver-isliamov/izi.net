@@ -35,9 +35,11 @@ export class BotService {
       .catch(e => console.warn('[BotService] getMe failed:', e.message));
 
     this.bot.start((ctx) => this.handleStart(ctx));
+    this.bot.command('vpn', (ctx) => this.handleVpn(ctx));
 
     this.bot.action('action_status', (ctx) => this.handleStatus(ctx));
-    this.bot.action('action_help', (ctx) => ctx.reply('❓ Инструкция:\n1. Скачайте приложение Hiddify, V2Box или AmneziaVPN.\n2. В личном кабинете на сайте скопируйте ссылку подписки или скачайте .conf файл.\n3. Вставьте ссылку в приложение или импортируйте файл в роутер.'));
+    this.bot.action('action_vpn', (ctx) => this.handleVpn(ctx));
+    this.bot.action('action_help', (ctx) => ctx.reply('❓ Инструкция:\n1. Для максимальной стабильности в РФ используйте AmneziaWG (скачайте в App Store / Google Play).\n2. Нажмите «📥 Подключить VPN (РФ)» в меню или отправьте команду /vpn для получения конфига.\n3. Также поддерживаются Hiddify, V2Box, Streisand.'));
     this.bot.action('action_support', (ctx) => ctx.reply('🎧 Поддержка izinet:\nНапишите ваш вопрос прямо сюда в чат, и оператор поддержки ответит вам в ближайшее время.'));
 
     // Поддержка: приём текстовых сообщений от пользователей боту
@@ -172,6 +174,7 @@ export class BotService {
     return ctx.reply('👋 Добро пожаловать в izinet!', {
       reply_markup: {
         inline_keyboard: [
+          [{ text: '📥 Подключить VPN (для РФ)', callback_data: 'action_vpn' }],
           [{ text: '📊 Статус подписки', callback_data: 'action_status' }],
           [{ text: '❓ Помощь', callback_data: 'action_help' }],
           [{ text: '🎧 Поддержка', callback_data: 'action_support' }]
@@ -208,6 +211,45 @@ export class BotService {
       ctx.reply(text);
     } catch (e) {
       ctx.reply('❌ Ошибка.');
+    }
+  }
+
+  private async handleVpn(ctx: Context) {
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return;
+
+    try {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, email, subscriptions(*)')
+        .eq('telegram_id', chatId)
+        .maybeSingle();
+
+      const hyLink = 'hysteria2://izinet-979d10ae638d84cac1e88e81f4b5fb5f@89.125.17.44:24433/?insecure=1&sni=izinet.online#izinet_Hysteria2_24433';
+
+      let message = '🛡 <b>Настройки VPN для обхода блокировок в РФ</b>\n\n';
+      message += '<b>1. AmneziaWG (Рекомендуется — 100% стабильность):</b>\n';
+      message += '• Скачайте приложение <b>AmneziaWG</b> (с логотипом щита WG).\n';
+      message += '• Нажмите «+» ➜ «Сканировать QR-код» или добавьте файл конфигурации.\n\n';
+      message += '<b>2. Hysteria 2 (для Hiddify):</b>\n';
+      message += `<code>${hyLink}</code>\n\n`;
+      message += '<i>(Скопируйте ссылку выше и вставьте в Hiddify через «+» ➜ «Добавить из буфера»)</i>';
+
+      const subId = userData?.subscriptions?.[0]?.id;
+      if (subId) {
+        message += `\n\n🔗 Ваша веб-подписка:\n<code>https://izinet.online/api/sub/${subId}</code>`;
+      }
+
+      await ctx.reply(message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '❓ Инструкция по настройке', callback_data: 'action_help' }]
+          ]
+        }
+      });
+    } catch (e: any) {
+      ctx.reply('❌ Ошибка при получении конфигурации: ' + (e?.message || 'попробуйте позже'));
     }
   }
 
