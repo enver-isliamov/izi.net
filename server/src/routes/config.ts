@@ -254,11 +254,11 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
           const matchedServer = findMatchingServer(rawVless);
           const activeHost = matchedServer?.domain || matchedServer?.ip || 'izinet.online';
 
-          // Heal blocked/mismatched SNI in cached links (e.g. www.cloudflare.com)
-          if (rawVless.includes('sni=www.cloudflare.com') || rawVless.includes('sni=www.microsoft.com')) {
+          // Heal blocked/mismatched SNI in cached links to use Russian-unblocked Apple SNI
+          if (rawVless.includes('security=reality')) {
             rawVless = rawVless
-              .replace(/([?&]sni=)[^&#]+/, `$1${activeHost}`)
-              .replace(/([?&]host=)[^&#]+/, `$1${activeHost}`);
+              .replace(/([?&]sni=)[^&#]+/, '$1gateway.icloud.com')
+              .replace(/([?&]host=)[^&#]+/, '$1gateway.icloud.com');
           }
 
           let title = '';

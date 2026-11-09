@@ -269,20 +269,20 @@ export class XUIService {
         const rs = reality.settings || reality;
         const network = String(stream.network || 'tcp').toLowerCase();
 
-        // 1. Проверяем и задаем serverNames совпадающие с сертификатом Fallback (izinet.online)
+        // 1. Проверяем и задаем serverNames с незаблокированными в РФ доменами маскировки Apple
         const currentNames: string[] = Array.isArray(reality.serverNames) ? reality.serverNames : [];
         const hasBlockedSni = currentNames.some(n => typeof n !== 'string' || n.includes('cloudflare') || n.trim() !== n);
-        if (hasBlockedSni || currentNames.length === 0) {
-          reality.serverNames = ['izinet.online', 'www.izinet.online'];
-          if (rs) rs.serverName = 'izinet.online';
+        if (hasBlockedSni || currentNames.length === 0 || !currentNames.includes('gateway.icloud.com')) {
+          reality.serverNames = ['gateway.icloud.com', 'swdist.apple.com', 'izinet.online', 'www.izinet.online'];
+          if (rs) rs.serverName = 'gateway.icloud.com';
           changed = true;
-          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен на izinet.online`);
+          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен на gateway.icloud.com`);
         }
 
         // 2. target / dest
         for (const k of ['dest', 'target']) {
-          if (!reality[k] || String(reality[k]).includes('microsoft') || String(reality[k]).includes('google')) {
-            reality[k] = 'host.docker.internal:3443';
+          if (!reality[k] || !String(reality[k]).includes('gateway.icloud.com')) {
+            reality[k] = 'gateway.icloud.com:443';
             changed = true;
           }
         }
