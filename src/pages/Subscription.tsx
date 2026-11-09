@@ -459,30 +459,56 @@ export default function Subscription() {
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
-                        {String(device.serverType || '').toUpperCase() === 'AWG' && (
-                          <Button
-                            size="sm"
-                            className="flex-1 sm:flex-none bg-emerald-500 text-black hover:bg-emerald-400 rounded-lg text-xs"
-                            onClick={() => handleDownloadAwg(device.id)}
+                        {String(device.serverType || '').toUpperCase() === 'AWG' ? (
+                          <>
+                            <Button
+                              size="sm"
+                              className="flex-1 sm:flex-none bg-emerald-500 text-black hover:bg-emerald-400 rounded-lg text-xs"
+                              onClick={() => handleDownloadAwg(device.id)}
+                            >
+                              Скачать файл
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="secondary" 
+                              className="flex-1 sm:flex-none rounded-lg text-xs" 
+                              onClick={async () => {
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  const res = await fetch(`/api/user/awg/devices/${device.id}/config`, {
+                                    headers: { Authorization: `Bearer ${session?.access_token}` }
+                                  });
+                                  const conf = await res.text();
+                                  const success = await copyToClipboard(conf || device.config);
+                                  if (success) {
+                                    toast.success(`Конфиг AmneziaWG скопирован (${devLabel})`);
+                                  }
+                                } catch (e) {
+                                  copyToClipboard(device.config || '');
+                                  toast.success(`Конфиг скопирован (${devLabel})`);
+                                }
+                              }}
+                            >
+                              Копировать
+                            </Button>
+                          </>
+                        ) : (
+                          <Button 
+                            size="sm" 
+                            variant="secondary" 
+                            className="flex-1 sm:flex-none rounded-lg text-xs" 
+                            onClick={async () => {
+                              const success = await copyToClipboard(device.config || device.v2ray_config);
+                              if (success) {
+                                toast.success(`Ключ скопирован (${devLabel})`);
+                              } else {
+                                toast.error("Ошибка копирования");
+                              }
+                            }}
                           >
-                            Скачать файл
+                            Копировать
                           </Button>
                         )}
-                        <Button 
-                          size="sm" 
-                          variant="secondary" 
-                          className="flex-1 sm:flex-none rounded-lg text-xs" 
-                          onClick={async () => {
-                            const success = await copyToClipboard(device.config || device.v2ray_config);
-                            if (success) {
-                              toast.success(`Ключ скопирован (${devLabel})`);
-                            } else {
-                              toast.error("Ошибка копирования");
-                            }
-                          }}
-                        >
-                          Копировать
-                        </Button>
                         <Button 
                           size="sm" 
                           className="flex-1 sm:flex-none bg-primary text-black hover:bg-primary/90 rounded-lg text-xs" 

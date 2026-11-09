@@ -789,6 +789,32 @@ export default function Dashboard() {
                               size="sm" 
                               variant="secondary" 
                               className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
+                              title="Скопировать ссылку для приложения AmneziaWG (awg://)"
+                              onClick={async () => {
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  const res = await axios.get('/api/user/awg-subscription', {
+                                    headers: { Authorization: `Bearer ${session?.access_token}` }
+                                  });
+                                  const link = res.data?.awgUrl || res.data?.wireguardUrl || '';
+                                  if (link) {
+                                    const success = await copyToClipboard(link);
+                                    if (success) toast.success(`Ссылка AmneziaWG скопирована (${device.label})`);
+                                  } else {
+                                    toast.error('Ссылка недоступна');
+                                  }
+                                } catch (e) {
+                                  toast.error('Не удалось получить ссылку AmneziaWG');
+                                }
+                              }}
+                            >
+                              <Copy className="w-3 h-3 mr-1 opacity-60" /> Ссылка
+                            </Button>
+
+                            <Button 
+                              size="sm" 
+                              variant="secondary" 
+                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
                               title="Скопировать текст конфигурации"
                               onClick={async () => {
                                 try {
