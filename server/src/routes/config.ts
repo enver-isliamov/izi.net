@@ -286,10 +286,10 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
         if (activeServers.length > 0) {
           for (const server of activeServers) {
             const host = server.domain || server.ip || '89.125.17.44';
-            finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
+            finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
           }
         } else {
-          finalLinks.push(`hysteria2://${hyPassword}@89.125.17.44:24433?insecure=1&sni=izinet.online#izinet_Hysteria2`);
+          finalLinks.push(`hysteria2://${hyPassword}@89.125.17.44:24433?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
         }
       }
     } catch (e: any) {
