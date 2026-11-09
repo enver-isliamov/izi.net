@@ -296,21 +296,9 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
     }
 
-    // 3. Add AmneziaWG (WireGuard Anti-DPI) links if universal subscription
-    if (!isSpecificDevice) {
-      try {
-        const userIdentifier = userEmail || sub.user_id || sub.id;
-        const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, `izinet_${safeUserTag}_AmneziaWG`);
-        if (awgData?.wireguardUrl) {
-          finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG`));
-        }
-        if (awgData?.awgUrl) {
-          finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#izinet_AmneziaWG_Native`));
-        }
-      } catch (e: any) {
-        console.warn(`⚠️ [SUB] AmneziaWG link creation skipped: ${e.message}`);
-      }
-    }
+    // 3. Add AmneziaWG (WireGuard Anti-DPI) links only for native AWG clients,
+    // as Hiddify/sing-box hangs when encountering custom awg:// or obfuscated wireguard:// in universal subs.
+    // AWG users receive their config via the dedicated .conf endpoint, the dashboard button, or Telegram.
 
     // Deduplicate exact duplicate lines
     const uniqueLinks = [...new Set(finalLinks.filter(Boolean))];
