@@ -269,14 +269,14 @@ export class XUIService {
         const rs = reality.settings || reality;
         const network = String(stream.network || 'tcp').toLowerCase();
 
-        // 1. Проверяем и очищаем serverNames от microsoft.com и пробелов
+        // 1. Проверяем и задаем serverNames совпадающие с сертификатом Fallback (izinet.online)
         const currentNames: string[] = Array.isArray(reality.serverNames) ? reality.serverNames : [];
-        const hasBlockedSni = currentNames.some(n => typeof n !== 'string' || n.includes('microsoft') || n.includes('google') || n.trim() !== n);
+        const hasBlockedSni = currentNames.some(n => typeof n !== 'string' || n.includes('cloudflare') || n.trim() !== n);
         if (hasBlockedSni || currentNames.length === 0) {
-          reality.serverNames = ['www.cloudflare.com'];
-          if (rs) rs.serverName = 'www.cloudflare.com';
+          reality.serverNames = ['izinet.online', 'www.izinet.online'];
+          if (rs) rs.serverName = 'izinet.online';
           changed = true;
-          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен на www.cloudflare.com`);
+          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен на izinet.online`);
         }
 
         // 2. target / dest
@@ -475,7 +475,7 @@ export class XUIService {
           transportParams = `type=ws&path=${encodeURIComponent(wsPath)}&host=${encodeURIComponent(wsHost)}`;
         } else if (network === 'xhttp') {
           const xhttpPath = streamSettings.xhttpSettings?.path || '/xhttp';
-          const xhttpHost = streamSettings.xhttpSettings?.host || sni || 'www.cloudflare.com';
+          const xhttpHost = streamSettings.xhttpSettings?.host || sni || 'izinet.online';
           const xhttpMode = streamSettings.xhttpSettings?.mode || 'auto';
           transportParams = `type=xhttp&path=${encodeURIComponent(xhttpPath)}&host=${encodeURIComponent(xhttpHost)}&mode=${encodeURIComponent(xhttpMode)}`;
         } else if (network === 'grpc') {

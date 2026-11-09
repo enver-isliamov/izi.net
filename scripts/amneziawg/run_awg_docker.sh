@@ -3,13 +3,13 @@
 # AmneziaWG БЕЗ модуля ядра — запуск в контейнере (userspace amneziawg-go).
 # Использовать, если setup_awg.sh написал "No such device" (модуль ядра не собрался).
 # Запуск: bash scripts/amneziawg/run_awg_docker.sh
-# Результат: контейнер izinet-awg поднимает awg0, порт UDP 51820 на хосте.
+# Результат: контейнер izinet-awg поднимает awg0, порт UDP 48123 на хосте.
 # ============================================================================
 set -euo pipefail
 
 AWG_DIR="/etc/amnezia/amneziawg"
 IFACE="${AWG_IFACE:-awg0}"
-PORT="${AWG_PORT:-51820}"
+PORT="${AWG_PORT:-48123}"
 SUBNET="${AWG_SUBNET:-10.9.0}"
 NAME="izinet-awg"
 IMAGE="izinet-awg:local"

@@ -8,7 +8,7 @@ import sqlite3
 import time
 
 DB_PATH = os.environ.get("XUI_DB_PATH", "/opt/izinet/xui-db/x-ui.db")
-SAFE_SERVER_NAMES = ["www.cloudflare.com"]
+SAFE_SERVER_NAMES = ["izinet.online", "www.izinet.online"]
 # Резолверы без РФ (Яндекс DoH/DNS убраны — это российские адреса). Опроса A-записей достаточно:
 # IPv6-выход не нужен и только создаёт риск утечки мимо туннеля.
 SAFE_DNS_SERVERS = [
@@ -125,7 +125,7 @@ def default_stream_settings(private_key, public_key):
         "realitySettings": {
             "show": False,
             "xver": 0,
-            "dest": "www.cloudflare.com:443",
+            "dest": "host.docker.internal:3443",
             "serverNames": SAFE_SERVER_NAMES,
             "privateKey": private_key,
             "publicKey": public_key,
@@ -136,7 +136,7 @@ def default_stream_settings(private_key, public_key):
             "settings": {
                 "publicKey": public_key,
                 "fingerprint": "chrome",
-                "serverName": "www.microsoft.com",
+                "serverName": "izinet.online",
                 "spiderX": "/",
             },
         },
@@ -169,7 +169,7 @@ def normalize_reality(stream_settings):
         stream_settings["realitySettings"] = reality
         changed = True
     names = reality.get("serverNames")
-    if not isinstance(names, list) or not names or any("google" in str(name).lower() for name in names):
+    if not isinstance(names, list) or not names or any("google" in str(name).lower() or "cloudflare" in str(name).lower() for name in names):
         reality["serverNames"] = SAFE_SERVER_NAMES
         changed = True
     for key in ("dest", "target"):

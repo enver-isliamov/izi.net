@@ -13,7 +13,7 @@ set -euo pipefail
 
 AWG_DIR="/etc/amnezia/amneziawg"
 IFACE="awg0"
-PORT="${AWG_PORT:-51820}"
+PORT="${AWG_PORT:-48123}"
 SERVER_JSON="${AWG_DIR}/izinet-server.json"
 
 echo "=== 0/9 Подготовка системы ==="

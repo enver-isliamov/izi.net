@@ -249,9 +249,18 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
           }
         }
 
-        // Format each VLESS link with proper server name
-        for (const rawVless of collectedVless) {
+        // Format each VLESS link with proper server name and heal outdated/blocked SNIs
+        for (let rawVless of collectedVless) {
           const matchedServer = findMatchingServer(rawVless);
+          const activeHost = matchedServer?.domain || matchedServer?.ip || 'izinet.online';
+
+          // Heal blocked/mismatched SNI in cached links (e.g. www.cloudflare.com)
+          if (rawVless.includes('sni=www.cloudflare.com') || rawVless.includes('sni=www.microsoft.com')) {
+            rawVless = rawVless
+              .replace(/([?&]sni=)[^&#]+/, `$1${activeHost}`)
+              .replace(/([?&]host=)[^&#]+/, `$1${activeHost}`);
+          }
+
           let title = '';
           if (matchedServer?.name) {
             title = formatRemark(matchedServer.name, 'Reality');

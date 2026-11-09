@@ -202,7 +202,7 @@ function readServerFromConfFile(): AwgServer | null {
       interface: IFACE,
       public_key: pub,
       private_key: priv || undefined,
-      port: Number(get('ListenPort')) || 51820,
+      port: Number(get('ListenPort')) || 48123,
       subnet: subnetBase(get('Address').replace(/\/.*$/, '')),
       jc: Number(get('Jc')) || 4,
       jmin: Number(get('Jmin')) || 50,
@@ -268,15 +268,15 @@ export class AwgService {
         return {
           available: false,
           message: 'Интерфейс AmneziaWG не активен на хосте. Запустите bash scripts/amneziawg/setup_awg.sh по SSH',
-          port: server?.port || 51820,
+          port: server?.port || 48123,
           peers,
           subnet: server?.subnet || '10.9.0'
         };
       }
-      return { available: true, message: 'AmneziaWG работает', port: server?.port || 51820, peers, subnet: server?.subnet || '10.9.0' };
+      return { available: true, message: 'AmneziaWG работает', port: server?.port || 48123, peers, subnet: server?.subnet || '10.9.0' };
     } catch (e: any) {
       const server = this.readServer();
-      return { available: false, message: 'Проверка AmneziaWG: ' + e.message, port: server?.port || 51820, subnet: server?.subnet || '10.9.0' };
+      return { available: false, message: 'Проверка AmneziaWG: ' + e.message, port: server?.port || 48123, subnet: server?.subnet || '10.9.0' };
     }
   }
 
@@ -301,7 +301,7 @@ export class AwgService {
     return {
       interface: IFACE,
       public_key: process.env.AWG_PUBLIC_KEY || 'izinetAwgServerPublicKeyMock1234567890=',
-      port: Number(process.env.AWG_PORT) || 51820,
+      port: Number(process.env.AWG_PORT) || 48123,
       subnet: '10.9.0',
       jc: 4, jmin: 50, jmax: 1000,
       s1: 64, s2: 128,
@@ -341,7 +341,7 @@ export class AwgService {
       interface: IFACE,
       public_key: keypair.pub,
       private_key: keypair.priv,
-      port: Number(process.env.AWG_PORT) || 51820,
+      port: Number(process.env.AWG_PORT) || 48123,
       subnet: '10.9.0',
       jc: 4,
       jmin: 50,

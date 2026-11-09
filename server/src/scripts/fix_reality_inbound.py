@@ -17,7 +17,7 @@ if not os.path.exists(DB_PATH):
         DB_PATH = os.path.abspath(alt)
 
 TARGET_PORT = 443
-CORRECT_SERVER_NAMES = ["www.cloudflare.com"]
+CORRECT_SERVER_NAMES = ["izinet.online", "www.izinet.online"]
 CORRECT_TARGET = "host.docker.internal:3443"
 CORRECT_FINGERPRINT = "chrome"
 
