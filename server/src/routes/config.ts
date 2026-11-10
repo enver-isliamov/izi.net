@@ -339,7 +339,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('profile-title', `izinet.online${userEmail ? ' ' + userEmail : ''}`);
     res.setHeader('profile-web-page-url', 'https://izinet.online');
-    res.setHeader('profile-update-interval', '1');
+    res.setHeader('profile-update-interval', '24');
     res.setHeader('Content-Disposition', 'inline; filename="izinet.txt"');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));
     res.send(base64Config);
