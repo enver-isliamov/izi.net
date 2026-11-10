@@ -196,6 +196,29 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     };
 
     // 1. Process devices
+    // 1. Provider-specific WS fallback for ISPs that block the direct VPS IP.
+    // Placed first so unblocked CDN nodes are the primary default in clients.
+    try {
+      const { data: wsFallback } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'WS_FALLBACK_LINK')
+        .maybeSingle();
+      const rawWs = (wsFallback?.value || '').trim();
+      if (rawWs) {
+        for (const line of rawWs.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('vless://')) {
+            const hasTag = trimmed.includes('#');
+            finalLinks.push(hasTag ? trimmed : `${trimmed}#izinet_WS_Fallback`);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ [SUB] WS fallback skipped: ${e.message}`);
+    }
+
+    // 2. Add VLESS Reality / AWG device links
     for (const device of devices) {
       const isAwgDevice = String(device.serverType).toUpperCase() === 'AWG' || String(device.serverType).toUpperCase() === 'ROUTER';
 
@@ -294,28 +317,6 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       }
     } catch (e: any) {
       console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
-    }
-
-    // 3. Provider-specific WS fallback for ISPs that block the direct VPS IP.
-    // Supports multiple newline-separated fallback links in settings.WS_FALLBACK_LINK
-    try {
-      const { data: wsFallback } = await supabase
-        .from('settings')
-        .select('value')
-        .eq('key', 'WS_FALLBACK_LINK')
-        .maybeSingle();
-      const rawWs = (wsFallback?.value || '').trim();
-      if (rawWs) {
-        for (const line of rawWs.split('\n')) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('vless://')) {
-            const hasTag = trimmed.includes('#');
-            finalLinks.push(hasTag ? trimmed : `${trimmed}#izinet_WS_Fallback`);
-          }
-        }
-      }
-    } catch (e: any) {
-      console.warn(`⚠️ [SUB] WS fallback skipped: ${e.message}`);
     }
 
     // 4. Add AmneziaWG (WireGuard Anti-DPI) links only for native AWG clients,
