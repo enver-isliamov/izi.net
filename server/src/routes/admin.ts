@@ -28,7 +28,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   ENOT_SECRET_KEY2: process.env.ENOT_SECRET_KEY2 || process.env.ENOT_SECRET_KEY || '',
   PROMO_CODES_ENABLED: 'true',
   PROMO_CODES_LIST: '',
-  UNIVERSAL_LINK_STATUS: 'all'
+  UNIVERSAL_LINK_STATUS: 'all',
+  WS_FALLBACK_LINK: process.env.WS_FALLBACK_LINK || ''
 };
 
 const isMissingTableError = (err?: { code?: string; message?: string } | null) =>

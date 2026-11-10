@@ -1,0 +1,13 @@
+[Unit]
+Description=IZINET Xray WS inbound
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/izinet/bin/xray-linux-amd64 -c /opt/izinet/ws-inbound/config.json
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

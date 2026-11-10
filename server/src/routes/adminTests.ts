@@ -205,16 +205,23 @@ router.get('/tests', adminOnly, async (_req, res) => {
           const vlessCount = lines.filter(l => l.startsWith('vless://')).length;
           const hyCount = lines.filter(l => l.startsWith('hysteria2://')).length;
           const awgCount = lines.filter(l => l.startsWith('wireguard://') || l.startsWith('awg://')).length;
+          const wsCount = lines.filter(l => l.includes('type=ws')).length;
 
           const hasColls = new Set(lines).size !== lines.length;
 
           push('Подписки (E2E)', 'sub-api-endpoint', 'Генерация /api/sub/:id (Base64)', 'ok',
-            `Узлов: ${lines.length} (VLESS: ${vlessCount}, Hy2: ${hyCount}, AWG: ${awgCount})`, Date.now() - t);
+            `Узлов: ${lines.length} (VLESS: ${vlessCount}, Hy2: ${hyCount}, AWG: ${awgCount}, WS: ${wsCount})`, Date.now() - t);
 
           if (hasColls) {
             push('Подписки (E2E)', 'sub-collisions', 'Уникальность узлов в подписке', 'warn', 'обнаружены дублирующие строки конфигурации');
           } else {
             push('Подписки (E2E)', 'sub-collisions', 'Уникальность узлов в подписке', 'ok', 'все имена и ссылки уникальны');
+          }
+
+          if (wsCount > 0) {
+            push('Подписки (E2E)', 'sub-ws-fallback', 'WS-fallback для обхода блокировок IP', 'ok', `Активен (${wsCount} узел type=ws)`);
+          } else {
+            push('Подписки (E2E)', 'sub-ws-fallback', 'WS-fallback для обхода блокировок IP', 'warn', 'резервный WS-узел отсутствует в выдаче');
           }
         } else {
           push('Подписки (E2E)', 'sub-api-endpoint', 'Генерация /api/sub/:id (Base64)', 'fail', `HTTP ${subResp.status}`);

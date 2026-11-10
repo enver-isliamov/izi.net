@@ -140,7 +140,7 @@ async function regenerateAllVlessLinks() {
     const { getXuiForServer } = await import('./services/xui.service');
     const { parseVpnDevices, getPublishedVlessPorts } = await import('./utils/vpn');
 
-    const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited']);
+    const { data: subs } = await supabase.from('subscriptions').select('*').in('status', ['active', 'limited', 'trial']);
     if (!subs || subs.length === 0) return;
 
     const { data: activeServers } = await supabase.from('vpn_servers').select('*').eq('is_active', true);

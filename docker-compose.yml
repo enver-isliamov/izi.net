@@ -49,6 +49,7 @@ services:
     volumes:
       - ./xui-db:/etc/x-ui
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./bin/xray-linux-amd64:/app/bin/xray-linux-amd64:ro
     networks:
       - izinet-net
     healthcheck:

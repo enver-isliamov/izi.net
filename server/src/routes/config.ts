@@ -177,7 +177,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     // Helper: Find server from host/ip in link
     const findMatchingServer = (link: string) => {
       const hostMatch = link.match(/@([^:/?#]+):/);
-      if (!hostMatch) return activeServers[0] || null;
+      if (!hostMatch) return null;
       const host = hostMatch[1].toLowerCase();
       const found = activeServers.find((s: any) => 
         (s.ip && s.ip.toLowerCase().includes(host)) ||
@@ -185,7 +185,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
         (s.public_host && s.public_host.toLowerCase() === host) ||
         (host === 'izinet.online' && (s.domain === 'vpn.izinet.online' || s.public_host === 'vpn.izinet.online'))
       );
-      return found || activeServers[0] || null;
+      return found || null;
     };
 
     // Helper: Clean remark format
@@ -282,20 +282,37 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
       const hyPassword = hySettings?.value;
       if (hyPassword) {
+        const defaultVpnHost = process.env.PUBLIC_HOST || 'vpn.izinet.online';
         if (activeServers.length > 0) {
           for (const server of activeServers) {
-            const host = server.domain || server.ip || '89.125.17.44';
+            const host = server.domain || server.public_host || server.ip || defaultVpnHost;
             finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
           }
         } else {
-          finalLinks.push(`hysteria2://${hyPassword}@89.125.17.44:24433?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
+          finalLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:24433?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
         }
       }
     } catch (e: any) {
       console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
     }
 
-    // 3. Add AmneziaWG (WireGuard Anti-DPI) links only for native AWG clients,
+    // 3. Provider-specific WS fallback for ISPs that block the direct VPS IP.
+    // The link is maintained by the izinet-ws-tunnel service on the VM.
+    try {
+      const { data: wsFallback } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'WS_FALLBACK_LINK')
+        .maybeSingle();
+      const wsLink = (wsFallback?.value || '').trim();
+      if (wsLink.startsWith('vless://')) {
+        finalLinks.push(wsLink.replace(/(#.*)?$/, '#izinet_WS_Fallback'));
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ [SUB] WS fallback skipped: ${e.message}`);
+    }
+
+    // 4. Add AmneziaWG (WireGuard Anti-DPI) links only for native AWG clients,
     // as Hiddify/sing-box hangs when encountering custom awg:// or obfuscated wireguard:// in universal subs.
     // AWG users receive their config via the dedicated .conf endpoint, the dashboard button, or Telegram.
 
@@ -312,7 +329,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('profile-title', `izinet.online${userEmail ? ' ' + userEmail : ''}`);
     res.setHeader('profile-web-page-url', 'https://izinet.online');
-    res.setHeader('profile-update-interval', '6');
+    res.setHeader('profile-update-interval', '1');
     res.setHeader('Content-Disposition', 'inline; filename="izinet.txt"');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));
     res.send(base64Config);

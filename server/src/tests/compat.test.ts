@@ -152,6 +152,8 @@ test('контракт подписки: base64-строка из строк-с�
   assert.ok(configSrc.includes('wireguardUrl') && configSrc.includes('awgUrl'), 'подписка не добавляет AWG-ссылки');
   assert.ok(awgSrc.includes('wireguard://') && awgSrc.includes('awg://'), 'не собираются wireguard:// и awg:// ссылки');
   assert.ok(configSrc.includes("Buffer.from(outputText).toString('base64')"), 'подписка не в base64');
+  assert.ok(configSrc.includes('WS_FALLBACK_LINK'), 'config.ts не читает WS_FALLBACK_LINK из настроек');
+  assert.ok(configSrc.includes('izinet_WS_Fallback'), 'config.ts не задает корректный тег izinet_WS_Fallback');
 });
 
 test('выдача .conf пользователю пересобирает файл из реестра (а не отдаёт устаревшую копию из БД)', () => {

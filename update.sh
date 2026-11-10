@@ -108,20 +108,24 @@ OLD_REV="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 NEW_REV="$OLD_REV"
 
 if (( ! SKIP_GIT )); then
+  CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   if (( DRY_RUN )); then
-    log "[dry-run] git fetch origin main && git reset --hard origin/main"
+    log "[dry-run] git fetch origin $CURRENT_BRANCH && git pull --ff-only origin $CURRENT_BRANCH"
   else
     if ! git diff --quiet || ! git diff --cached --quiet; then
       die "В репозитории есть локальные изменения tracked-файлов. Сделайте commit/stash или используйте --skip-git."
     fi
-    git fetch origin main
-    NEW_REV="$(git rev-parse --short origin/main)"
+    git fetch origin "$CURRENT_BRANCH"
+    NEW_REV="$(git rev-parse --short "origin/$CURRENT_BRANCH" 2>/dev/null || git rev-parse --short HEAD)"
     if [[ "$OLD_REV" = "$NEW_REV" ]] && (( ! FORCE )); then
-      ok "Код уже на $NEW_REV; пересборка не нужна (--force чтобы пересобрать)"
+      ok "Код уже на $NEW_REV (ветка $CURRENT_BRANCH); пересборка не нужна (--force чтобы пересобрать)"
       exit 0
     fi
-    git reset --hard origin/main
-    ok "Код: $OLD_REV → $NEW_REV"
+    git pull --ff-only origin "$CURRENT_BRANCH" || {
+      warn "Fast-forward не удался. Проверяю ветку..."
+      git reset --hard "origin/$CURRENT_BRANCH"
+    }
+    ok "Код ($CURRENT_BRANCH): $OLD_REV → $NEW_REV"
   fi
 fi
 
@@ -190,6 +194,18 @@ if (( ! DRY_RUN )); then
     log "Проверяю NAT AmneziaWG..."
     bash scripts/amneziawg/ensure_awg_nat.sh || warn "AWG NAT не применён; проверьте scripts/amneziawg/diagnose_awg.sh"
   fi
+
+  # WS Fallback: проверка активности службы Xray WS
+  if systemctl is-active --quiet izinet-ws.service 2>/dev/null; then
+    ok "Служба izinet-ws активна"
+  elif [[ -f /etc/systemd/system/izinet-ws.service ]]; then
+    log "Перезапуск службы izinet-ws..."
+    systemctl restart izinet-ws.service || warn "Не удалось перезапустить izinet-ws"
+  fi
+
+  # Xray: проверка закреплённой версии в x3-ui
+  XRAY_VER="$(docker exec "$PANEL_CONTAINER" /app/bin/xray-linux-amd64 version 2>/dev/null | head -1 || echo unknown)"
+  ok "Панель x3-ui: $XRAY_VER"
 else
   log "[dry-run] curl health loop + ensure_awg_nat.sh"
 fi

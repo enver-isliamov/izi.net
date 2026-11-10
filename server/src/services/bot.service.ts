@@ -225,7 +225,8 @@ export class BotService {
         .eq('telegram_id', chatId)
         .maybeSingle();
 
-      const hyLink = 'hysteria2://izinet-979d10ae638d84cac1e88e81f4b5fb5f@89.125.17.44:24433/?insecure=1&sni=izinet.online#izinet_Hysteria2_24433';
+      const vpnHost = process.env.PUBLIC_HOST || 'vpn.izinet.online';
+      const hyLink = `hysteria2://izinet-979d10ae638d84cac1e88e81f4b5fb5f@${vpnHost}:24433/?insecure=1&sni=${vpnHost}#izinet_Hysteria2_24433`;
 
       let message = '🛡 <b>Настройки VPN для обхода блокировок в РФ</b>\n\n';
       message += '<b>1. AmneziaWG (Рекомендуется — 100% стабильность):</b>\n';

@@ -1,0 +1,31 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 8080,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          { "id": "4a668db8-1558-4d46-9ff5-99487dc6632b", "flow": "" }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": { "path": "/izinet-ws" }
+      }
+    }
+  ],
+  "outbounds": [
+    { "protocol": "freedom", "tag": "direct" },
+    { "protocol": "blackhole", "tag": "blocked" }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      { "type": "field", "protocol": ["bittorrent"], "outboundTag": "blocked" }
+    ]
+  }
+}
