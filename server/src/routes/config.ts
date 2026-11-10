@@ -104,7 +104,8 @@ router.get('/universal-link-visible', async (req, res) => {
 
 router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscription/universal/:id', '/subscription/:id', '/universal/:id'], async (req, res) => {
   const { id } = req.params;
-  const { deviceId } = req.query;
+  const { deviceId, cdn, ws, mode } = req.query;
+  const isCdnOnly = cdn === '1' || ws === '1' || mode === 'cdn' || mode === 'ws';
 
   // Prevent routing collisions with static sub-routes
   if (['config', 'servers', 'sync-servers', 'sync-traffic', 'universal-link-visible'].includes(id)) {
@@ -218,105 +219,107 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       console.warn(`⚠️ [SUB] WS fallback skipped: ${e.message}`);
     }
 
-    // 2. Add VLESS Reality / AWG device links
-    for (const device of devices) {
-      const isAwgDevice = String(device.serverType).toUpperCase() === 'AWG' || String(device.serverType).toUpperCase() === 'ROUTER';
+    // 2. Add VLESS Reality / AWG device links (skipped in CDN-only mode to prevent Hiddify healthcheck drops)
+    if (!isCdnOnly) {
+      for (const device of devices) {
+        const isAwgDevice = String(device.serverType).toUpperCase() === 'AWG' || String(device.serverType).toUpperCase() === 'ROUTER';
 
-      if (isAwgDevice) {
-        // AmneziaWG device
-        try {
-          const userIdentifier = device.email || userEmail || sub.user_id || sub.id;
-          const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, formatRemark(device.label || 'AmneziaWG'));
-          if (awgData?.wireguardUrl) {
-            finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG')}`));
-          }
-          if (awgData?.awgUrl) {
-            finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG', 'Native')}`));
-          }
-        } catch (e: any) {
-          console.warn(`⚠️ [SUB] AWG device link error: ${e.message}`);
-        }
-      } else {
-        // VLESS Reality device
-        const collectedVless: string[] = [];
-
-        if (device.config) {
-          const lines = device.config.split('\n').map((l: string) => l.trim()).filter(Boolean);
-          for (const line of lines) {
-            if (line.startsWith('vless://')) {
-              collectedVless.push(line);
+        if (isAwgDevice) {
+          // AmneziaWG device
+          try {
+            const userIdentifier = device.email || userEmail || sub.user_id || sub.id;
+            const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, formatRemark(device.label || 'AmneziaWG'));
+            if (awgData?.wireguardUrl) {
+              finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG')}`));
             }
-          }
-        }
-
-        // If no VLESS links found in stored config, heal dynamically
-        if (collectedVless.length === 0 && activeServers.length > 0 && device.uuid && device.email) {
-          for (const server of activeServers) {
-            try {
-              const { instance, server: serverData } = await getXuiForServer(server.id);
-              const inbounds = await instance.getInbounds();
-              const pubPorts = await getPublishedVlessPorts();
-              const realityInbounds = inbounds.filter((ib: any) => {
-                try {
-                  const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
-                  return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
-                } catch { return false; }
-              });
-              for (const ri of realityInbounds) {
-                try {
-                  const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
-                  if (rawLink) {
-                    collectedVless.push(rawLink);
-                  }
-                } catch (e) {}
-              }
-            } catch (e) {}
-          }
-        }
-
-        // Format each VLESS link with proper server name and heal outdated/blocked SNIs
-        for (let rawVless of collectedVless) {
-          const matchedServer = findMatchingServer(rawVless);
-          const activeHost = matchedServer?.domain || matchedServer?.ip || 'vpn.izinet.online';
-
-          // Route node directly to VPS (vpn.izinet.online) to bypass Cloudflare CDN edge
-          const targetHost = (activeHost && activeHost !== 'izinet.online') ? activeHost : 'vpn.izinet.online';
-          rawVless = rawVless.replace(/@[^:/?#]+:/, `@${targetHost}:`);
-
-          // Heal blocked/mismatched SNI in cached links to use Russian-unblocked Apple SNI
-          if (rawVless.includes('security=reality')) {
-            rawVless = rawVless
-              .replace(/([?&]sni=)[^&#]+/, '$1gateway.icloud.com')
-              .replace(/([?&]host=)[^&#]+/, '$1gateway.icloud.com');
-          }
-
-          const portMatch = rawVless.match(/:(\d+)\?/);
-          const port = portMatch ? portMatch[1] : '';
-          const protoSuffix = rawVless.includes('type=grpc') ? 'gRPC' : (rawVless.includes('type=xhttp') ? 'XHTTP' : (port === '443' ? 'Reality' : `Reality_${port}`));
-          const serverBaseName = matchedServer?.name || 'OneD';
-          const title = formatRemark(serverBaseName, protoSuffix);
-          finalLinks.push(rawVless.replace(/(#.*)?$/, `#${title}`));
-        }
-      }
-    }
-
-    // 2. Add Hysteria 2 links for each active server (using port 24433 to bypass Russia UDP 443 QUIC drops)
-    try {
-      const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
-      const hyPassword = hySettings?.value;
-      if (hyPassword) {
-        const defaultVpnHost = process.env.PUBLIC_HOST || 'vpn.izinet.online';
-        if (activeServers.length > 0) {
-          for (const server of activeServers) {
-            const host = server.domain || server.public_host || server.ip || defaultVpnHost;
-            finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
+            if (awgData?.awgUrl) {
+              finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG', 'Native')}`));
+            }
+          } catch (e: any) {
+            console.warn(`⚠️ [SUB] AWG device link error: ${e.message}`);
           }
         } else {
-          finalLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:24433?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
+          // VLESS Reality device
+          const collectedVless: string[] = [];
+
+          if (device.config) {
+            const lines = device.config.split('\n').map((l: string) => l.trim()).filter(Boolean);
+            for (const line of lines) {
+              if (line.startsWith('vless://')) {
+                collectedVless.push(line);
+              }
+            }
+          }
+
+          // If no VLESS links found in stored config, heal dynamically
+          if (collectedVless.length === 0 && activeServers.length > 0 && device.uuid && device.email) {
+            for (const server of activeServers) {
+              try {
+                const { instance, server: serverData } = await getXuiForServer(server.id);
+                const inbounds = await instance.getInbounds();
+                const pubPorts = await getPublishedVlessPorts();
+                const realityInbounds = inbounds.filter((ib: any) => {
+                  try {
+                    const ss = typeof ib.streamSettings === 'string' ? JSON.parse(ib.streamSettings) : (ib.streamSettings || {});
+                    return ss.security === 'reality' && ib.enable !== false && (!pubPorts || pubPorts.includes(ib.port));
+                  } catch { return false; }
+                });
+                for (const ri of realityInbounds) {
+                  try {
+                    const rawLink = await instance.getInboundLink(ri.id, device.uuid, device.email);
+                    if (rawLink) {
+                      collectedVless.push(rawLink);
+                    }
+                  } catch (e) {}
+                }
+              } catch (e) {}
+            }
+          }
+
+          // Format each VLESS link with proper server name and heal outdated/blocked SNIs
+          for (let rawVless of collectedVless) {
+            const matchedServer = findMatchingServer(rawVless);
+            const activeHost = matchedServer?.domain || matchedServer?.ip || 'vpn.izinet.online';
+
+            // Route node directly to VPS (vpn.izinet.online) to bypass Cloudflare CDN edge
+            const targetHost = (activeHost && activeHost !== 'izinet.online') ? activeHost : 'vpn.izinet.online';
+            rawVless = rawVless.replace(/@[^:/?#]+:/, `@${targetHost}:`);
+
+            // Heal blocked/mismatched SNI in cached links to use Russian-unblocked Apple SNI
+            if (rawVless.includes('security=reality')) {
+              rawVless = rawVless
+                .replace(/([?&]sni=)[^&#]+/, '$1gateway.icloud.com')
+                .replace(/([?&]host=)[^&#]+/, '$1gateway.icloud.com');
+            }
+
+            const portMatch = rawVless.match(/:(\d+)\?/);
+            const port = portMatch ? portMatch[1] : '';
+            const protoSuffix = rawVless.includes('type=grpc') ? 'gRPC' : (rawVless.includes('type=xhttp') ? 'XHTTP' : (port === '443' ? 'Reality' : `Reality_${port}`));
+            const serverBaseName = matchedServer?.name || 'OneD';
+            const title = formatRemark(serverBaseName, protoSuffix);
+            finalLinks.push(rawVless.replace(/(#.*)?$/, `#${title}`));
+          }
         }
       }
-    } catch (e: any) {
-      console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
+
+      // 3. Add Hysteria 2 links for each active server (using port 24433 to bypass Russia UDP 443 QUIC drops)
+      try {
+        const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
+        const hyPassword = hySettings?.value;
+        if (hyPassword) {
+          const defaultVpnHost = process.env.PUBLIC_HOST || 'vpn.izinet.online';
+          if (activeServers.length > 0) {
+            for (const server of activeServers) {
+              const host = server.domain || server.public_host || server.ip || defaultVpnHost;
+              finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
+            }
+          } else {
+            finalLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:24433?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
+          }
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
+      }
     }
 
     // 4. Add AmneziaWG (WireGuard Anti-DPI) links only for native AWG clients,
