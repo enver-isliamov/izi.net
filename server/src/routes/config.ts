@@ -297,16 +297,22 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     }
 
     // 3. Provider-specific WS fallback for ISPs that block the direct VPS IP.
-    // The link is maintained by the izinet-ws-tunnel service on the VM.
+    // Supports multiple newline-separated fallback links in settings.WS_FALLBACK_LINK
     try {
       const { data: wsFallback } = await supabase
         .from('settings')
         .select('value')
         .eq('key', 'WS_FALLBACK_LINK')
         .maybeSingle();
-      const wsLink = (wsFallback?.value || '').trim();
-      if (wsLink.startsWith('vless://')) {
-        finalLinks.push(wsLink.replace(/(#.*)?$/, '#izinet_WS_Fallback'));
+      const rawWs = (wsFallback?.value || '').trim();
+      if (rawWs) {
+        for (const line of rawWs.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('vless://')) {
+            const hasTag = trimmed.includes('#');
+            finalLinks.push(hasTag ? trimmed : `${trimmed}#izinet_WS_Fallback`);
+          }
+        }
       }
     } catch (e: any) {
       console.warn(`⚠️ [SUB] WS fallback skipped: ${e.message}`);
