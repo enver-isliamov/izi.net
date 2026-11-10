@@ -1,35 +1,57 @@
 import React from 'react';
-import { ShieldCheck, FileText, AlertTriangle } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { FileText, ArrowLeft } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 export default function Terms() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6 flex flex-col items-center">
-      <div className="w-full max-w-4xl space-y-8 animate-in fade-in duration-500">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center border border-primary/30">
-              <FileText className="text-primary w-5 h-5" />
+    <div className="min-h-screen bg-[#06080c] text-[#f1f4f7] p-4 sm:p-6 flex flex-col items-center relative overflow-hidden selection:bg-[#7bdcff]/30 selection:text-white">
+      {/* Background ambient lighting */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] bg-[radial-gradient(ellipse_at_top,rgba(13,23,34,0.6)_0%,transparent_65%)]" />
+      </div>
+
+      <div className="w-full max-w-4xl space-y-6 relative z-10 animate-in fade-in duration-500 py-6">
+        {/* Brand Header */}
+        <div className="flex items-center justify-between pb-6 border-b border-white/[0.08]">
+          <Link to="/" className="inline-flex items-center gap-2.5 group">
+            <div className="relative w-8 h-8 rounded-full border border-cyan-400/60 shadow-[0_0_12px_rgba(123,220,255,0.35)] flex items-center justify-center bg-cyan-950/30 group-hover:border-cyan-300 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-[#8be5f0] shadow-[0_0_8px_#6ae6ff]" />
             </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-glow">Пользовательское соглашение и оферта</h1>
-              <p className="text-muted-foreground">Договор публичной оферты</p>
-            </div>
-          </div>
-          <Button variant="outline" onClick={() => navigate('/login')}>
-            Вернуться
+            <span className="text-xl font-bold tracking-tight text-white">
+              izi<span className="text-[#7bdcff]">net</span>
+            </span>
+          </Link>
+          <Button 
+            variant="outline" 
+            onClick={() => navigate(-1)}
+            className="bg-[#0e141b]/60 border-white/10 hover:bg-[#19232c] text-[#d6dce4] rounded-xl text-xs gap-1.5"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> Назад
           </Button>
         </div>
 
-        <Card className="glass-card border-primary/20">
+        {/* Page Title */}
+        <div className="flex items-center gap-3 pt-2">
+          <div className="w-10 h-10 bg-cyan-500/10 border border-cyan-500/20 rounded-2xl flex items-center justify-center text-[#7bdcff]">
+            <FileText className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-white">
+              Пользовательское соглашение и оферта
+            </h1>
+            <p className="text-xs sm:text-sm text-[#8d959f]">Договор публичной оферты</p>
+          </div>
+        </div>
+
+        <Card className="rounded-3xl border border-white/10 bg-[#0c1016]/90 p-2 sm:p-4 backdrop-blur-xl shadow-xl">
           <CardHeader>
-            <CardTitle>1. Общие положения</CardTitle>
+            <CardTitle className="text-lg font-medium text-white">1. Общие положения</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+          <CardContent className="space-y-4 text-sm text-[#8d959f] leading-relaxed">
             <p>
               1.1. Настоящий документ представляет собой публичную оферту (далее — «Соглашение»). izinet (далее — «Сервис») является программным комплексом, предоставляющим интерфейс для управления сетевыми параметрами.
             </p>
@@ -45,11 +67,11 @@ export default function Terms() {
           </CardContent>
         </Card>
 
-        <Card className="glass-card border-primary/20">
+        <Card className="rounded-3xl border border-white/10 bg-[#0c1016]/90 p-2 sm:p-4 backdrop-blur-xl shadow-xl">
           <CardHeader>
-            <CardTitle>2. Предмет и момент оказания услуги</CardTitle>
+            <CardTitle className="text-lg font-medium text-white">2. Предмет и момент оказания услуги</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+          <CardContent className="space-y-4 text-sm text-[#8d959f] leading-relaxed">
             <p>
               2.1. Предметом Соглашения является предоставление права доступа к информационной инфраструктуре и генерации уникальных конфигурационных данных.
             </p>
@@ -57,81 +79,49 @@ export default function Terms() {
               2.2. Услуга считается полностью и надлежащим образом оказанной в момент предоставления доступа к Личному кабинету или генерации уникального ключа/файла. С этого момента обязательства Сервиса считаются выполненными за весь оплаченный период ввиду нематериального характера передаваемого контента.
             </p>
             <p>
-              2.3. Пользователь дает явное согласие на начало исполнения договора в момент оплаты и признает, что в связи с передачей цифрового контента он утрачивает право на отказ от договора (в соответствии с применимым законодательством о цифровых товарах).
-            </p>
-            <p>
-              2.4. Вся ответственность за использование предоставленных данных и инструментов возлагается исключительно на Пользователя.
+              2.3. Пользователь дает явное согласие на начало исполнения услуги немедленно после совершения оплаты и подтверждает, что осознает утрату права на безусловный отказ от договора с момента предоставления цифрового доступа.
             </p>
           </CardContent>
         </Card>
 
-        <Card className="glass-card border-primary/20">
+        <Card className="rounded-3xl border border-white/10 bg-[#0c1016]/90 p-2 sm:p-4 backdrop-blur-xl shadow-xl">
           <CardHeader>
-            <CardTitle>3. Ограничение ответственности (Disclaimer of Warranties and Liability)</CardTitle>
+            <CardTitle className="text-lg font-medium text-white">3. Ограничение ответственности и форс-мажор</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
-            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl mb-4">
-              <div className="flex items-center gap-2 text-destructive font-bold mb-2">
-                <AlertTriangle className="w-5 h-5" />
-                Отказ от ответственности
-              </div>
-              <p className="text-secondary-foreground text-xs leading-relaxed">
-                Администрация проекта, владельцы, разработчики и любые аффилированные лица полностью и безоговорочно снимают с себя любую юридическую, финансовую и иную ответственность за любые прямые, косвенные, случайные, штрафные или вытекающие убытки, потерю данных, прибыли или репутации, возникающие вследствие использования или невозможности использования Сервиса. 
-              </p>
-            </div>
+          <CardContent className="space-y-4 text-sm text-[#8d959f] leading-relaxed">
             <p>
-              3.1. Пользователь признает и соглашается, что весь риск, связанный с использованием Сервиса, лежит исключительно на нем. Ни при каких обстоятельствах администрация не несет ответственности за действия пользователя или третьих лиц в рамках использования Сервиса.
+              3.1. Администрация Сервиса не несет ответственности за перебои в работе, вызванные действиями третьих лиц, включая операторов связи, магистральных провайдеров, регуляторов, а также блокировками сетевых протоколов со стороны ТСПУ/РКН.
             </p>
             <p>
-              3.2. Мы не гарантируем бесперебойную работу, отсутствие ошибок, а также защиту от блокировок со стороны интернет-провайдеров, операторов связи, или органов государственной власти на любых территориях. Обход блокировок или фильтрации трафика не является предметом или гарантией данного соглашения.
-            </p>
-            <p>
-              3.3. Настоящее Соглашение регулируется принципами международного торгового права. Любые споры, возникающие из настоящего Соглашения или в связи с ним, подлежат разрешению исключительно путем электронных переговоров через официальные каналы поддержки Сервиса. В случае невозможности достижения согласия, спор подлежит рассмотрению в суде по месту регистрации владельца Сервиса (если применимо) или в Международном коммерческом арбитражном суде, в соответствии с правилами арбитража, исключая нормы коллизионного права и локальные законы о защите прав потребителей, в той мере, в какой это допустимо международным правом.
+              3.2. Максимальный размер совокупной ответственности Администрации по любым искам или претензиям ограничивается суммой, фактически уплаченной Пользователем за текущий расчетный период (1 месяц), предшествующий возникновению основания для претензии.
             </p>
           </CardContent>
         </Card>
 
-        <Card className="glass-card border-primary/20">
+        <Card className="rounded-3xl border border-white/10 bg-[#0c1016]/90 p-2 sm:p-4 backdrop-blur-xl shadow-xl">
           <CardHeader>
-            <CardTitle>4. Приостановка и прекращение доступа</CardTitle>
+            <CardTitle className="text-lg font-medium text-white">4. Приостановка и прекращение доступа</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+          <CardContent className="space-y-4 text-sm text-[#8d959f] leading-relaxed">
             <p>
-              4.1. Администрация имеет право приостановить или полностью прекратить доступ Пользователя к Сервису (заблокировать аккаунт) в любой момент без предварительного уведомления и объяснения причин, включая, но не ограничиваясь: подозрением в нарушении правил использования, совершением мошеннических действий, созданием чрезмерной нагрузки на инфраструктуру или по требованию платежных систем/регуляторов.
+              4.1. Администрация имеет право приостановить или полностью прекратить доступ Пользователя к Сервису при нарушении правил использования, совершении мошеннических действий или создании чрезмерной нагрузки на инфраструктуру.
             </p>
             <p>
-              4.2. В случае блокировки за нарушение условий Соглашения, возврат неиспользованных денежных средств не производится и считается штрафной санкцией в пользу Сервиса за нарушение условий оферты.
+              4.2. В случае блокировки за нарушение условий Соглашения, возврат неиспользованных денежных средств не производится.
             </p>
           </CardContent>
         </Card>
 
-        <Card className="glass-card border-primary/20">
+        <Card className="rounded-3xl border border-white/10 bg-[#0c1016]/90 p-2 sm:p-4 backdrop-blur-xl shadow-xl">
           <CardHeader>
-            <CardTitle>5. Заверения пользователя</CardTitle>
+            <CardTitle className="text-lg font-medium text-white">5. Заверения пользователя</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+          <CardContent className="space-y-4 text-sm text-[#8d959f] leading-relaxed">
             <p>
               5.1. Пользователь подтверждает, что использует Сервис исключительно в законных целях и обязуется не нарушать применимое законодательство, права третьих лиц или правила сетевой этики.
             </p>
             <p>
-              5.2. Пользователь осознает, что Сервис не осуществляет сбор, хранение и логгирование персонального пользовательского трафика (Zero-Logs Policy), в связи с чем не располагает данными для передачи третьим лицам по запросу.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card border-primary/20">
-          <CardHeader>
-            <CardTitle>6. Соответствие законодательству и делимость</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
-            <p>
-              6.1. Настоящее Соглашение действует в той мере, в какой оно не противоречит применимому законодательству страны проживания Пользователя. Компании осознает, что законы о защите прав потребителей некоторых юрисдикций могут иметь приоритет над частными договорами.
-            </p>
-            <p>
-              6.2. Если какое-либо положение настоящего Соглашения будет признано судом недействительным или не имеющим юридической силы, такое положение должно быть исключено из Соглашения, а остальные положения Соглашения сохраняют свою полную силу и действие.
-            </p>
-            <p>
-              6.3. Пользователь соглашается с тем, что Сервис предоставляет доступ к нематериальным цифровым ключам, и данный характер услуги является основанием для ограничения прав на возврат в соответствии с большинством международных норм (например, Directive 2011/83/EU в Европе).
+              5.2. Пользователь осознает, что Сервис не осуществляет сбор, хранение и логгирование персонального пользовательского трафика (Zero-Logs Policy).
             </p>
           </CardContent>
         </Card>

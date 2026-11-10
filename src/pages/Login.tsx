@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { ShieldCheck, Mail, Lock, ArrowRight, Send, Loader2, Sparkles } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Send, Loader2, Sparkles, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { motion } from 'motion/react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppConfig } from '@/hooks/useAppConfig';
 
@@ -58,15 +58,6 @@ export default function Login() {
     if (hash && (hash.includes('error=validation_failed') || hash.includes('Unsupported+provider') || hash.includes('provider_not_enabled'))) {
       toast.error('Авторизация через Google временно недоступна в Supabase. Воспользуйтесь Telegram или Email.', { duration: 7000 });
       window.history.replaceState(null, '', window.location.pathname);
-    }
-
-    // Сохраняем реферальный код
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref');
-    if (ref) {
-      setRefCode(ref);
-      sessionStorage.setItem('referral_code', ref);
-      localStorage.setItem('izinet_referral_code', ref);
     } else {
       const savedRef = sessionStorage.getItem('referral_code') || localStorage.getItem('izinet_referral_code');
       if (savedRef) setRefCode(savedRef);
@@ -179,18 +170,15 @@ export default function Login() {
     setIsLoading(true);
     const toastId = toast.loading('Подготовка входа через Telegram...');
     try {
-      // 1. Токен создаёт сервер под service-role
       const { data: startRes } = await axios.post('/api/user/auth/telegram/start', {});
       const token = startRes?.token;
       const targetBot = startRes?.botName || telegramBotName || 'izinet_bot';
       if (!token) throw new Error('Сервер не вернул токен входа');
 
-      // 2. Открываем бота со ссылкой подтверждения
       const link = `https://t.me/${targetBot}?start=${token}`;
       toast.success('Переходим в Telegram... Нажмите START в боте для входа', { id: toastId });
       window.open(link, '_blank');
 
-      // 3. Опрашиваем сервер: подтвердил ли пользователь вход в боте
       const startedAt = Date.now();
       let verifiedSuccessfully = false;
 
@@ -287,65 +275,75 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-[#06080c] text-[#f1f4f7] flex flex-col items-center justify-center p-4 relative overflow-hidden selection:bg-[#7bdcff]/30 selection:text-white">
+      {/* Background radial atmosphere */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] bg-[radial-gradient(ellipse_at_top,rgba(13,23,34,0.7)_0%,transparent_65%)]" />
+        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-[radial-gradient(circle,rgba(123,220,255,0.03)_0%,transparent_70%)] blur-[90px]" />
+      </div>
+
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md"
+        className="w-full max-w-md relative z-10 my-8"
       >
         {/* Brand Header */}
-        <div className="flex justify-center mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center neon-glow">
-              <ShieldCheck className="text-black w-8 h-8" />
+        <div className="flex flex-col items-center mb-6">
+          <Link to="/" className="inline-flex items-center gap-2.5 group mb-2">
+            <div className="relative w-8 h-8 rounded-full border border-cyan-400/60 shadow-[0_0_15px_rgba(123,220,255,0.35)] flex items-center justify-center bg-cyan-950/30 group-hover:border-cyan-300 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-[#8be5f0] shadow-[0_0_8px_#6ae6ff]" />
             </div>
-            <span className="text-3xl font-bold tracking-tight neon-text">izinet</span>
-          </div>
+            <span className="text-2xl font-bold tracking-tight text-white">
+              izi<span className="text-[#7bdcff]">net</span>
+            </span>
+          </Link>
+          <Link to="/" className="text-xs text-[#8d959f] hover:text-white transition-colors inline-flex items-center gap-1">
+            <ArrowLeft className="w-3.5 h-3.5" /> На главную страницу
+          </Link>
         </div>
 
-        <Card className="glass-card border-border/50 shadow-2xl relative overflow-hidden">
+        {/* Auth Card */}
+        <Card className="rounded-3xl border border-white/10 bg-[#0c1016]/90 p-2 sm:p-4 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.6)] relative overflow-hidden">
           <CardHeader className="pb-4 text-center">
-            <CardTitle className="text-2xl font-black tracking-tight text-white">
+            <CardTitle className="text-2xl font-medium tracking-tight text-white">
               {mode === 'forgot' ? 'Восстановление пароля' : (mode === 'register' ? 'Создать аккаунт' : 'Вход в izinet')}
             </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground">
+            <CardDescription className="text-xs text-[#8d959f]">
               {mode === 'forgot'
                 ? 'Введите ваш email для получения ссылки на сброс пароля'
-                : 'Быстрый вход в 1 клик через Telegram или классический по Email'}
+                : 'Быстрый вход через Telegram или по Email'}
             </CardDescription>
 
             {refCode && (
-              <div className="mt-2 p-2.5 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center gap-2 text-xs text-primary font-bold">
+              <div className="mt-2 p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/20 flex items-center justify-center gap-2 text-xs text-[#7bdcff] font-medium">
                 <Sparkles className="w-4 h-4 shrink-0" />
-                <span>Бонус 50₽ будет зачислен при первой авторизации!</span>
+                <span>Бонус 50 ₽ будет зачислен при первой авторизации!</span>
               </div>
             )}
           </CardHeader>
 
-          {/* ОСНОВНЫЕ СПОСОБЫ ВХОДА (TELEGRAM & GOOGLE) */}
+          {/* Быстрые способы входа (Telegram & Google) */}
           {mode !== 'forgot' && (
             <div className="px-6 pb-2 space-y-2.5">
-              {/* Кнопка 1: Telegram (Основной и рекомендуемый способ) */}
               <Button 
                 onClick={handleTelegramLogin}
                 disabled={isLoading}
                 type="button" 
-                className="w-full bg-[#0088cc] hover:bg-[#0088cc]/90 text-white font-bold rounded-xl h-12 gap-3 text-sm shadow-lg shadow-[#0088cc]/20 transition-all hover:scale-[1.01] active:scale-[0.99] border border-white/10"
+                className="w-full bg-[#0e1620] hover:bg-[#142232] text-[#7bdcff] border border-cyan-500/25 hover:border-cyan-400/40 hover:shadow-[0_0_20px_rgba(123,220,255,0.2)] font-medium rounded-xl h-11 gap-3 text-sm transition-all"
               >
                 <Send className="w-4 h-4 shrink-0" />
                 <span>Войти через Telegram</span>
-                <span className="ml-auto text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-white/20 text-white font-black tracking-wider">
+                <span className="ml-auto text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-[#7bdcff] border border-cyan-500/20">
                   Быстро
                 </span>
               </Button>
 
-              {/* Кнопка 2: Google */}
               <Button 
                 onClick={handleGoogleLogin}
                 disabled={isLoading}
                 type="button" 
-                variant="outline" 
-                className="w-full bg-white/[0.04] hover:bg-white/[0.08] border-white/10 hover:border-white/20 text-white font-semibold rounded-xl h-12 gap-3 text-xs shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99]"
+                variant="outline"
+                className="w-full bg-[#0e141b]/50 border-white/10 hover:bg-[#151c25] hover:border-white/20 text-[#d6dce4] rounded-xl h-11 gap-3 text-sm transition-all"
               >
                 <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -353,81 +351,92 @@ export default function Login() {
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
                 </svg>
-                <span>Продолжить с Google</span>
-                <span className="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-muted-foreground">
-                  1 клик
-                </span>
+                <span>Войти через Google</span>
               </Button>
 
-              {/* Разделитель */}
-              <div className="relative py-2.5">
+              <div className="relative py-2">
                 <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border/50" />
+                  <span className="w-full border-t border-white/5" />
                 </div>
-                <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-wider">
-                  <span className="bg-card px-3 text-muted-foreground">или по электронной почте</span>
+                <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
+                  <span className="bg-[#0c1016] px-3 text-[#59636f]">или по Email</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ФОРМА ПОЧТЫ (КОМПАКТНАЯ, БЕЗ ВКЛАДОК) */}
+          {/* Email форма */}
           <form onSubmit={mode === 'forgot' ? handleForgotPassword : (mode === 'register' ? handleRegister : handleLogin)}>
-            <CardContent className="space-y-3.5 pt-1">
+            <CardContent className="space-y-3.5">
+              {/* Email поле */}
               <div className="space-y-1">
+                <label className="text-xs font-medium text-[#8d959f]">Электронная почта</label>
                 <div className="relative">
-                  <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Ваш Email"
-                    type="email"
-                    aria-label="Email"
-                    className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 text-sm ${errors.email ? 'border-red-500' : ''}`}
+                  <Mail className="absolute left-3.5 top-3 w-4 h-4 text-[#59636f]" />
+                  <Input 
+                    type="email" 
+                    placeholder="name@example.com" 
                     value={email}
-                    onChange={(e) => { setEmail(e.target.value); setErrors(prev => ({ ...prev, email: '' })); }}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (errors.email) setErrors({ ...errors, email: '' });
+                    }}
+                    className={`pl-10 h-11 bg-[#080c12] border-white/10 rounded-xl text-white placeholder:text-[#59636f] focus:border-cyan-400 focus:ring-cyan-400/20 text-sm ${errors.email ? 'border-red-500/80' : ''}`}
+                    disabled={isLoading}
                   />
                 </div>
-                {errors.email && <p className="text-xs text-red-500 pl-1">{errors.email}</p>}
+                {errors.email && <p className="text-xs text-red-400 pl-1">{errors.email}</p>}
               </div>
 
+              {/* Password поле */}
               {mode !== 'forgot' && (
                 <div className="space-y-1">
+                  <label className="text-xs font-medium text-[#8d959f]">Пароль</label>
                   <div className="relative">
-                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      type="password"
-                      placeholder="Пароль"
-                      aria-label="Пароль"
-                      className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 text-sm ${errors.password ? 'border-red-500' : ''}`}
+                    <Lock className="absolute left-3.5 top-3 w-4 h-4 text-[#59636f]" />
+                    <Input 
+                      type="password" 
+                      placeholder="••••••••" 
                       value={password}
-                      onChange={(e) => { setPassword(e.target.value); setErrors(prev => ({ ...prev, password: '' })); }}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (errors.password) setErrors({ ...errors, password: '' });
+                      }}
+                      className={`pl-10 h-11 bg-[#080c12] border-white/10 rounded-xl text-white placeholder:text-[#59636f] focus:border-cyan-400 focus:ring-cyan-400/20 text-sm ${errors.password ? 'border-red-500/80' : ''}`}
+                      disabled={isLoading}
                     />
                   </div>
-                  {errors.password && <p className="text-xs text-red-500 pl-1">{errors.password}</p>}
+                  {errors.password && <p className="text-xs text-red-400 pl-1">{errors.password}</p>}
                 </div>
               )}
 
+              {/* Confirm Password поле */}
               {mode === 'register' && (
-                <div className="space-y-1 animate-in fade-in duration-200">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-[#8d959f]">Подтверждение пароля</label>
                   <div className="relative">
-                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      type="password"
-                      placeholder="Повторите пароль"
-                      aria-label="Повторите пароль"
-                      className={`pl-10 bg-muted/30 border-border focus:border-primary rounded-xl h-11 text-sm ${errors.confirmPassword ? 'border-red-500' : ''}`}
+                    <Lock className="absolute left-3.5 top-3 w-4 h-4 text-[#59636f]" />
+                    <Input 
+                      type="password" 
+                      placeholder="••••••••" 
                       value={confirmPassword}
-                      onChange={(e) => { setConfirmPassword(e.target.value); setErrors(prev => ({ ...prev, confirmPassword: '' })); }}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: '' });
+                      }}
+                      className={`pl-10 h-11 bg-[#080c12] border-white/10 rounded-xl text-white placeholder:text-[#59636f] focus:border-cyan-400 focus:ring-cyan-400/20 text-sm ${errors.confirmPassword ? 'border-red-500/80' : ''}`}
+                      disabled={isLoading}
                     />
                   </div>
-                  {errors.confirmPassword && <p className="text-xs text-red-500 pl-1">{errors.confirmPassword}</p>}
+                  {errors.confirmPassword && <p className="text-xs text-red-400 pl-1">{errors.confirmPassword}</p>}
                 </div>
               )}
 
-              {/* Главная кнопка действия */}
+              {/* Главная кнопка действия (Oxy glossy white) */}
               <Button 
                 type="submit" 
                 disabled={isLoading} 
-                className="w-full bg-primary text-black hover:bg-primary/90 rounded-xl h-11 font-bold text-sm neon-glow mt-1"
+                className="w-full bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] font-semibold hover:shadow-[0_0_25px_rgba(176,232,255,0.35)] hover:-translate-y-0.5 rounded-xl h-11 text-sm transition-all mt-2"
               >
                 {isLoading && <Loader2 className="animate-spin w-4 h-4 mr-2" />}
                 {mode === 'forgot'
@@ -436,8 +445,8 @@ export default function Login() {
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
 
-              {/* Плавные переключатели режимов (вместо громоздких вкладок) */}
-              <div className="pt-2 flex flex-col items-center gap-1.5 text-xs text-muted-foreground text-center">
+              {/* Переключатели режимов */}
+              <div className="pt-2 flex flex-col items-center gap-1.5 text-xs text-[#8d959f] text-center">
                 {mode === 'login' && (
                   <>
                     <div>
@@ -445,7 +454,7 @@ export default function Login() {
                       <button 
                         type="button" 
                         onClick={() => { setMode('register'); setErrors({}); }}
-                        className="text-primary hover:underline font-semibold"
+                        className="text-[#7bdcff] hover:underline font-medium"
                       >
                         Зарегистрироваться
                       </button>
@@ -454,7 +463,7 @@ export default function Login() {
                       <button 
                         type="button" 
                         onClick={() => { setMode('forgot'); setErrors({}); }}
-                        className="text-muted-foreground hover:text-white transition-colors"
+                        className="text-[#59636f] hover:text-white transition-colors"
                       >
                         Забыли пароль?
                       </button>
@@ -468,7 +477,7 @@ export default function Login() {
                     <button 
                       type="button" 
                       onClick={() => { setMode('login'); setErrors({}); }}
-                      className="text-primary hover:underline font-semibold"
+                      className="text-[#7bdcff] hover:underline font-medium"
                     >
                       Войти
                     </button>
@@ -480,7 +489,7 @@ export default function Login() {
                     <button 
                       type="button" 
                       onClick={() => { setMode('login'); setErrors({}); }}
-                      className="text-primary hover:underline font-semibold"
+                      className="text-[#7bdcff] hover:underline font-medium"
                     >
                       Вернуться ко входу
                     </button>
@@ -492,12 +501,12 @@ export default function Login() {
         </Card>
         
         {/* Footer links */}
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 text-xs text-muted-foreground">
-          <a href="/terms" className="hover:text-primary transition-colors">Пользовательское соглашение</a>
-          <span className="hidden sm:inline text-border">•</span>
-          <a href="/refund" className="hover:text-primary transition-colors">Политика возвратов</a>
-          <span className="hidden sm:inline text-border">•</span>
-          <a href="/privacy" className="hover:text-primary transition-colors">Политика конфиденциальности</a>
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-[#59636f]">
+          <Link to="/terms" className="hover:text-white transition-colors">Пользовательское соглашение</Link>
+          <span className="text-white/10">•</span>
+          <Link to="/refund" className="hover:text-white transition-colors">Политика возвратов</Link>
+          <span className="text-white/10">•</span>
+          <Link to="/privacy" className="hover:text-white transition-colors">Конфиденциальность</Link>
         </div>
       </motion.div>
     </div>

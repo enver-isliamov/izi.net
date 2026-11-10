@@ -6,26 +6,26 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-sans: 'Inter', sans-serif;
-    --color-primary: #00ff88;
-    --color-primary-foreground: #000000;
-    --color-background: #000000;
-    --color-foreground: #ffffff;
-    --color-card: #111111;
-    --color-card-foreground: #ffffff;
-    --color-popover: #111111;
-    --color-popover-foreground: #ffffff;
-    --color-secondary: #1a1a1a;
-    --color-secondary-foreground: #ffffff;
-    --color-muted: #1a1a1a;
-    --color-muted-foreground: #888888;
-    --color-accent: #1a1a1a;
-    --color-accent-foreground: #00ff88;
-    --color-destructive: #ff4444;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --color-primary: #7bdcff;
+    --color-primary-foreground: #0c1117;
+    --color-background: #06080c;
+    --color-foreground: #f1f4f7;
+    --color-card: #0c1016;
+    --color-card-foreground: #f1f4f7;
+    --color-popover: #0c1016;
+    --color-popover-foreground: #f1f4f7;
+    --color-secondary: #10151b;
+    --color-secondary-foreground: #f1f4f7;
+    --color-muted: #10151b;
+    --color-muted-foreground: #8d959f;
+    --color-accent: #11161f;
+    --color-accent-foreground: #7bdcff;
+    --color-destructive: #ff5252;
     --color-destructive-foreground: #ffffff;
-    --color-border: #222222;
-    --color-input: #222222;
-    --color-ring: #00ff88;
+    --color-border: rgba(255, 255, 255, 0.08);
+    --color-input: rgba(255, 255, 255, 0.1);
+    --color-ring: #7bdcff;
     
     --radius-lg: 1rem;
     --radius-md: 0.75rem;
@@ -33,25 +33,25 @@
 }
 
 :root {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 7%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 7%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 152 100% 50%;
-    --primary-foreground: 0 0% 0%;
-    --secondary: 0 0% 10%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 10%;
-    --muted-foreground: 0 0% 53%;
-    --accent: 0 0% 10%;
-    --accent-foreground: 152 100% 50%;
+    --background: 220 33% 4%;
+    --foreground: 210 20% 96%;
+    --card: 216 29% 6%;
+    --card-foreground: 210 20% 96%;
+    --popover: 216 29% 6%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 195 100% 74%;
+    --primary-foreground: 214 32% 7%;
+    --secondary: 213 26% 8%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 213 26% 8%;
+    --muted-foreground: 214 10% 59%;
+    --accent: 216 29% 9%;
+    --accent-foreground: 195 100% 74%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 13%;
-    --input: 0 0% 13%;
-    --ring: 152 100% 50%;
+    --border: 220 14% 14%;
+    --input: 220 14% 14%;
+    --ring: 195 100% 74%;
     --radius: 1rem;
 }
 
@@ -61,9 +61,10 @@
   }
   body {
     @apply bg-background text-foreground antialiased min-h-screen;
+    background-color: #06080c;
     background-image: 
-      radial-gradient(circle at 50% 50%, rgba(0, 255, 136, 0.03) 0%, transparent 70%),
-      repeating-radial-gradient(circle at 50% 50%, rgba(0, 255, 136, 0.02) 0, rgba(0, 255, 136, 0.02) 1px, transparent 1px, transparent 80px);
+      radial-gradient(ellipse at 50% 0%, rgba(13, 23, 34, 0.6) 0%, transparent 60%),
+      radial-gradient(circle at 100% 100%, rgba(123, 220, 255, 0.02) 0%, transparent 50%);
     background-attachment: fixed;
   }
 
@@ -71,22 +72,22 @@
   input:-webkit-autofill:hover, 
   input:-webkit-autofill:focus, 
   input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 1000px #111111 inset !important;
-    -webkit-text-fill-color: white !important;
+    -webkit-box-shadow: 0 0 0 1000px #0c1016 inset !important;
+    -webkit-text-fill-color: #f1f4f7 !important;
     transition: background-color 5000s ease-in-out 0s;
   }
 }
 
 .neon-glow {
-  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+  box-shadow: 0 0 15px rgba(123, 220, 255, 0.35);
 }
 
 .neon-text {
-  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  text-shadow: 0 0 10px rgba(123, 220, 255, 0.5);
 }
 
 .glass-card {
-  @apply bg-card/80 backdrop-blur-md border-border/50;
+  @apply bg-card/85 backdrop-blur-md border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.4)];
 }
 
 /* Custom scrollbar */
@@ -94,11 +95,12 @@
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-background;
+  background: #06080c;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-muted rounded-full;
+  background: #19232c;
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-primary/50;
+  background: rgba(123, 220, 255, 0.4);
 }

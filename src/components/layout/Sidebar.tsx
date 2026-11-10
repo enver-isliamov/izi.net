@@ -2,17 +2,12 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
-  CreditCard, 
   Download, 
   LifeBuoy, 
-  User, 
   Users, 
   HelpCircle,
   LogOut,
-  ShieldCheck,
-  Globe,
-  Wallet,
-  Settings
+  Wallet
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -21,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const menuItems = [
   { icon: LayoutDashboard, label: 'Дашборд', path: '/dashboard' },
   { icon: Download, label: 'Установка', path: '/installation' },
-  { icon: Wallet, label: 'Кошелек', path: '/wallet' },
+  { icon: Wallet, label: 'Кошелёк', path: '/wallet' },
   { icon: Users, label: 'Рефералы', path: '/referrals' },
   { icon: LifeBuoy, label: 'Поддержка', path: '/support' },
   { icon: HelpCircle, label: 'FAQ', path: '/faq' },
@@ -34,15 +29,21 @@ export function Sidebar() {
   const isAdmin = role === 'admin' || role === 'superadmin';
 
   return (
-    <aside className="w-64 border-r border-border bg-card/30 backdrop-blur-xl hidden md:flex flex-col h-screen sticky top-0">
+    <aside className="w-64 border-r border-white/[0.08] bg-[#080c12]/95 backdrop-blur-xl hidden md:flex flex-col h-screen sticky top-0 z-20">
+      {/* Brand Header */}
       <div className="p-6 flex items-center gap-3">
-        <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center neon-glow">
-          <ShieldCheck className="text-black w-6 h-6" />
-        </div>
-        <span className="text-xl font-bold tracking-tight neon-text">izinet</span>
+        <Link to="/" className="inline-flex items-center gap-2.5 group">
+          <div className="relative w-8 h-8 rounded-full border border-cyan-400/60 shadow-[0_0_12px_rgba(123,220,255,0.35)] flex items-center justify-center bg-cyan-950/30 group-hover:border-cyan-300 transition-colors">
+            <span className="w-2 h-2 rounded-full bg-[#8be5f0] shadow-[0_0_8px_#6ae6ff]" />
+          </div>
+          <span className="text-xl font-bold tracking-tight text-white">
+            izi<span className="text-[#7bdcff]">net</span>
+          </span>
+        </Link>
       </div>
 
-      <nav className="flex-1 px-4 space-y-1">
+      {/* Navigation */}
+      <nav className="flex-1 px-3 space-y-1.5">
         {menuItems.map((item) => {
           const isActive = location.pathname === item.path;
           return (
@@ -50,32 +51,34 @@ export function Sidebar() {
               <Button
                 variant="ghost"
                 className={cn(
-                  "w-full justify-start gap-3 h-12 px-4 rounded-xl transition-all duration-200",
+                  "w-full justify-start gap-3 h-11 px-3.5 rounded-xl transition-all duration-200 text-sm font-medium",
                   isActive 
-                    ? "bg-primary/10 text-primary hover:bg-primary/20" 
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    ? "bg-gradient-to-r from-cyan-950/40 via-cyan-900/20 to-transparent text-[#7bdcff] border border-cyan-500/25 shadow-[0_0_15px_rgba(123,220,255,0.12)] font-semibold" 
+                    : "text-[#8d959f] hover:text-white hover:bg-white/[0.04]"
                 )}
               >
-                <item.icon className={cn("w-5 h-5", isActive && "neon-text")} />
-                <span className="font-medium">{item.label}</span>
+                <item.icon className={cn("w-4 h-4", isActive ? "text-[#7bdcff]" : "text-[#8d959f]")} />
+                <span>{item.label}</span>
               </Button>
             </Link>
           );
         })}
       </nav>
 
-      <div className="p-4 border-t border-border space-y-4">
-        <div className="flex flex-col gap-2 px-4 text-[10px] text-muted-foreground w-full">
-          <Link to="/terms" className="hover:text-primary transition-colors">Правила сервиса</Link>
-          <Link to="/refund" className="hover:text-primary transition-colors">Политика возвратов</Link>
+      {/* Footer Info & Logout */}
+      <div className="p-4 border-t border-white/[0.08] space-y-3">
+        <div className="flex flex-col gap-1.5 px-3 text-[11px] text-[#59636f]">
+          <Link to="/terms" className="hover:text-[#7bdcff] transition-colors">Правила сервиса</Link>
+          <Link to="/refund" className="hover:text-[#7bdcff] transition-colors">Политика возвратов</Link>
+          <Link to="/privacy" className="hover:text-[#7bdcff] transition-colors">Конфиденциальность</Link>
         </div>
         <Button
           variant="ghost"
           onClick={signOut}
-          className="w-full justify-start gap-3 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-xl h-12"
+          className="w-full justify-start gap-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl h-10 text-xs font-medium"
         >
-          <LogOut className="w-5 h-5" />
-          <span className="font-medium">Выйти</span>
+          <LogOut className="w-4 h-4" />
+          <span>Выйти</span>
         </Button>
       </div>
     </aside>
