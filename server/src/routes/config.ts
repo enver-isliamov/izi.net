@@ -285,11 +285,11 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
             const targetHost = (activeHost && activeHost !== 'izinet.online') ? activeHost : 'vpn.izinet.online';
             rawVless = rawVless.replace(/@[^:/?#]+:/, `@${targetHost}:`);
 
-            // Heal blocked/mismatched SNI in cached links to use Russian-unblocked Apple SNI
+            // Heal blocked/mismatched SNI in cached links to use unblocked Google CDN SNI
             if (rawVless.includes('security=reality')) {
               rawVless = rawVless
-                .replace(/([?&]sni=)[^&#]+/, '$1gateway.icloud.com')
-                .replace(/([?&]host=)[^&#]+/, '$1gateway.icloud.com');
+                .replace(/([?&]sni=)[^&#]+/, '$1dl.google.com')
+                .replace(/([?&]host=)[^&#]+/, '$1dl.google.com');
             }
 
             const portMatch = rawVless.match(/:(\d+)\?/);
@@ -302,7 +302,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
         }
       }
 
-      // 3. Add Hysteria 2 links for each active server (using port 24433 to bypass Russia UDP 443 QUIC drops)
+      // 3. Add Hysteria 2 links for each active server (using UDP port 443)
       try {
         const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
         const hyPassword = hySettings?.value;
@@ -311,10 +311,10 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
           if (activeServers.length > 0) {
             for (const server of activeServers) {
               const host = server.domain || server.public_host || server.ip || defaultVpnHost;
-              finalLinks.push(`hysteria2://${hyPassword}@${host}:24433?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
+              finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
             }
           } else {
-            finalLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:24433?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
+            finalLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:443?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
           }
         }
       } catch (e: any) {

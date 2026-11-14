@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Globe,
   Smartphone,
+  Laptop,
   LifeBuoy,
   Loader2,
   Plus,
@@ -19,7 +20,8 @@ import {
   Gift,
   Download,
   Router,
-  Wifi
+  Wifi,
+  ExternalLink
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -505,37 +507,37 @@ export default function Dashboard() {
   return (
     <div className="space-y-3 md:space-y-4 animate-in fade-in duration-500 max-w-4xl mx-auto">
       <WelcomeWizard />
-      {/* Simplified Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 md:gap-3">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
         <div>
-          <h1 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2">
+          <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-white flex items-center gap-2">
              Привет, {userData?.name || user?.email?.split('@')?.[0]}!
              {userData?.is_pro && (
-               <span className="inline-flex items-center gap-1 bg-gradient-to-r from-yellow-500/20 to-amber-500/20 text-yellow-500 border border-yellow-500/30 text-[10px] md:text-xs font-black uppercase px-2 py-0.5 rounded-lg shadow-lg shadow-yellow-500/5 select-none tracking-wider animate-pulse">PRO</span>
+               <span className="inline-flex items-center gap-1 bg-cyan-950/40 text-[#7bdcff] border border-cyan-500/30 text-[10px] md:text-xs font-bold uppercase px-2 py-0.5 rounded-full select-none tracking-wider">PRO</span>
              )}
           </h1>
-          <p className="text-[10px] md:text-xs text-muted-foreground mt-0.5">
+          <p className="text-xs text-[#8d959f] mt-1 flex items-center gap-1.5">
             {activeDeviceCount > 0 ? (
-              <span className="flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-primary animate-pulse" />
-                <span>Защита активна (Устройств: {activeDeviceCount})</span>
-              </span>
+              <>
+                <span className="w-2 h-2 rounded-full bg-[#8be5f0] shadow-[0_0_8px_#6ae6ff] animate-pulse shrink-0" />
+                <span className="text-zinc-300">Защита активна · Устройств: {activeDeviceCount} из {userDeviceLimit}</span>
+              </>
             ) : (
-              'У вас пока нет активных устройств'
+              'У вас пока нет активных подключений'
             )}
           </p>
         </div>
         <div className="flex gap-2">
             <Button 
-               className="bg-primary text-black hover:bg-primary/90 rounded-xl px-3 md:px-4 h-8 md:h-9 neon-glow text-[11px] md:text-xs font-bold shadow-lg shadow-primary/20 w-full sm:w-auto"
+               className="bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] font-semibold hover:shadow-[0_0_20px_rgba(176,232,255,0.35)] hover:-translate-y-0.5 rounded-xl px-5 h-10 text-xs sm:text-sm transition-all shadow-[0_2px_8px_rgba(0,0,0,0.35)] w-full sm:w-auto"
                onClick={() => openWizard('extend')}
             >
-               {subscription ? 'Продлить / Улучшить' : 'Активировать VPN'}
+               {subscription ? 'Продлить / Изменить тариф' : 'Активировать VPN'}
             </Button>
           <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-            <DialogContent className="max-w-[95%] sm:max-w-[450px] bg-card border-border p-3 md:p-4 shadow-2xl">
+            <DialogContent className="max-w-[95%] sm:max-w-[450px] bg-[#0c1016] border border-white/10 p-4 md:p-6 rounded-3xl shadow-2xl">
               <DialogHeader>
-                <DialogTitle className="text-sm md:text-base font-bold">
+                <DialogTitle className="text-base md:text-lg font-medium text-white">
                   {wizardMode === 'new' ? 'Добавление устройства' : 'Оформление подписки'}
                 </DialogTitle>
               </DialogHeader>
@@ -557,11 +559,11 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
         {[
           { icon: Wallet, label: 'Баланс', value: `${Number(currentBalance).toFixed(0)}`, sub: '₽', onClick: () => navigate('/wallet') },
           { icon: Users, label: 'Рефералы', value: refCount, onClick: () => navigate('/referrals') },
-          { icon: Clock, label: 'Осталось', value: subscription ? `${daysLeft}д.` : '—', color: daysLeft <= 3 ? "text-red-400" : "text-foreground" },
+          { icon: Clock, label: 'Осталось', value: subscription ? `${daysLeft}д.` : '—', color: daysLeft <= 3 ? "text-amber-400" : "text-white" },
           { icon: Smartphone, label: 'Устройства', value: String(activeDeviceCount), sub: `из ${userDeviceLimit}` }
         ].map((stat, i) => (
           <motion.div
@@ -571,21 +573,21 @@ export default function Dashboard() {
           >
             <Card 
               className={cn(
-                "glass-card p-2 md:p-3 flex items-center justify-between gap-2 hover:border-primary/30 transition-colors h-14 md:h-16",
+                "rounded-2xl border border-white/10 bg-[#0c1016]/85 backdrop-blur-xl p-3 md:p-3.5 flex items-center justify-between gap-2.5 hover:border-cyan-500/30 transition-all h-16 shadow-[0_4px_20px_rgba(0,0,0,0.3)]",
                 stat.onClick && "cursor-pointer"
               )} 
               onClick={stat.onClick}
             >
-              <div className="flex items-center gap-2 md:gap-2.5 min-w-0 flex-1">
-                <div className="p-1.5 md:p-2 bg-primary/10 rounded-xl text-primary shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="w-9 h-9 rounded-xl bg-cyan-950/30 border border-cyan-400/20 text-[#7bdcff] flex items-center justify-center shrink-0">
                   <stat.icon className="w-4 h-4 md:w-5 md:h-5" />
                 </div>
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-[8px] md:text-[9px] uppercase font-bold text-muted-foreground tracking-wider truncate">
+                  <span className="text-[9px] uppercase font-semibold text-[#8d959f] tracking-wider truncate">
                     {stat.label}
                   </span>
-                  <span className={cn("text-xs md:text-sm font-black leading-tight mt-0.5 truncate", stat.color)}>
-                    {stat.value} {stat.sub && <span className="text-[9px] md:text-xs font-bold text-muted-foreground">{stat.sub}</span>}
+                  <span className={cn("text-sm md:text-base font-bold leading-tight mt-0.5 truncate text-white", stat.color)}>
+                    {stat.value} {stat.sub && <span className="text-xs font-medium text-[#8d959f] ml-0.5">{stat.sub}</span>}
                   </span>
                 </div>
               </div>
@@ -595,67 +597,64 @@ export default function Dashboard() {
       </div>
 
       {/* Device Management Section (Main UI) */}
-      <div className="space-y-3">
+      <div className="space-y-4 pt-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
-            <Smartphone className="w-4 h-4 text-primary" /> Ваши Устройства
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm md:text-base font-medium text-white tracking-tight">
+              Ваши устройства
+            </h2>
+            <span className="text-xs text-[#8d959f] font-mono">({activeDeviceCount})</span>
+          </div>
           <Button 
             variant="outline" 
             size="sm" 
-            className="rounded-xl border-primary/30 text-primary hover:bg-primary/5 h-7 gap-1 text-[10px] px-2.5"
+            className="rounded-xl border-white/10 bg-[#0e141b]/80 hover:bg-[#151c25] hover:border-cyan-400/30 text-[#7bdcff] h-8 gap-1.5 text-xs px-3 transition-all"
             onClick={() => {
               if (vpnDevices.length >= userDeviceLimit) {
-                toast.error(`Достигнут лимит устройств (${userDeviceLimit}). Для увеличения лимита обратитесь в поддержку.`);
+                toast.error(`Достигнут лимит устройств (${userDeviceLimit}). Для увеличения обратитесь в поддержку.`);
               } else {
                 openWizard('new');
               }
             }}
           >
-            <Plus className="w-3 h-3" /> Добавить
+            <Plus className="w-3.5 h-3.5" /> Добавить устройство
           </Button>
         </div>
 
+        {/* Featured Universal Subscription Banner */}
         {subscription && showUniversalLink && (
-           <div className="bg-primary/5 border border-primary/25 rounded-xl p-2.5 md:p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-             <div className="flex items-center gap-2.5">
-               <Globe className="w-5 h-5 text-primary shrink-0 animate-pulse" />
-               <div className="flex flex-col">
-                 <div className="flex items-center gap-1.5 flex-wrap">
-                   <span className="font-bold text-[11px] md:text-xs text-white">Универсальная подписка</span>
-                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">VLESS Reality</span>
-                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">Hysteria 2</span>
-                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AmneziaWG</span>
+           <div className="rounded-3xl border border-cyan-500/25 bg-gradient-to-r from-cyan-950/30 via-[#0e141b]/90 to-[#0c1016] p-4 sm:p-5 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.4)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden">
+             <div className="flex items-center gap-3.5">
+               <div className="w-11 h-11 rounded-2xl border border-cyan-400/30 bg-cyan-950/40 flex items-center justify-center text-[#7bdcff] shadow-[0_0_15px_rgba(123,220,255,0.2)] shrink-0">
+                 <Globe className="w-6 h-6 animate-pulse" />
+               </div>
+               <div>
+                 <div className="flex items-center gap-2 flex-wrap">
+                   <span className="font-semibold text-sm sm:text-base text-white">Единая подписка на все устройства</span>
+                   <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-cyan-500/10 text-[#7bdcff] border border-cyan-500/20">
+                     VLESS + CDN + AmneziaWG
+                   </span>
                  </div>
-                 <p className="text-[9px] md:text-[10px] text-muted-foreground leading-none mt-1">
-                   Включает все 3 протокола для Hiddify, NekoBox, AmneziaWG и WireGuard
+                 <p className="text-xs text-[#8d959f] mt-0.5">
+                   Один универсальный профиль для Hiddify, Happ, v2rayN, AmneziaWG и роутеров Keenetic
                  </p>
                </div>
              </div>
-             <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+
+             <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
                 <Button 
-                  size="sm"
+                  onClick={async () => {
+                     const success = await copyToClipboard(subUrl);
+                     if (success) toast.success("Единая ссылка подписки скопирована!");
+                  }}
+                  className="flex-1 sm:flex-none min-h-[38px] px-4 bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] font-semibold text-xs rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_0_20px_rgba(176,232,255,0.35)] transition-all flex items-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Скопировать всё</span>
+                </Button>
+
+                <Button 
                   variant="outline"
-                  className="rounded-lg text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 h-7 gap-1 text-[10px] px-2"
-                  onClick={handleOpenAwgModal}
-                  title="Подключение через AmneziaWG"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> AmneziaWG
-                </Button>
-                <Button 
-                  size="icon" 
-                  variant="ghost" 
-                  className="rounded-lg text-emerald-400 hover:bg-emerald-500/10 h-7 w-7"
-                  title="Скачать .conf для AmneziaWG"
-                  onClick={handleDownloadAwg}
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </Button>
-                <Button 
-                  size="icon" 
-                  variant="ghost" 
-                  className="rounded-lg text-primary hover:bg-primary/10 h-7 w-7"
-                  title="QR-код подписки"
                   onClick={() => {
                     const primaryVless = vpnDevices.find(d => String(d.serverType).toUpperCase() !== 'AWG')?.config || vpnDevices[0]?.config || '';
                     const cleanKey = primaryVless ? primaryVless.trim().split('\n')[0] : '';
@@ -663,32 +662,33 @@ export default function Dashboard() {
                       value: cleanKey || subUrl,
                       key: cleanKey,
                       sub: subUrl,
-                      title: 'Универсальная подписка',
-                      subtitle: 'Наведите камеру в приложении (v2rayNG / Hiddify / Happ)'
+                      title: 'Единая подписка',
+                      subtitle: 'Отсканируйте камерой в Hiddify / Happ / v2rayNG'
                     });
                     setQrMode(cleanKey ? 'key' : 'sub');
                     setIsQrOpen(true);
                   }}
+                  className="min-h-[38px] px-3 bg-[#0e141b]/80 border-white/10 hover:bg-[#19232c] text-[#f1f4f7] rounded-xl text-xs"
+                  title="QR-код подписки"
                 >
-                  <QrCode className="w-3.5 h-3.5" />
+                  <QrCode className="w-3.5 h-3.5 text-[#7bdcff]" />
                 </Button>
+
                 <Button 
-                  size="icon" 
-                  variant="ghost" 
-                  className="rounded-lg text-primary hover:bg-primary/10 h-7 w-7"
-                  title="Скопировать ссылку"
-                  onClick={async () => {
-                     const success = await copyToClipboard(subUrl);
-                     if (success) toast.success("Ссылка подписки скопирована");
-                  }}
+                  variant="outline"
+                  onClick={handleOpenAwgModal}
+                  className="min-h-[38px] px-3 bg-[#0e141b]/80 border-white/10 hover:bg-[#19232c] text-emerald-400 rounded-xl text-xs gap-1"
+                  title="AmneziaWG настройки"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">AmneziaWG</span>
                 </Button>
              </div>
            </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-3 md:gap-6">
+        {/* Device Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {vpnDevices.length > 0 ? vpnDevices.map((device, i) => {
             const devExpiry = new Date(device.expiresAt);
             const devDaysLeft = Math.max(0, Math.ceil((devExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
@@ -697,239 +697,234 @@ export default function Dashboard() {
             const totalTrafficLimit = trafficLimitGB || 100;
             const devTrafficPercent = Math.min(100, Math.round((devTrafficGB / totalTrafficLimit) * 100));
             
-            // Online status: heuristic based on record update time or existence of bytes
             const isOnline = device.trafficUsedBytes > 0;
             const isExpired = devDaysLeft <= 0;
+            const isRouter = device.serverType === 'AWG' || device.serverType === 'ROUTER';
+            const isLaptop = /mac|pc|ноут|laptop|комп|win/i.test(device.label || '');
+            const DeviceIcon = isRouter ? Router : (isLaptop ? Laptop : Smartphone);
+            const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
+            const cleanKey = device.config ? device.config.trim().split('\n')[0] : '';
 
             return (
               <motion.div
                 key={i}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.1 }}
-                whileHover={{ scale: 1.01 }}
+                transition={{ delay: i * 0.08 }}
+                whileHover={{ scale: 1.008 }}
                 className="h-full"
               >
-                <Card className={cn(
-                  "glass-card overflow-hidden group hover:border-primary/40 transition-all duration-300 h-full",
+                <div className={cn(
+                  "relative rounded-3xl border border-white/10 bg-gradient-to-b from-[#0f141c] to-[#090d13] p-5 sm:p-6 backdrop-blur-xl shadow-[0_15px_35px_rgba(0,0,0,0.4)] hover:border-cyan-500/35 transition-all flex flex-col justify-between group overflow-hidden h-full",
                   isExpired && "border-red-500/30"
                 )}>
-                  <CardContent className="p-0">
-                    <div className="p-2.5 md:p-3 flex items-start justify-between">
-                      <div className="flex items-center gap-2.5">
+                  {/* Subtle ambient lighting on top-right */}
+                  <div className="absolute top-0 right-0 w-36 h-36 bg-[radial-gradient(circle,rgba(123,220,255,0.05)_0%,transparent_70%)] pointer-events-none" />
+
+                  {/* Top: Device Information */}
+                  <div>
+                    <div className="flex items-start justify-between gap-3 mb-4">
+                      <div className="flex items-center gap-3">
                         <div className={cn(
-                          "w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl flex items-center justify-center transition-all shrink-0",
+                          "w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 transition-all",
                           isExpired 
-                            ? "bg-red-500/10 text-red-500" 
-                            : isOnline 
-                              ? "bg-primary/10 text-primary shadow-[0_0_15px_rgba(0,255,136,0.2)]" 
-                              : "bg-blue-500/10 text-blue-400"
+                            ? "border-red-500/30 bg-red-950/20 text-red-400" 
+                            : "border-cyan-400/30 bg-cyan-950/25 text-[#7bdcff] shadow-[0_0_15px_rgba(123,220,255,0.15)]"
                         )}>
-                          <Smartphone className="w-4 h-4" />
+                          <DeviceIcon className="w-5 h-5" />
                         </div>
                         <div>
-                          <div className="font-bold flex items-center gap-1.5 text-xs md:text-sm">
-                            {device.label || `Device ${i + 1}`}
-                            {isOnline && !isExpired && <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />}
-                            {!isOnline && !isExpired && <span className="w-1.5 h-1.5 rounded-full bg-blue-400/50 shrink-0" />}
-                            {isExpired && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_5px_red] shrink-0" />}
+                          <div className="font-semibold text-white text-base tracking-tight flex items-center gap-2">
+                            <span>{device.label || `Устройство ${i + 1}`}</span>
+                            {isExpired ? (
+                              <span className="w-2 h-2 rounded-full bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.5)] shrink-0" />
+                            ) : isOnline ? (
+                              <span className="w-2 h-2 rounded-full bg-[#8be5f0] shadow-[0_0_8px_#6ae6ff] animate-pulse shrink-0" />
+                            ) : (
+                              <span className="w-2 h-2 rounded-full bg-cyan-400/50 shrink-0" />
+                            )}
                           </div>
-                          <div className="text-[8px] md:text-[9px] text-muted-foreground uppercase tracking-wider font-bold mt-0.5">
-                            {device.serverType || 'WI-FI СТАНДАРТ'} • {activeServer?.location_code || 'WW'}
+                          <div className="text-xs text-[#8d959f] flex items-center gap-1.5 mt-0.5">
+                            <span>{isRouter ? 'AmneziaWG • Keenetic / OpenWrt' : (device.serverType || 'VLESS Reality + CDN')}</span>
+                            <span>•</span>
+                            <span className="text-zinc-400 font-mono">{activeServer?.location_code || 'NL'}</span>
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                         <div className={cn("text-[10px] font-black", devDaysLeft <= 3 ? "text-red-400" : "text-primary")}>
-                           {isExpired ? 'ИСТЕКЛА' : `${devDaysLeft}д.`}
-                         </div>
+
+                      {/* Days Left Pill */}
+                      <div className="shrink-0">
+                        {isExpired ? (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 border border-red-500/25 text-red-400">
+                            Срок истёк
+                          </span>
+                        ) : devDaysLeft <= 3 ? (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 border border-amber-500/25 text-amber-400">
+                            Истекает ({devDaysLeft} дн.)
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-cyan-500/10 border border-cyan-500/25 text-[#7bdcff]">
+                            Осталось {devDaysLeft} дн.
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    <div className="px-2.5 pb-2.5 md:px-3 md:pb-3 space-y-2">
-                      <div className="space-y-0.5">
-                         <div className="flex justify-between text-[8px] font-mono">
-                            <span className="text-muted-foreground">ИСПОЛЬЗОВАНО ТРАФИКА</span>
-                            <span className="text-foreground">{devTrafficGB.toFixed(1)} / {totalTrafficLimit} GB</span>
-                         </div>
-                         <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                            <div 
-                              className={cn(
-                                "h-full transition-all duration-1000",
-                                isExpired ? "bg-red-500" : "bg-primary shadow-[0_0_8px_rgba(0,255,136,0.5)]"
-                              )}
-                              style={{ width: `${devTrafficPercent}%` }}
-                            />
-                         </div>
+                    {/* Traffic Bar */}
+                    <div className="my-4 py-3 border-y border-white/5 space-y-1.5">
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-[#8d959f]">
+                          Использовано: <strong className="text-white font-mono">{devTrafficGB.toFixed(1)} GB</strong> из {totalTrafficLimit} GB
+                        </span>
+                        <span className="text-[#7bdcff] font-mono font-medium">{devTrafficPercent}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                        <div 
+                          className={cn(
+                            "h-full transition-all duration-700",
+                            isExpired ? "bg-red-500" : "bg-gradient-to-r from-cyan-400 to-[#7bdcff] shadow-[0_0_8px_rgba(123,220,255,0.4)]"
+                          )}
+                          style={{ width: `${Math.max(3, devTrafficPercent)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Area (Tier 1 & Tier 2) */}
+                  <div className="space-y-3 pt-1">
+                    {/* Tier 1: Main Action & QR button */}
+                    <div className="flex items-center gap-2">
+                      {isRouter ? (
+                        <>
+                          <Button 
+                            onClick={handleDownloadAwg}
+                            className="flex-1 min-h-[42px] bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] font-semibold text-xs sm:text-sm rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_0_20px_rgba(176,232,255,0.35)] hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2"
+                            title="Скачать конфигурационный файл .conf для роутеров и AmneziaVPN"
+                          >
+                            <Download className="w-4 h-4" />
+                            <span>Скачать .conf</span>
+                          </Button>
+
+                          <Button 
+                            variant="outline"
+                            onClick={handleOpenAwgModal}
+                            className="min-h-[42px] px-3.5 bg-[#0e141b]/80 border-white/10 hover:bg-[#19232c] hover:border-white/20 text-[#f1f4f7] rounded-xl text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
+                            title="Показать QR-код AmneziaWG"
+                          >
+                            <QrCode className="w-4 h-4 text-[#7bdcff]" />
+                            <span className="hidden sm:inline">QR</span>
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button 
+                            onClick={async () => {
+                              const success = await copyToClipboard(deviceSubUrl);
+                              if (success) toast.success(`Ссылка для ${device.label || 'устройства'} скопирована! Вставьте в Hiddify или Happ`);
+                            }}
+                            className="flex-1 min-h-[42px] bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] font-semibold text-xs sm:text-sm rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_0_20px_rgba(176,232,255,0.35)] hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2"
+                            title="Скопировать персональную ссылку подписки"
+                          >
+                            <Copy className="w-4 h-4" />
+                            <span>Скопировать ссылку</span>
+                          </Button>
+
+                          <Button 
+                            variant="outline"
+                            onClick={() => {
+                              setQrData({
+                                value: cleanKey || deviceSubUrl,
+                                key: cleanKey,
+                                sub: deviceSubUrl,
+                                title: device.label || 'Подключение устройства',
+                                subtitle: 'Отсканируйте камерой в Hiddify / Happ / v2rayNG'
+                              });
+                              setQrMode(cleanKey ? 'key' : 'sub');
+                              setIsQrOpen(true);
+                            }}
+                            className="min-h-[42px] px-3.5 bg-[#0e141b]/80 border-white/10 hover:bg-[#19232c] hover:border-white/20 text-[#f1f4f7] rounded-xl text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
+                            title="Показать QR-код подключения"
+                          >
+                            <QrCode className="w-4 h-4 text-[#7bdcff]" />
+                            <span className="hidden sm:inline">QR-код</span>
+                          </Button>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Tier 2: Secondary Quick Actions */}
+                    <div className="flex items-center justify-between pt-1 text-xs text-[#8d959f]">
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTargetDevice(device.id);
+                            setTargetDeviceName(device.label);
+                            openWizard('extend');
+                          }}
+                          className="hover:text-[#7bdcff] transition-colors flex items-center gap-1 text-[11px] font-medium"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-[#7bdcff]" />
+                          <span>Продлить</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => navigate('/installation')}
+                          className="hover:text-white transition-colors flex items-center gap-1 text-[11px]"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Инструкция</span>
+                        </button>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        {device.serverType === 'AWG' || device.serverType === 'ROUTER' ? (
-                          <>
-                            <Button 
-                              size="sm" 
-                              className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] h-7.5 px-2.5 font-bold gap-1"
-                              title="Скачать конфигурационный файл .conf для роутеров и AmneziaVPN"
-                              onClick={handleDownloadAwg}
-                            >
-                              <Download className="w-3.5 h-3.5" /> Скачать .conf
-                            </Button>
-
-                            <Button 
-                              size="icon" 
-                              variant="secondary" 
-                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
-                              title="Показать QR-код AmneziaWG"
-                              onClick={handleOpenAwgModal}
-                            >
-                              <QrCode className="w-3.5 h-3.5 text-emerald-400" />
-                            </Button>
-
-                            <Button 
-                              size="sm" 
-                              variant="secondary" 
-                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
-                              title="Скопировать ссылку для приложения AmneziaWG (awg://)"
-                              onClick={async () => {
-                                try {
-                                  const { data: { session } } = await supabase.auth.getSession();
-                                  const res = await axios.get('/api/user/awg-subscription', {
-                                    headers: { Authorization: `Bearer ${session?.access_token}` }
-                                  });
-                                  const link = res.data?.awgUrl || res.data?.wireguardUrl || '';
-                                  if (link) {
-                                    const success = await copyToClipboard(link);
-                                    if (success) toast.success(`Ссылка AmneziaWG скопирована (${device.label})`);
-                                  } else {
-                                    toast.error('Ссылка недоступна');
-                                  }
-                                } catch (e) {
-                                  toast.error('Не удалось получить ссылку AmneziaWG');
-                                }
-                              }}
-                            >
-                              <Copy className="w-3 h-3 mr-1 opacity-60" /> Ссылка
-                            </Button>
-
-                            <Button 
-                              size="sm" 
-                              variant="secondary" 
-                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
-                              title="Скопировать текст конфигурации"
-                              onClick={async () => {
-                                try {
-                                  const { data: { session } } = await supabase.auth.getSession();
-                                  const res = await axios.get('/api/user/awg-subscription', {
-                                    headers: { Authorization: `Bearer ${session?.access_token}` }
-                                  });
-                                  const confText = res.data?.conf || '';
-                                  if (confText) {
-                                    const success = await copyToClipboard(confText);
-                                    if (success) toast.success(`Конфиг скопирован (${device.label})`);
-                                  }
-                                } catch (e) {
-                                  toast.error('Не удалось скопировать конфиг');
-                                }
-                              }}
-                            >
-                              <Copy className="w-3 h-3 mr-1 opacity-60" /> Текст
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button 
-                              size="icon" 
-                              variant="secondary" 
-                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
-                              title="Показать QR-код подключения"
-                              onClick={() => {
-                                const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
-                                const cleanKey = device.config ? device.config.trim().split('\n')[0] : '';
-                                setQrData({
-                                  value: cleanKey || deviceSubUrl,
-                                  key: cleanKey,
-                                  sub: deviceSubUrl,
-                                  title: device.label || 'Подключение устройства',
-                                  subtitle: 'Наведите камеру в приложении (v2rayNG / Hiddify / Happ)'
-                                });
-                                setQrMode(cleanKey ? 'key' : 'sub');
-                                setIsQrOpen(true);
-                              }}
-                            >
-                              <QrCode className="w-3.5 h-3.5 text-primary" />
-                            </Button>
-
-                            <Button 
-                              size="icon" 
-                              variant="secondary" 
-                              className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg h-7.5 w-7.5 shrink-0"
-                              title="Перегенерировать ключ"
-                              onClick={() => handleRegenerateDevice(device.id)}
-                            >
-                              <RefreshCw className="w-3.5 h-3.5 text-green-400" />
-                            </Button>
-
-                            <Button 
-                              size="sm" 
-                              variant="secondary" 
-                              className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-muted-foreground hover:text-white"
-                              title="Скопировать ссылку подписки для Hiddify / V2Box"
-                              onClick={async () => {
-                                const deviceSubUrl = `${subUrl}${subUrl.includes('?') ? '&' : '?'}deviceId=${device.id}`;
-                                const success = await copyToClipboard(deviceSubUrl);
-                                if (success) toast.success(`Ссылка скопирована (${device.label})`);
-                              }}
-                            >
-                              <Copy className="w-3 h-3 mr-1 opacity-60" /> Ссылка
-                            </Button>
-                          </>
+                      <div className="flex items-center gap-2.5">
+                        {!isRouter && (
+                          <button
+                            type="button"
+                            onClick={() => handleRegenerateDevice(device.id)}
+                            className="hover:text-emerald-400 transition-colors p-1 rounded-md text-[#59636f]"
+                            title="Перегенерировать ключ (сменить параметры при сбоях)"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
                         )}
 
-                        <Button 
-                          size="sm" 
-                          variant="secondary" 
-                          className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] h-7.5 px-2 text-blue-400 hover:text-blue-300 ml-auto"
-                          onClick={() => {
-                             setTargetDevice(device.id);
-                             setTargetDeviceName(device.label);
-                             openWizard('extend');
-                          }}
-                        >
-                           Продлить
-                        </Button>
-
-                        <Button 
-                          size="icon" 
-                          className="shrink-0 w-7.5 h-7.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/10 rounded-lg"
-                          title="Удалить устройство"
+                        <button
+                          type="button"
                           onClick={() => handleDeleteDevice(device.id, i === 0)}
+                          className="hover:text-red-400 transition-colors p-1 rounded-md text-[#59636f]"
+                          title="Удалить устройство"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        </button>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               </motion.div>
             );
           }) : (
-            <div className="md:col-span-2 flex flex-col items-center justify-center p-8 md:p-12 border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
-              <Smartphone className="w-12 h-12 text-muted-foreground mb-4 opacity-20" />
-              <h3 className="font-bold text-lg">Нет активных устройств</h3>
-              <p className="text-sm text-muted-foreground text-center max-w-xs mt-2">
-                Активируйте подписку, чтобы получить доступ к безопасному интернету.
+            <div className="md:col-span-2 flex flex-col items-center justify-center p-8 md:p-14 border border-dashed border-white/10 rounded-3xl bg-[#0c1016]/50 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-cyan-950/20 border border-cyan-400/20 flex items-center justify-center text-[#7bdcff] mb-4">
+                <Smartphone className="w-7 h-7 opacity-60" />
+              </div>
+              <h3 className="font-semibold text-lg text-white">Нет активных устройств</h3>
+              <p className="text-xs sm:text-sm text-[#8d959f] max-w-sm mt-1 mb-6 leading-relaxed">
+                Активируйте подписку или активируйте бесплатный промокод, чтобы получить персональные ключи.
               </p>
               
-              <div className="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full max-w-md justify-center">
-                <Button onClick={() => openWizard('extend')} className="bg-primary text-black hover:bg-primary/90 font-bold rounded-xl px-8 h-10 neon-glow w-full sm:w-auto">
-                  Активировать прямо сейчас
-                </Button>
-              </div>
+              <Button 
+                onClick={() => openWizard('extend')} 
+                className="bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] font-semibold rounded-xl px-8 h-11 text-sm shadow-[0_0_20px_rgba(176,232,255,0.35)] hover:-translate-y-0.5 transition-all w-full sm:w-auto"
+              >
+                Активировать прямо сейчас
+              </Button>
 
               {/* Promo Code Input section for new users */}
               <div className="mt-8 pt-6 border-t border-white/5 w-full max-w-sm flex flex-col items-center">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 font-semibold">
-                  <Gift className="w-3.5 h-3.5 text-primary" />
+                <div className="flex items-center gap-1.5 text-xs text-[#8d959f] mb-3 font-medium">
+                  <Gift className="w-3.5 h-3.5 text-[#7bdcff]" />
                   <span>У вас есть промокод?</span>
                 </div>
                 <form onSubmit={handleApplyPromo} className="flex gap-2 w-full">
@@ -938,23 +933,23 @@ export default function Dashboard() {
                     placeholder="ВВЕДИТЕ ПРОМОКОД..."
                     value={promoCode}
                     onChange={(e) => setPromoCode(e.target.value)}
-                    className="flex-1 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary rounded-xl py-2 px-3 text-base md:text-xs uppercase font-mono tracking-wider outline-none text-white transition-all text-center"
+                    className="flex-1 bg-[#080c12] border border-white/10 hover:border-white/15 focus:border-cyan-400 rounded-xl py-2 px-3 text-xs uppercase font-mono tracking-wider outline-none text-white transition-all text-center placeholder:text-[#59636f]"
                     disabled={isApplyingPromo}
                   />
                   <Button 
                     type="submit" 
                     disabled={isApplyingPromo}
-                    className="bg-primary hover:bg-primary/90 text-black text-xs font-bold rounded-xl px-5 h-9 shrink-0 transition-all font-sans"
+                    className="bg-gradient-to-b from-white to-[#dfe8ed] text-[#0c1117] text-xs font-semibold rounded-xl px-5 h-9 shrink-0 transition-all"
                   >
                     {isApplyingPromo ? (
                       <Loader2 className="animate-spin w-3 h-3" />
                     ) : (
-                      'Ок'
+                      'Применить'
                     )}
                   </Button>
                 </form>
-                <span className="text-[10px] text-muted-foreground/60 text-center mt-2 leading-tight">
-                  Активирует бесплатный тестовый период на 24 часа. Доступно раз в аккаунт.
+                <span className="text-[11px] text-[#59636f] text-center mt-2 leading-tight">
+                  Активирует бесплатный тестовый период. Доступно 1 раз на аккаунт.
                 </span>
               </div>
             </div>

@@ -17,8 +17,8 @@ if not os.path.exists(DB_PATH):
         DB_PATH = os.path.abspath(alt)
 
 TARGET_PORT = 443
-CORRECT_SERVER_NAMES = ["gateway.icloud.com", "swdist.apple.com", "izinet.online", "www.izinet.online"]
-CORRECT_TARGET = "gateway.icloud.com:443"
+CORRECT_SERVER_NAMES = ["dl.google.com", "swdist.apple.com", "izinet.online", "www.izinet.online"]
+CORRECT_TARGET = "dl.google.com:443"
 CORRECT_FINGERPRINT = "chrome"
 
 def find_reality_inbound(cursor):
