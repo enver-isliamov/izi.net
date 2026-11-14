@@ -300,7 +300,8 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
             finalLinks.push(rawVless.replace(/(#.*)?$/, `#${title}`));
 
             // Add direct IP variant to completely bypass ISP DNS blocks/timeouts in Russia
-            const serverIp = matchedServer?.ip || '89.125.17.44';
+            const rawIp = matchedServer?.ip || '89.125.17.44';
+            const serverIp = rawIp.replace(/^https?:\/\//, '').split(':')[0] || '89.125.17.44';
             if (serverIp && serverIp !== targetHost) {
               const ipVless = rawVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
               const ipTitle = formatRemark(serverBaseName, `${protoSuffix}_IP`);
@@ -320,8 +321,9 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
             for (const server of activeServers) {
               const host = server.domain || server.public_host || server.ip || defaultVpnHost;
               finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
-              if (server.ip && server.ip !== host) {
-                finalLinks.push(`hysteria2://${hyPassword}@${server.ip}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2_IP')}`);
+              const cleanIp = (server.ip || '89.125.17.44').replace(/^https?:\/\//, '').split(':')[0];
+              if (cleanIp && cleanIp !== host) {
+                finalLinks.push(`hysteria2://${hyPassword}@${cleanIp}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2_IP')}`);
               }
             }
           } else {
