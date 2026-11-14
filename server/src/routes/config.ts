@@ -214,6 +214,10 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
             finalLinks.push(hasTag ? trimmed : `${trimmed}#izinet_WS_Fallback`);
           }
         }
+        // Add dynamic Cloudflare Auto proxy node for proxied domain
+        if (!rawWs.includes('@izinet.online:443')) {
+          finalLinks.push(`vless://4a668db8-1558-4d46-9ff5-99487dc6632b@izinet.online:443?alpn=http%2F1.1&encryption=none&fp=firefox&host=izinet.online&path=%2Fizinet-ws&security=tls&sni=izinet.online&type=ws#izinet_Cloudflare_Auto`);
+        }
       }
     } catch (e: any) {
       console.warn(`⚠️ [SUB] WS fallback skipped: ${e.message}`);
@@ -306,6 +310,19 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
               const ipVless = rawVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
               const ipTitle = formatRemark(serverBaseName, `${protoSuffix}_IP`);
               finalLinks.push(ipVless.replace(/(#.*)?$/, `#${ipTitle}`));
+            }
+
+            // Add Yandex camouflage variant (docs.yandex.ru - whitelisted by Russian TSPU/DPI)
+            if (rawVless.includes('security=reality')) {
+              const yandexVless = rawVless
+                .replace(/([?&]sni=)[^&#]+/, '$1docs.yandex.ru')
+                .replace(/([?&]host=)[^&#]+/, '$1docs.yandex.ru');
+              finalLinks.push(yandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex`)}`));
+
+              if (serverIp && serverIp !== targetHost) {
+                const ipYandexVless = yandexVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
+                finalLinks.push(ipYandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex_IP`)}`));
+              }
             }
           }
         }
