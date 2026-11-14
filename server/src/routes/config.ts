@@ -216,7 +216,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
         }
         // Add dynamic Cloudflare Auto proxy node for proxied domain
         if (!rawWs.includes('@izinet.online:443')) {
-          finalLinks.push(`vless://4a668db8-1558-4d46-9ff5-99487dc6632b@izinet.online:443?alpn=http%2F1.1&encryption=none&fp=firefox&host=izinet.online&path=%2Fizinet-ws&security=tls&sni=izinet.online&type=ws#izinet_Cloudflare_Auto`);
+          finalLinks.push(`vless://4a668db8-1558-4d46-9ff5-99487dc6632b@izinet.online:443?alpn=http%2F1.1&encryption=none&fp=firefox&host=izinet.online&path=%2Fizinet-ws&security=tls&sni=izinet.online&type=ws&packetEncoding=xudp#izinet_Cloudflare_Auto`);
         }
       }
     } catch (e: any) {
@@ -357,8 +357,16 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     // as Hiddify/sing-box hangs when encountering custom awg:// or obfuscated wireguard:// in universal subs.
     // AWG users receive their config via the dedicated .conf endpoint, the dashboard button, or Telegram.
 
+    // Ensure all VLESS WebSocket links have packetEncoding=xudp for UDP/DNS tunneling
+    const normalizedLinks = finalLinks.map(link => {
+      if (link.startsWith('vless://') && link.includes('type=ws') && !link.includes('packetEncoding=')) {
+        return link.replace(/(#.*)?$/, '&packetEncoding=xudp$1');
+      }
+      return link;
+    });
+
     // Deduplicate exact duplicate lines
-    const uniqueLinks = [...new Set(finalLinks.filter(Boolean))];
+    const uniqueLinks = [...new Set(normalizedLinks.filter(Boolean))];
 
     let outputText = uniqueLinks.join('\n');
     if (!outputText.trim()) {
