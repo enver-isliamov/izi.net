@@ -5,9 +5,10 @@
 
 ## 📖 Mandatory Reading Before Any Task:
 1. `AGENTS.md` — Single source of truth for architectural guidelines and security rules.
-2. `docs/ARCHITECTURE.md` — Network layout (Xray 443 ⇄ Nginx 3443 ⇄ Hysteria2 UDP ⇄ Node.js 3000).
-3. `fix.md` — Audit log of resolved bugs (never delete past entries; always log new fixes).
-4. `Todo.md` — Global task queue.
+2. `docs/ANTI_PATTERNS.md` — 🚫 Registry of failed methods & anti-patterns (MANDATORY: never re-propose).
+3. `docs/ARCHITECTURE.md` — Network layout (Xray 443 ⇄ Nginx 3443 ⇄ Hysteria2 UDP ⇄ Node.js 3000).
+4. `fix.md` — Audit log of resolved bugs (never delete past entries; always log new fixes).
+5. `Todo.md` — Global task queue.
 
 ## ⚡ Quick Rules:
 - **Reality keys**: Stored ONLY in 3x-ui SQLite database (`x-ui.db`). NEVER hardcode in `.env` or Supabase.
