@@ -269,14 +269,22 @@ export class XUIService {
         const rs = reality.settings || reality;
         const network = String(stream.network || 'tcp').toLowerCase();
 
-        // 1. Проверяем и задаем serverNames с незаблокированными в РФ доменами маскировки Google CDN
+        // 1. Проверяем и задаем serverNames с незаблокированными в РФ доменами маскировки Google CDN и Яндекс
         const currentNames: string[] = Array.isArray(reality.serverNames) ? reality.serverNames : [];
         const hasBlockedSni = currentNames.some(n => typeof n !== 'string' || n.includes('cloudflare') || n.trim() !== n);
-        if (hasBlockedSni || currentNames.length === 0 || !currentNames.includes('dl.google.com')) {
-          reality.serverNames = ['dl.google.com', 'swdist.apple.com', 'izinet.online', 'www.izinet.online'];
+        if (hasBlockedSni || currentNames.length === 0 || !currentNames.includes('dl.google.com') || !currentNames.includes('docs.yandex.ru')) {
+          reality.serverNames = [
+            'dl.google.com',
+            'docs.yandex.ru',
+            'disk.yandex.ru',
+            'telemost.yandex.ru',
+            'swdist.apple.com',
+            'izinet.online',
+            'www.izinet.online'
+          ];
           if (rs) rs.serverName = 'dl.google.com';
           changed = true;
-          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен на dl.google.com`);
+          fixed.push(`Inbound ${ib.id} (${network}): serverNames обновлен с добавлением docs.yandex.ru и dl.google.com`);
         }
 
         // 2. target / dest
@@ -332,9 +340,10 @@ export class XUIService {
             stream.xhttpSettings.mode = 'auto';
             changed = true;
           }
-          if (!stream.xhttpSettings.host) {
-            stream.xhttpSettings.host = 'www.cloudflare.com';
+          if (stream.xhttpSettings.host) {
+            stream.xhttpSettings.host = '';
             changed = true;
+            fixed.push(`Inbound ${ib.id} (xhttp): очищен host для поддержки динамического SNI`);
           }
         }
 
