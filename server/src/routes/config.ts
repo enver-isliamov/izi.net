@@ -173,8 +173,6 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       }
     }
 
-    const finalLinks: string[] = [];
-
     // Helper: Find server from host/ip in link
     const findMatchingServer = (link: string) => {
       const hostMatch = link.match(/@([^:/?#]+):/);
