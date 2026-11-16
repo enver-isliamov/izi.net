@@ -189,6 +189,11 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       return found || null;
     };
 
+    // Collections categorized by priority to ensure reliable direct-IP nodes are always tested first
+    const primaryDirectLinks: string[] = [];
+    const secondaryDirectLinks: string[] = [];
+    const fallbackCdnLinks: string[] = [];
+
     // Helper: Clean remark format
     const formatRemark = (serverName: string, suffix?: string) => {
       const cleanName = serverName.trim().replace(/\s+/g, '_');
@@ -196,9 +201,7 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
       return suffix ? `${base}_${suffix}` : base;
     };
 
-    // 1. Process devices
-    // 1. Provider-specific WS fallback for ISPs that block the direct VPS IP.
-    // Placed first so unblocked CDN nodes are the primary default in clients.
+    // 1. Process VLESS WebSocket fallback links
     try {
       const { data: wsFallback } = await supabase
         .from('settings')
@@ -211,12 +214,20 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
           const trimmed = line.trim();
           if (trimmed.startsWith('vless://')) {
             const hasTag = trimmed.includes('#');
-            finalLinks.push(hasTag ? trimmed : `${trimmed}#izinet_WS_Fallback`);
+            const link = hasTag ? trimmed : `${trimmed}#izinet_WS_Fallback`;
+            // Categorize: direct IP WS vs Cloudflare CDN WS
+            if (link.includes('Cloudflare') || link.includes('@izinet.online') || link.includes('@172.67.') || link.includes('@104.21.')) {
+              fallbackCdnLinks.push(link);
+            } else if (link.includes('_IP') || link.includes('@89.125.17.44')) {
+              primaryDirectLinks.push(link);
+            } else {
+              secondaryDirectLinks.push(link);
+            }
           }
         }
-        // Add dynamic Cloudflare Auto proxy node for proxied domain
+        // Add dynamic Cloudflare Auto proxy node for proxied domain to fallback list
         if (!rawWs.includes('@izinet.online:443')) {
-          finalLinks.push(`vless://4a668db8-1558-4d46-9ff5-99487dc6632b@izinet.online:443?alpn=http%2F1.1&encryption=none&fp=firefox&host=izinet.online&path=%2Fizinet-ws&security=tls&sni=izinet.online&type=ws&packetEncoding=xudp#izinet_Cloudflare_Auto`);
+          fallbackCdnLinks.push(`vless://4a668db8-1558-4d46-9ff5-99487dc6632b@izinet.online:443?alpn=http%2F1.1&encryption=none&fp=firefox&host=izinet.online&path=%2Fizinet-ws&security=tls&sni=izinet.online&type=ws&packetEncoding=xudp#izinet_Cloudflare_Auto`);
         }
       }
     } catch (e: any) {
@@ -234,10 +245,10 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
             const userIdentifier = device.email || userEmail || sub.user_id || sub.id;
             const awgData = await AwgService.getOrCreatePeerForUser(userIdentifier, formatRemark(device.label || 'AmneziaWG'));
             if (awgData?.wireguardUrl) {
-              finalLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG')}`));
+              secondaryDirectLinks.push(awgData.wireguardUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG')}`));
             }
             if (awgData?.awgUrl) {
-              finalLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG', 'Native')}`));
+              secondaryDirectLinks.push(awgData.awgUrl.replace(/(#.*)?$/, `#${formatRemark(device.label || 'AmneziaWG', 'Native')}`));
             }
           } catch (e: any) {
             console.warn(`⚠️ [SUB] AWG device link error: ${e.message}`);
@@ -300,35 +311,71 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
             const port = portMatch ? portMatch[1] : '';
             const protoSuffix = rawVless.includes('type=grpc') ? 'gRPC' : (rawVless.includes('type=xhttp') ? 'XHTTP' : (port === '443' ? 'Reality' : `Reality_${port}`));
             const serverBaseName = matchedServer?.name || 'OneD';
-            const title = formatRemark(serverBaseName, protoSuffix);
-            finalLinks.push(rawVless.replace(/(#.*)?$/, `#${title}`));
 
-            // Add direct IP variant to completely bypass ISP DNS blocks/timeouts in Russia
             const rawIp = matchedServer?.ip || '89.125.17.44';
             const serverIp = rawIp.replace(/^https?:\/\//, '').split(':')[0] || '89.125.17.44';
-            if (serverIp && serverIp !== targetHost) {
-              const ipVless = rawVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
-              const ipTitle = formatRemark(serverBaseName, `${protoSuffix}_IP`);
-              finalLinks.push(ipVless.replace(/(#.*)?$/, `#${ipTitle}`));
-            }
 
-            // Add Yandex camouflage variant (docs.yandex.ru - whitelisted by Russian TSPU/DPI)
-            if (rawVless.includes('security=reality')) {
+            // Special handling for standard Port 443 Reality (best camouflage against TSPU DPI)
+            if (port === '443' && rawVless.includes('security=reality')) {
+              // 1. Microsoft camouflage (clean foreign CDN, passes TSPU without ASN mismatch)
+              const msVless = rawVless
+                .replace(/([?&]sni=)[^&#]+/, '$1www.microsoft.com')
+                .replace(/([?&]host=)[^&#]+/, '$1www.microsoft.com');
+              if (serverIp) {
+                const ipMsVless = msVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
+                primaryDirectLinks.push(ipMsVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, 'Reality_Microsoft_IP')}`));
+              }
+              secondaryDirectLinks.push(msVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, 'Reality_Microsoft')}`));
+
+              // 2. Samsung camouflage (clean foreign CDN, alternative TLS certificate)
+              const samsungVless = rawVless
+                .replace(/([?&]sni=)[^&#]+/, '$1www.samsung.com')
+                .replace(/([?&]host=)[^&#]+/, '$1www.samsung.com');
+              if (serverIp) {
+                const ipSamsungVless = samsungVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
+                primaryDirectLinks.push(ipSamsungVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, 'Reality_Samsung_IP')}`));
+              }
+              secondaryDirectLinks.push(samsungVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, 'Reality_Samsung')}`));
+
+              // 3. Google camouflage direct IP
+              if (serverIp && serverIp !== targetHost) {
+                const ipVless = rawVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
+                primaryDirectLinks.push(ipVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_IP`)}`));
+              }
+              secondaryDirectLinks.push(rawVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, protoSuffix)}`));
+
+              // 4. Yandex camouflage (for ISPs requiring domestic SNI)
               const yandexVless = rawVless
                 .replace(/([?&]sni=)[^&#]+/, '$1docs.yandex.ru')
                 .replace(/([?&]host=)[^&#]+/, '$1docs.yandex.ru');
-              finalLinks.push(yandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex`)}`));
-
               if (serverIp && serverIp !== targetHost) {
                 const ipYandexVless = yandexVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
-                finalLinks.push(ipYandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex_IP`)}`));
+                secondaryDirectLinks.push(ipYandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex_IP`)}`));
+              }
+              secondaryDirectLinks.push(yandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex`)}`));
+            } else {
+              // Non-443 Reality (gRPC 2022, XHTTP 2088)
+              secondaryDirectLinks.push(rawVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, protoSuffix)}`));
+              if (serverIp && serverIp !== targetHost) {
+                const ipVless = rawVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
+                secondaryDirectLinks.push(ipVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_IP`)}`));
+              }
+              if (rawVless.includes('security=reality')) {
+                const yandexVless = rawVless
+                  .replace(/([?&]sni=)[^&#]+/, '$1docs.yandex.ru')
+                  .replace(/([?&]host=)[^&#]+/, '$1docs.yandex.ru');
+                secondaryDirectLinks.push(yandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex`)}`));
+                if (serverIp && serverIp !== targetHost) {
+                  const ipYandexVless = yandexVless.replace(/@[^:/?#]+:/, `@${serverIp}:`);
+                  secondaryDirectLinks.push(ipYandexVless.replace(/(#.*)?$/, `#${formatRemark(serverBaseName, `${protoSuffix}_Yandex_IP`)}`));
+                }
               }
             }
           }
         }
       }
 
-      // 3. Add Hysteria 2 links for each active server (using UDP port 443)
+      // 3. Add Hysteria 2 links for each active server (using UDP port 443 - primary anti-DPI protocol)
       try {
         const { data: hySettings } = await supabase.from('settings').select('value').eq('key', 'HYSTERIA_PASSWORD').maybeSingle();
         const hyPassword = hySettings?.value;
@@ -337,21 +384,31 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
           if (activeServers.length > 0) {
             for (const server of activeServers) {
               const host = server.domain || server.public_host || server.ip || defaultVpnHost;
-              finalLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
               const cleanIp = (server.ip || '89.125.17.44').replace(/^https?:\/\//, '').split(':')[0];
-              if (cleanIp && cleanIp !== host) {
-                finalLinks.push(`hysteria2://${hyPassword}@${cleanIp}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2_IP')}`);
+              if (cleanIp) {
+                primaryDirectLinks.push(`hysteria2://${hyPassword}@${cleanIp}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2_IP')}`);
               }
+              secondaryDirectLinks.push(`hysteria2://${hyPassword}@${host}:443?insecure=1&sni=vpn.izinet.online#${formatRemark(server.name || 'Server', 'Hysteria2')}`);
             }
           } else {
-            finalLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:443?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
-            finalLinks.push(`hysteria2://${hyPassword}@89.125.17.44:443?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2_IP`);
+            primaryDirectLinks.push(`hysteria2://${hyPassword}@89.125.17.44:443?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2_IP`);
+            secondaryDirectLinks.push(`hysteria2://${hyPassword}@${defaultVpnHost}:443?insecure=1&sni=vpn.izinet.online#izinet_Hysteria2`);
           }
         }
       } catch (e: any) {
         console.warn(`⚠️ [SUB] Hysteria link creation skipped: ${e.message}`);
       }
     }
+
+    // Assemble finalLinks in strictly ordered priority:
+    // 1. Primary Direct IP links (Reality Microsoft/Samsung IP, Hysteria 2 IP, WS Direct IP)
+    // 2. Secondary Direct links (Domain-based Reality, non-443 Reality, gRPC, XHTTP)
+    // 3. Cloudflare CDN Fallback links (at the end so they do not cause healthcheck/balancer drops)
+    const finalLinks: string[] = [
+      ...primaryDirectLinks,
+      ...secondaryDirectLinks,
+      ...fallbackCdnLinks
+    ];
 
     // 4. Add AmneziaWG (WireGuard Anti-DPI) links only for native AWG clients,
     // as Hiddify/sing-box hangs when encountering custom awg:// or obfuscated wireguard:// in universal subs.
