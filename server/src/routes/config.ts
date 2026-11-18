@@ -436,6 +436,30 @@ router.get(['/:id', '/sub/:id', '/user/subscription/universal/:id', '/subscripti
     res.setHeader('profile-update-interval', '24');
     res.setHeader('Content-Disposition', 'inline; filename="izinet.txt"');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=' + Math.floor((sub.traffic_used_mb || 0)*1024*1024) + '; total=' + Math.floor((sub.traffic_limit_mb || 0)*1024*1024) + '; expire=' + Math.floor(new Date(sub.expires_at).getTime()/1000));
+
+    // Provide automated split-routing for Happ / Xray clients (AI & blocked sites via VPN, RU direct)
+    const happRouting = JSON.stringify({
+      Name: 'izinet',
+      GlobalProxy: 'false',
+      DomainStrategy: 'IPIfNonMatch',
+      ProxySites: [
+        'geosite:category-ai-!cn',
+        'geosite:openai',
+        'geosite:anthropic',
+        'geosite:google-gemini',
+        'geosite:youtube',
+        'geosite:instagram',
+        'geosite:facebook',
+        'geosite:twitter',
+        'geosite:meta',
+        'geosite:telegram'
+      ],
+      ProxyIp: ['1.1.1.1', '8.8.8.8'],
+      DirectIp: ['geoip:private', 'geoip:ru'],
+      DirectSites: ['geosite:category-ru']
+    });
+    res.setHeader('Routing', 'happ://routing/onadd/' + Buffer.from(happRouting).toString('base64'));
+
     res.send(base64Config);
   } catch (err: any) {
     console.error('🔥 [SUB] Error generating subscription config:', err);
